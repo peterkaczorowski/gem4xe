@@ -40,10 +40,12 @@
 #define ST_DONE  4
 
 /* Both buffers are host-poked staging, so they go in the `teststage` section,
- * which src/gem4xe.scm maps to $4000-$7FFF.  That region is off limits to the
- * driver -- U1MB banks its extended memory there -- but this runner never
- * enables banking, and putting the buffers in their own named section means
- * nothing else can end up there by accident. */
+ * which src/gem4xe.scm gives a memory of its own.  Naming the section means
+ * nothing else can end up in the region the host pokes, and it keeps the
+ * runner's map identical to the driver's everywhere else. */
+/* From src/farload.s -- reports the bank the far code is running in. */
+extern unsigned int _fl_running_bank(void);
+
 #define SCRIPT_WORDS 512
 __attribute__((section("teststage")))
 volatile WORD vdi_script[SCRIPT_WORDS];
@@ -196,6 +198,11 @@ __task void main(void)
         STATUS[22] = ok;
         STATUS[23] = (unsigned char)(a >> 16);
     }
+
+    /* Which bank is this code actually executing in?  src/farload.s copies it
+     * up at load time and nothing else can confirm that it landed: the bridge
+     * reports a 16-bit PC and no K register. */
+    STATUS[24] = (unsigned char)_fl_running_bank();
 
     /* Start from a known screen: pen 0 (white), as a GEM desktop would. */
     blit_fill(VR_SCREEN0, SCR_STRIDE, SCR_STRIDE, SCR_H, 0x00);

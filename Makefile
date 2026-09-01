@@ -3,7 +3,8 @@
 #   make            build/hello.xex and the bootable test disk
 #   make test-emu   Phase 0 hardware gate (VBXE / Rapidus / MEMAC / CPU switch)
 #   make test-m1    Milestone 1: Calypsi C running on the 65C816
-#   make test       both
+#   make test-m6    the far code really is in, and running from, bank $01
+#   make test       all of them
 #   make emu-stop   kill leftover emulators (never use pkill -f: it kills the shell)
 
 CALYPSI  ?= $(HOME)/dev/toolchains/calypsi-65816
@@ -11,18 +12,20 @@ EMUTOS   ?= $(HOME)/dev/emutos
 CC        = $(CALYPSI)/bin/cc65816
 AS        = $(CALYPSI)/bin/as65816
 LD        = $(CALYPSI)/bin/ln65816
-LIB       = clib-sc-sd.a
+LIB       = clib-lc-sd.a
 
-# Small code + small data keeps everything in bank $00, which is all an Atari
-# DOS loader can place.  Rapidus banks $01+ need a runtime copy-up: later.
-CFLAGS    = --code-model=small --data-model=small -O2
+# Large code puts every C function in `farcode`, which src/gem4xe.scm places in
+# bank $01 and src/farload.s copies up as DOS loads the file.  Data stays small
+# -- globals and constants are addressed through the data bank register, so
+# they have to remain in bank $00 (see the linker script).
+CFLAGS    = --code-model=large --data-model=small -O2
 LDFLAGS   = --rtattr exit=simplified
 
 SRC_DOS  ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['dos']['sd_dos2'])" 2>/dev/null)
 
-HELLO_OBJS = build/crt_atari.o build/hello.o
-M2_OBJS    = build/crt_atari.o build/m2_vbxe.o build/vbxe.o
-M3_OBJS    = build/crt_atari.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/farmem.o build/font8x8.o build/vbxe.o
+HELLO_OBJS = build/crt_atari.o build/farload.o build/hello.o
+M2_OBJS    = build/crt_atari.o build/farload.o build/m2_vbxe.o build/vbxe.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/farmem.o build/font8x8.o build/vbxe.o
 
 all: build/hello-boot.atr build/m2-boot.atr build/m3-boot.atr
 
@@ -103,7 +106,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM
 
-test: test-host test-emu test-m1 test-m2 test-m3 test-m4 test-m5
+test: test-host test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6
 
 test-host:
 	python3 -m unittest discover -s tests/host -t .
@@ -126,15 +129,25 @@ test-m4: build/m3-boot.atr
 test-m5: build/m3-boot.atr
 	python3 tests/emu/m5_farmem.py
 
+test-m6: build/m3-boot.atr
+	python3 tests/emu/m6_farcode.py
+
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.
 demo: build/m3-boot.atr
 	python3 tests/emu/demo_desktop.py
 
+# NEVER `pkill -f AltirraSDL` here: the pattern matches this shell too and
+# takes the session with it.  pgrep -x matches the process NAME only.
+# An emulator halted at a debugger breakpoint ignores SIGTERM, so escalate
+# rather than reporting a kill that did not happen.
 emu-stop:
-	@pgrep -x AltirraSDL | while read p; do kill $$p 2>/dev/null && echo "killed $$p"; done; true
+	@pgrep -x AltirraSDL | while read p; do kill $$p 2>/dev/null; done; true
+	@sleep 1; pgrep -x AltirraSDL | while read p; do \
+		kill -9 $$p 2>/dev/null && echo "emu-stop: SIGKILL $$p (was wedged)"; done; true
+	@n=$$(pgrep -x AltirraSDL | wc -l); echo "emu-stop: $$n emulator(s) left"
 
 clean:
 	rm -rf build
 
-.PHONY: all test test-host test-emu test-m1 test-m2 test-m3 test-m4 test-m5 demo emu-stop clean
+.PHONY: all test test-host test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 demo emu-stop clean

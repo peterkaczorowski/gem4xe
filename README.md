@@ -24,13 +24,14 @@ full-screen repaints.
 
 | Gate | | |
 |---|---|---|
-| `make test-host` | 9/9 | pointer device layer |
+| `make test-host` | 19/19 | pointer device layer, .xex far-code staging |
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
 | `make test-m3` | 49/49 | VDI conformance — pixels *and* return values |
 | `make test-m4` | 4/4 | AES `objc_draw` / `objc_find` |
-| `make test-m5` | PASS | linear RAM probed: banks `$01-$EF`, 14.9 MB |
+| `make test-m5` | PASS | linear RAM probed: banks `$02-$EF`, 14.9 MB |
+| `make test-m6` | PASS | far code copied up and running in bank `$01` |
 
 `make test` runs them all. Per-phase notes, including the bugs and what caught
 them, are in `docs/`.
@@ -38,6 +39,18 @@ them, are in `docs/`.
 The 37 VDI opcodes the AES and the GEM Desktop actually use are complete. The
 AES object library draws and hit-tests. Next is `form_do` and the window
 manager.
+
+Code lives in **bank `$01`**, not bank `$00`. A `.xex` segment header is two
+16-bit addresses, so a DOS loader cannot place anything above `$FFFF`; the far
+image therefore travels as chunks aimed at a staging buffer and DOS copies it
+up through `INITAD` as it reads the file. That took the code ceiling from ~28 KB
+to a bank at a time, and freed the `$4000-$7FFF` scaffold the test runner had
+been borrowing from U1MB.
+
+Running this on a machine without a 65C816 would corrupt memory rather than
+fail — the long store the copier needs is an unstable undocumented opcode on an
+NMOS 6502 — so the loader identifies the CPU and probes for linear RAM before
+its first store, and prints a line and returns to DOS if either is missing.
 
 ## Verification
 

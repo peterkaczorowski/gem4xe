@@ -31,7 +31,7 @@
               .rtmodel version, "1"
               .rtmodel core, "*"
 
-              .extern __program_start
+              .extern __program_start, _fl_ok
               .public _atari_entry
 
 #define NMIEN  0xD40E                 /* ANTIC: VBI / DLI enable */
@@ -40,6 +40,15 @@
 
               .section code, root
 _atari_entry:
+;;; src/farload.s clears _fl_ok when the machine cannot run gem4xe -- no 65816,
+;;; or no RAM in bank $01, either of which means the far code never arrived.
+;;; It has already said so on screen, so return to DOS quietly.  This must come
+;;; BEFORE the interrupt sources are switched off, or DOS gets its machine back
+;;; with no VBI and no SIO.
+              lda     _fl_ok
+              bne     ae_go
+              rts
+ae_go:
               sei                     ; no maskable IRQs
               lda     #0
               sta     IRQEN           ; POKEY: no timer/serial/key IRQs

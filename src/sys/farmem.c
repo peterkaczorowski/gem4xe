@@ -8,6 +8,19 @@
 
 FARMEM farmem;
 
+/* The first bank the program does not occupy, exported by src/farload.s from
+ * the end of the FarCode memory in src/gem4xe.scm.  Probing and allocating
+ * both start here.
+ *
+ * This is not caution, it is a repair.  The far code lives in bank $01, and
+ * the first version of this file probed and allocated from bank $01 -- so
+ * farmem_probe() wrote a bank number into $010100 and far_alloc() returned
+ * $010000, and the program corrupted three bytes of its own text.  The
+ * symptom was three unrelated VDI conformance failures that MOVED with the
+ * optimisation level, because a different function was sitting on those
+ * addresses each time. */
+extern const uint8_t _fl_heap_bank;
+
 /* The offset within each bank used for probing.  $0100 rather than $0000
  * because if a bank turns out to MIRROR bank $00, a write at offset 0 would
  * land in the OS zero page; $0100 is the 6502 stack page, which the 65816 is
@@ -54,6 +67,7 @@ void far_get(uint8_t *dst, uint32_t src, uint16_t len)
 void farmem_probe(void)
 {
     uint16_t b;
+    uint16_t first = _fl_heap_bank;
     uint8_t run_first = 0, run_len = 0, best_first = 0, best_len = 0;
 
     farmem.kind = FARMEM_NONE;
@@ -65,10 +79,10 @@ void farmem_probe(void)
     if (far_read8(0xFF0000UL) == '6' && far_read8(0xFF0001UL) == 'S')
         farmem.kind = FARMEM_RAPIDUS;
 
-    for (b = 1; b <= 0xFE; b++)
+    for (b = first; b <= 0xFE; b++)
         far_write8(((uint32_t)b << 16) | PROBE_OFF, (uint8_t)b);
 
-    for (b = 1; b <= 0xFF; b++) {
+    for (b = first; b <= 0xFF; b++) {
         uint8_t ok = (b <= 0xFE) &&
                      (far_read8(((uint32_t)b << 16) | PROBE_OFF) == (uint8_t)b);
         if (ok) {
@@ -92,8 +106,9 @@ void farmem_probe(void)
     farmem.banks = best_len;
     farmem.last_bank = (uint8_t)(best_first + best_len - 1);
     farmem.bytes = (uint32_t)best_len << 16;
-    /* Start allocating one bank in, so nothing lands on the probe bytes and
-     * bank boundaries stay easy to reason about. */
+    /* The bump starts at the foot of the run, which is already past the far
+     * code; the probe byte at PROBE_OFF is inside the first allocation and is
+     * dead by then. */
     farmem.brk = (uint32_t)best_first << 16;
 }
 
