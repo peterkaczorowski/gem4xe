@@ -1,0 +1,8 @@
+build/
+ref/
+*.zip
+__pycache__/
+*.pyc
+fixtures.toml
+*.lst
+*.map
