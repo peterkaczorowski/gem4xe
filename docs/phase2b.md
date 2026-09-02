@@ -59,22 +59,30 @@ after `fd_addr` by two bytes — `vrt_cpyfm` read `fd_w` out of the address's
 upper half. Declaring it `uint32_t` (and taking the low 16 bits, since forms
 live in bank $00) keeps the struct at its specified 20 bytes.
 
-**2. An unexplained codegen difference, worked around.** Inside `vrt_cpyfm`,
+**2. A codegen difference, worked around here and root-caused in Phase 7.**
+Inside `vrt_cpyfm`,
 
     r = bits + (uint16_t)((sy1 + row) * stride)
 
-computed per iteration reads the **wrong address** under Calypsi 5.18: row 0 is
-correct and every later row reads unrelated memory. Reproduced with the offset
-hoisted into an explicit `uint16_t`, so it is not the expression shape.
-Rewriting the walk as an **incrementing pointer** (`bits += stride` in the loop
-header) is correct.
+computed per iteration read the **wrong address** under Calypsi 5.18: row 0
+was correct and every later row read unrelated memory. Rewriting the walk as
+an **incrementing pointer** (`bits += stride` in the loop header) was correct,
+and at the time I wrote that it was not root-caused and not asserted to be a
+compiler bug.
 
-**Not root-caused, and not asserted to be a compiler bug** — it may be
-something subtle about the C that I have not seen. What is certain is that the
-two forms behave differently and the incrementing one is right. Treat
-pointer-plus-computed-offset in this driver with suspicion, prefer incremental
-pointers, and if it recurs, narrow it into a minimal case worth reporting
-upstream.
+It was one, and it was not in the line I was looking at. The line before it,
+
+    stride = (uint16_t)((uint16_t)src->fd_wdwidth * 2u);
+
+compiles — when `src` has been spilled to the stack by the `order()` calls and
+is dead after this line — to an **in-place shift of `src`'s own stack slot**:
+`tsc; clc; adc ##9; tax; asl 0,x`. The field is never read; `stride` is the
+pointer doubled. With `sy1 == 0` row 0 is `0 * garbage`, hence correct, and
+every later row is garbage. The incrementing form changed the slot allocation
+so `stride` no longer shared `src`'s slot, which is why it worked and why the
+symptom looked like the pointer arithmetic. The fix is to read the field
+through a scalar; it is B5 in `tools/ccbug/README.md`, reproduced in the
+vendor's simulator and pinned by `make check-cc`.
 
 Both bugs were invisible to the eye and caught immediately by pixel comparison.
 That is the argument for the whole harness.

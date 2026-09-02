@@ -16,7 +16,11 @@ checks the mechanism itself rather than its consequences:
      the bug that made three VDI cases fail with a different three at every
      optimisation level;
   4. the staging buffer is inside the MEMAC A window, where it costs nothing;
-  5. and on a machine that CANNOT run it -- the same disk, booted without
+  5. the bank $00 the data, stack and direct page live in is being served
+     from the accelerator's SRAM, not the motherboard's 1.79 MHz bus -- the
+     Rapidus resets with every 16 KB window slow, and six phases ran that way
+     without a gate noticing (docs/phase7.md);
+  6. and on a machine that CANNOT run it -- the same disk, booted without
      switching the CPU -- the loader says so and gives DOS its machine back
      rather than writing bank $01 with an opcode the 6502 does not have.
 
@@ -169,6 +173,38 @@ def main():
         if not (0x8000 <= hdr and scr + 16 <= 0xA000):
             fails.append(f"staging buffer ${hdr:04X}-${scr + 15:04X} is outside the "
                          f"MEMAC A window, so it costs real bank $00 space")
+
+        # 5. bank $00 is on the fast bus where the program lives.  The runner
+        #    publishes what rapidus_speedup() found and did (STATUS+25..28);
+        #    the registers are read back as well, so a report is not trusted
+        #    over the hardware.  Windows are derived from the linker's
+        #    placement, not restated: the direct page and a data symbol say
+        #    where the program is, the staging buffer says where MEMAC is.
+        present, mcr_before, mcr_said, cmcr_said = (b.peek(STATUS + 25 + i)
+                                                    for i in range(4))
+        mcr = b.cmd("EVAL db($FF0080)").get("value")
+        cmcr = b.cmd("EVAL db($FF0081)").get("value")
+        win = lambda a: a >> 14
+        program = {win(syms["_DirectPageStart"]), win(syms["rapidus"])}
+        memac = win(hdr)
+        print(f"speed map  : Rapidus {'present' if present else 'ABSENT'}, "
+              f"MCR ${mcr_before:02X} -> ${mcr:02X}, CMCR ${cmcr:02X}; "
+              f"program in window(s) {sorted(program)}, MEMAC in {memac}")
+        if not present:
+            fails.append("rapidus_speedup() did not find the board signature")
+        if (mcr, cmcr) != (mcr_said, cmcr_said):
+            fails.append(f"runner reports MCR ${mcr_said:02X} CMCR ${cmcr_said:02X} "
+                         f"but the registers read ${mcr:02X} ${cmcr:02X}")
+        for w in sorted(program):
+            if mcr & (1 << w):
+                fails.append(f"window {w} (${w << 14:04X}) holds the program's "
+                             f"data and is still SLOW: MCR ${mcr:02X}")
+        if not mcr & (1 << memac):
+            fails.append(f"window {memac} (${memac << 14:04X}) holds the MEMAC "
+                         f"window and is FAST, which hides VRAM: MCR ${mcr:02X}")
+        if 0 in program and not cmcr & 0x40:
+            fails.append(f"window 0 holds the direct page but CMCR ${cmcr:02X} "
+                         f"still writes it through at 1.79 MHz")
     finally:
         emu.stop()
 

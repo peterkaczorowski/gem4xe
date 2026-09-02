@@ -42,9 +42,13 @@ def emit(data, out):
                 " * Copyright (C) 2001-2021 The EmuTOS development team, GPL v2\n"
                 " * or later.  Stored as a 1bpp strip: %d bytes per row, %d rows,\n"
                 " * character N's byte on row r at r*%d + N.\n"
+                " *\n"
+                " * __far: the strip is read at start-up, to expand the glyph\n"
+                " * masks into VRAM, and by the pixel-by-pixel fallback; it\n"
+                " * does not earn 2 KB of bank $00, where every global lives.\n"
                 " */\n"
                 "#include <stdint.h>\n\n"
-                "const uint8_t font8x8[%d] = {\n" % (FORM_W, FORM_H, FORM_W, len(data)))
+                "const uint8_t __far font8x8[%d] = {\n" % (FORM_W, FORM_H, FORM_W, len(data)))
         for i in range(0, len(data), 16):
             f.write("    " + ", ".join("0x%02X" % b for b in data[i:i + 16]) + ",\n")
         f.write("};\n")

@@ -1,0 +1,196 @@
+/* bugs.c -- the cc65816 5.18 code generation bugs gem4xe works around.
+ *
+ * Every bug is a pair of shapes: the one that miscompiles and the one the
+ * sources use instead.  check.py builds this with the vendor's own minimal
+ * linker script and C library, runs it in db65816's simulator, and reads the
+ * results back through the volatile globals.  A bug that has gone away is
+ * news (the workaround can go); a workaround shape that has stopped working
+ * is a failure, because gem4xe is built on it.
+ *
+ * The shapes are lifted from where each bug was met: everyobj() in
+ * src/aes/objc.c (B1), gsx_tcalc() in src/aes/graf.c (B2, B3), ob_sst()
+ * in src/aes/objc.c (B4) and vdi_vrt_cpyfm() in src/vdi/vdi.c (B5).  Keep
+ * them recognisable rather than minimal.
+ */
+#include <stdint.h>
+
+typedef short WORD;
+
+/* ---- B1: stack array element + operand loads instead of adds ---------- */
+
+typedef struct { WORD pad[8]; WORD ob_x, ob_y; } OBJ;
+OBJ tree[3];
+
+/* `x[depth] = x[depth-1] + tree[this].ob_x` becomes `ldy ob_x; lda (&x),y`
+ * -- a load from address &x[depth-1] + ob_x, not an add. */
+static WORD b1_bug(OBJ *t, WORD this, WORD depth, WORD startx)
+{
+    WORD x[12];
+    x[0] = startx;
+    x[depth] = (WORD)(x[depth - 1] + t[this].ob_x);
+    return x[depth];
+}
+
+/* The element through a scalar first. */
+static WORD b1_fix(OBJ *t, WORD this, WORD depth, WORD startx)
+{
+    WORD x[12], prev;
+    x[0] = startx;
+    prev = x[depth - 1];
+    x[depth] = (WORD)(prev + t[this].ob_x);
+    return x[depth];
+}
+
+WORD b3_len(const char *s) { WORD n = 0; while (*s++) n++; return n; }
+
+/* ---- B2: the flags after _Div16 / _Mod16 are not the result's ---------- */
+
+/* At -O1 and above `if (a / b)` is `jsl _Div16; beq`.  The library leaves N
+ * and Z from the sign word (dividend ^ divisor) on the non-negative path, so
+ * 8/8 tests as zero and 7/8 as non-zero; _Mod16 likewise tests the dividend.
+ * The fix is a replacement _Div16/_Mod16 (src/sys/div16.s, linked with
+ * --override), so there is no source-level "fixed" shape: check.py links
+ * this program both ways. */
+volatile WORD b2_hc = 8;
+
+WORD b2_div_truth(const char *s, WORD *ph)
+{
+    WORD n = b3_len(s);
+    if (*ph / b2_hc)            /* gsx_tcalc: does one line of text fit? */
+        return n;
+    return 0;
+}
+WORD b2_mod_truth(const char *s, WORD *ph)
+{
+    WORD n = b3_len(s);
+    if (*ph % b2_hc)
+        return n;
+    return 0;
+}
+
+/* ---- B3: `*out = c ? a : b` in an inlined static function ------------- */
+
+/* The conditional store lands in a dead stack slot; *pn is never written. */
+static void b3_bug_callee(const char *s, WORD *pw, WORD *pn)
+{
+    WORD n = b3_len(s), m = *pw;
+    *pn = (n < m) ? n : m;
+}
+WORD b3_bug(const char *s, WORD *pw, WORD *ph)
+{
+    WORD num;
+    (void)ph;
+    b3_bug_callee(s, pw, &num);
+    return num;
+}
+
+/* Return the value instead. */
+static WORD b3_fix_callee(const char *s, WORD *pw)
+{
+    WORD n = b3_len(s), m = *pw;
+    return (n < m) ? n : m;
+}
+WORD b3_fix(const char *s, WORD *pw, WORD *ph) { (void)ph; return b3_fix_callee(s, pw); }
+
+/* ---- B4: (int8_t) of a 32-bit-derived value does not sign-extend ------- */
+
+volatile uint32_t b4_spec = 0x00FE1100;   /* char 0x00, thickness -2, colour */
+
+static WORD b4_bug(uint32_t spec) { return (WORD)(int8_t)((spec >> 16) & 0xFF); }
+
+static WORD b4_fix(uint32_t spec)
+{
+    WORD hi = (WORD)(spec >> 16);
+    int8_t th = (int8_t)hi;
+    return th;
+}
+
+/* ---- B5: a shifted load through a spilled pointer drops the load ------- */
+
+/* `stride = p->field * 2u` where p is a local that lives on the stack (a
+ * call preceded it) and is dead afterwards: the compiler gives stride the
+ * pointer's own slot and emits `tsc; adc #slot; tax; asl 0,x` -- the slot is
+ * shifted in place, so stride = p << 1 and p->field is never read.  Any
+ * shift-shaped operator does it (* 2, << 1, x + x, * 4, / 2u, >> 1); * 3
+ * does not, a byte field does not, a global or parameter pointer does not,
+ * and a pointer still live afterwards does not.  All -O levels.
+ *
+ * This was the Phase 2b "unexplained" wrong-row read in vrt_cpyfm. */
+typedef struct { uint32_t fd_addr; WORD fd_w, fd_h, fd_wdwidth, fd_stand; } MFDB;
+MFDB b5_mfdb;
+uint8_t b5_form[32];
+WORD b5_contrl[8], b5_ptsin[4];
+
+void b5_order(WORD *a, WORD *b) { if (*a > *b) { WORD t = *a; *a = *b; *b = t; } }
+
+static WORD b5_walk(const uint8_t *bits, WORD sy1, uint16_t stride)
+{
+    WORD row, sum = 0;
+    for (row = 0; row < 4; row++)
+        sum = (WORD)(sum + bits[(uint16_t)((sy1 + row) * stride)]);
+    return sum;
+}
+
+WORD b5_bug(void)
+{
+    MFDB *src = (MFDB *)(uint16_t)b5_contrl[7];
+    WORD sy1 = b5_ptsin[1], sy2 = b5_ptsin[3];
+    const uint8_t *bits;
+    uint16_t stride;
+    if (!src) return -1;
+    b5_order(&sy1, &sy2);                       /* spills src to the stack */
+    bits   = (const uint8_t *)(uint16_t)src->fd_addr;
+    stride = (uint16_t)((uint16_t)src->fd_wdwidth * 2u);   /* src dead here */
+    return b5_walk(bits, sy1, stride);
+}
+
+/* The field through a scalar first. */
+WORD b5_fix(void)
+{
+    MFDB *src = (MFDB *)(uint16_t)b5_contrl[7];
+    WORD sy1 = b5_ptsin[1], sy2 = b5_ptsin[3], wd;
+    const uint8_t *bits;
+    uint16_t stride;
+    if (!src) return -1;
+    b5_order(&sy1, &sy2);
+    bits   = (const uint8_t *)(uint16_t)src->fd_addr;
+    wd     = src->fd_wdwidth;
+    stride = (uint16_t)((uint16_t)wd * 2u);
+    return b5_walk(bits, sy1, stride);
+}
+
+/* ---- results ------------------------------------------------------------ */
+
+volatile WORD r_b1_bug, r_b1_fix;                       /* want 476 */
+volatile WORD r_b2_eq, r_b2_lt, r_b2_mod;               /* want 7, 0, 0 */
+volatile WORD r_b3_bug, r_b3_fix;                       /* want 7 */
+volatile WORD r_b4_bug, r_b4_fix;                       /* want -2 */
+volatile WORD r_b5_bug, r_b5_fix;                       /* want 120 */
+
+__task int main(void)
+{
+    WORD w = 200, h;
+
+    tree[2].ob_x = 376;
+    r_b1_bug = b1_bug(tree, 2, 1, 100);
+    r_b1_fix = b1_fix(tree, 2, 1, 100);
+
+    h = 8;  r_b2_eq  = b2_div_truth("centred", &h);     /* 8 / 8 = 1: 7 */
+    h = 7;  r_b2_lt  = b2_div_truth("centred", &h);     /* 7 / 8 = 0: 0 */
+    h = 16; r_b2_mod = b2_mod_truth("centred", &h);     /* 16 % 8 = 0: 0 */
+
+    r_b3_bug = b3_bug("centred", &w, &h);
+    r_b3_fix = b3_fix("centred", &w, &h);
+
+    r_b4_bug = b4_bug(b4_spec);
+    r_b4_fix = b4_fix(b4_spec);
+
+    for (h = 0; h < 32; h++) b5_form[h] = (uint8_t)(h * 3);
+    b5_mfdb.fd_addr = (uint16_t)b5_form;
+    b5_mfdb.fd_wdwidth = 2;                     /* 4 bytes per row */
+    b5_contrl[7] = (WORD)(uint16_t)&b5_mfdb;
+    b5_ptsin[1] = 1; b5_ptsin[3] = 4;
+    r_b5_bug = b5_bug();                        /* rows 1..4: 12+24+36+48 */
+    r_b5_fix = b5_fix();
+    return 0;
+}

@@ -312,6 +312,40 @@ void blit_copy(uint32_t src, uint16_t sstride, uint32_t dst,
     p[20] = BLT_MODE_COPY;
 }
 
+void blit_move(uint32_t src, uint16_t sstride, uint32_t dst,
+               uint16_t dstride, uint16_t bytes, uint16_t rows)
+{
+    uint8_t *p;
+    uint16_t sneg, dneg;
+
+    if (dst <= src) {
+        blit_copy(src, sstride, dst, dstride, bytes, rows);
+        return;
+    }
+    /* The blitter reads and writes a byte at a time, left to right, top
+     * to bottom, so a copy to a higher address would overwrite source rows
+     * it has yet to read.  Run it the other way: start both at their last
+     * byte, step X by -1 and Y by -stride. */
+    p = bcb_new();
+    if (!p)
+        return;
+    bcb_common(p, src + (uint32_t)(rows - 1) * sstride + (uint32_t)(bytes - 1),
+               0,
+               dst + (uint32_t)(rows - 1) * dstride + (uint32_t)(bytes - 1),
+               0, bytes, rows);
+    sneg = (uint16_t)((uint16_t)(0u - sstride) & 0x1FFFu);   /* 13-bit signed */
+    dneg = (uint16_t)((uint16_t)(0u - dstride) & 0x1FFFu);
+    p[3]  = (uint8_t)sneg;
+    p[4]  = (uint8_t)(sneg >> 8);
+    p[5]  = 0xFF;                                 /* source X step: -1      */
+    p[9]  = (uint8_t)dneg;
+    p[10] = (uint8_t)(dneg >> 8);
+    p[11] = 0xFF;                                 /* dest X step: -1        */
+    p[15] = 0xFF;
+    p[16] = 0x00;
+    p[20] = BLT_MODE_COPY;
+}
+
 /* Upload the queued list and start it, without waiting. */
 void blit_start(void)
 {
@@ -349,6 +383,24 @@ void blit_mask(uint32_t src, uint16_t sstride, uint32_t dst, uint16_t dstride,
     bcb_common(p, src, sstride, dst, dstride, bytes, rows);
     p[15] = and_mask;
     p[16] = xor_mask;
+    p[20] = mode;
+}
+
+/* Byte 19 of the BCB: D7 enables the pattern counter, D5:D0 hold the repeat
+ * length minus one.  Altirra (vbxe.cpp, BlitRow) resets the source pointer to
+ * the row's start address when the counter expires. */
+void blit_pattern(uint32_t src, uint16_t sstride, uint32_t dst,
+                  uint16_t dstride, uint16_t bytes, uint16_t rows,
+                  uint8_t and_mask, uint8_t xor_mask, uint8_t mode,
+                  uint8_t repeat)
+{
+    uint8_t *p = bcb_new();
+    if (!p)
+        return;
+    bcb_common(p, src, sstride, dst, dstride, bytes, rows);
+    p[15] = and_mask;
+    p[16] = xor_mask;
+    p[19] = (uint8_t)(0x80 | ((repeat - 1) & 0x3F));
     p[20] = mode;
 }
 

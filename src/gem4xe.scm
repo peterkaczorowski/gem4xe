@@ -6,8 +6,8 @@
 ;;;   $0200-$06FF  OS vars / page 6      -- not ours ($02E0/$02E2 are the .xex vectors)
 ;;;   $0700-$1FFF  DOS resident          -- not ours
 ;;;   $2000-$20FF  direct page           <- ours
-;;;   $2100-$2FFF  stack / data / zdata  <- ours
-;;;   $3000-$3FFF  near code and rodata  <- ours
+;;;   $2100-$37FF  stack / data / zdata  <- ours
+;;;   $3800-$3FFF  near code and rodata  <- ours
 ;;;   $4000-$7FFF  RESERVED: U1MB PORTB banking window -- nothing may go here
 ;;;   $8000-$9FFF  RESERVED: VBXE MEMAC A window       -- nothing may RUN here,
 ;;;                but it is plain RAM until vbxe_init() opens the window, so
@@ -22,13 +22,16 @@
 ;;;
 ;;; WHAT GOES FAR AND WHAT MUST NOT
 ;;;
-;;; `farcode` and `switch` are the only sections that move.  Everything a far
-;;; function reaches for its DATA stays in bank $00, because the small data
-;;; model addresses globals and constants ABSOLUTE, through the data bank
+;;; `farcode`, `switch` and `cfar` are the only sections that move.  Everything
+;;; a far function reaches for its DATA stays in bank $00, because the small
+;;; data model addresses globals and constants ABSOLUTE, through the data bank
 ;;; register -- so `cdata`, `idata`, `data_init_table`, `data` and `zdata` are
 ;;; all bank $00 by requirement, not by preference.  A `switch` table is read
 ;;; with long addressing and could sit anywhere; it travels with the code it
-;;; belongs to.
+;;; belongs to.  `cfar` holds what is declared `__far const` -- the system
+;;; font -- and is read with long addressing too, at the cost of a far
+;;; pointer in the two places that read it.  Bank $00 is 3.8 KB of data for
+;;; everything, and the window manager's tables alone want 2 KB of it.
 ;;;
 ;;; No `reset` section is used at run time: a .xex is entered through the DOS
 ;;; run vector at $02E0, which tools/mkxex.py points at _atari_entry.
@@ -36,12 +39,15 @@
 (define memories
   '((memory DirectPage (address (#x2000 . #x20ff))
             (section (registers ztiny)))
-    (memory LoRAM      (address (#x2100 . #x2fff))
+    (memory LoRAM      (address (#x2100 . #x37ff))
             (section stack data zdata heap))
 
     ;; Near code: the entry stub, farload, the C startup and every library
-    ;; routine that is not compiled far -- plus all constant data.
-    (memory Near       (address (#x3000 . #x3fff))
+    ;; routine that is not compiled far -- plus all constant data.  Near2
+    ;; takes the overflow, and it is SLOW: it shares the accelerator's 16 KB
+    ;; window with the MEMAC window, which has to stay on the bus (see
+    ;; src/sys/rapidus.h), so nothing that runs often should land there.
+    (memory Near       (address (#x3800 . #x3fff))
             (section code libcode cdata idata data_init_table))
     (memory Near2      (address (#xa000 . #xafff))
             (section code libcode cdata idata data_init_table))
@@ -62,7 +68,7 @@
     ;; Bank $01: the far code.  A .xex cannot load here; src/farload.s copies
     ;; it up as DOS reads the file.
     (memory FarCode    (address (#x010000 . #x01ffff))
-            (section farcode switch))
+            (section cfar farcode switch))
 
     ;; The library cstartup always emits a `reset` section -- a word pointing
     ;; at __program_start.  A .xex has no reset vector, so this is inert filler

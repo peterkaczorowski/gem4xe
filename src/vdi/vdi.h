@@ -76,11 +76,37 @@ typedef struct {
     WORD line_width;
     WORD line_index;        /* line style, 1..7 */
     WORD fill_color;
-    WORD fill_index;        /* fill style: 0 hollow, 1 solid, ... */
-    WORD fill_style;
+    WORD fill_style;        /* interior: FIS_HOLLOW .. FIS_USER (donor name) */
+    WORD fill_index;        /* vsf_style's index MINUS ONE, as the donor keeps it */
     WORD fill_per;          /* outline fill area */
     WORD text_color;
+    /* What the two above resolve to: the 16-bit rows of the current fill
+     * pattern and the mask that turns a y coordinate into a row index
+     * (3 for the 4-row dithers, 7 for the OEM and coarse hatches, 15 for
+     * the fine hatches and the user pattern).  Bit 15 is the LEFTMOST
+     * pixel of a 16-aligned screen word. */
+    const UWORD *patptr;
+    WORD  patmsk;
+    UWORD ud_patrn[16];     /* vsf_udpat's pattern, FIS_USER */
 } Vwk;
+
+/* fill interior styles (vsf_interior) */
+#define FIS_HOLLOW  0
+#define FIS_SOLID   1
+#define FIS_PATTERN 2
+#define FIS_HATCH   3
+#define FIS_USER    4
+/* vsf_style limits: 24 patterns (8 dithers + 16 OEM), 12 hatches; an index
+ * out of range becomes 1, the way the donor's vsf_style does it. */
+#define MAX_FILL_PATTERN 24
+#define MAX_FILL_HATCH   12
+/* The standard tables, generated from the donor by tools/patconv.py into
+ * src/vdi/fillpat.c: 8 dithers of 4 rows, 16 OEM patterns of 8, 6 coarse
+ * hatches of 8, 6 fine hatches of 16. */
+extern const UWORD fill_dither[32];
+extern const UWORD fill_oem[128];
+extern const UWORD fill_hatch0[48];
+extern const UWORD fill_hatch1[96];
 
 extern Vwk vwk;
 
@@ -96,6 +122,8 @@ extern Vwk vwk;
 #define V_CLRWK        3
 #define V_PLINE        6
 #define V_GTEXT        8
+#define VST_HEIGHT    12
+#define VQT_ATTRIBUTES 38
 #define VST_ALIGNMENT 39
 #define VSL_TYPE      15
 #define VSL_WIDTH     16
@@ -105,6 +133,7 @@ extern Vwk vwk;
 #define VSF_STYLE     24
 #define VSF_COLOR     25
 #define VSWR_MODE     32
+#define VSF_UDPAT    112
 #define V_OPNVWK     100
 #define V_CLSVWK     101
 #define VQ_EXTND     102
@@ -137,7 +166,7 @@ extern Vwk vwk;
 #define FONT_H        8
 #define FONT_STRIDE 256
 #define FONT_TOP      6     /* Fonthead.top: baseline to top of cell */
-extern const uint8_t font8x8[FONT_STRIDE * FONT_H];
+extern const uint8_t __far font8x8[FONT_STRIDE * FONT_H];
 
 void vdi(void);             /* dispatch on contrl[0]; the GSX "SCREEN" entry */
 void vdi_init(void);        /* one-time bring-up of the physical workstation */
@@ -147,6 +176,14 @@ void vdi_font_expand(void); /* 1bpp -> 4bpp glyph masks into VRAM; call once */
  * ptr_poll(): it erases, repositions and redraws only if something changed. */
 void vdi_cursor_move(void);
 
+/* The driver's save buffer for the AES -- what a drop-down or an alert
+ * saves the screen under itself into (bb_save / bb_restore).  The donor
+ * gsx_malloc()s one 25 character columns wide from the OS; here it is a
+ * whole screen in VRAM, laid out like the screen, where the blitter can
+ * reach it, and only the driver knows where.  Fills in an MFDB naming it,
+ * for vro_cpyfm. */
+void vdi_save_form(MFDB *m);
+
 /* Drive the input devices once.  Polls the pointer and the keyboard, moves the
  * cursor, and calls whichever vex_* vectors are installed.
  *
@@ -155,6 +192,12 @@ void vdi_cursor_move(void);
  * is what the VBI will call instead -- the AES above it will not notice the
  * difference, which is the point of it being a single entry point. */
 void vdi_input_poll(void);
+
+/* Just the keyboard: move POKEY's one-key latch into the driver's queue and
+ * re-arm it.  Part of vdi_input_poll(); on its own it is what an idle loop
+ * that must not disturb the pointer or the cursor calls, so that a key
+ * pressed between two events is still there when someone asks. */
+void vdi_key_poll(void);
 
 /* The gem4xe ABI for vex_* handlers: they take no arguments and read
  * ptr_state / the VDI globals.  GEM's 68000 convention passes x and y in

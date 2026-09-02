@@ -98,8 +98,30 @@
 #define VR_BCB             0x30100UL            /* blit control blocks, 1K  */
 #define VR_CURSAVE         0x30200UL            /* 16x16 under the pointer  */
 #define VR_CURSAVE_STRIDE  16
-#define VR_FONT            0x31000UL            /* 4bpp-expanded glyphs     */
-/* $40000+ free: window backing stores, icons, patterns */
+#define VR_CURSAVE_ROWS    16
+/* The current fill pattern, expanded to 4bpp: 16 rows of one 16-pixel repeat
+ * written TWICE per row, so a blit may start at any byte of the repeat and
+ * read eight bytes before the pattern counter wraps it (see blit_pattern).
+ * It follows the cursor save area, however large that is.                */
+#define VR_PATT            (VR_CURSAVE + (uint32_t)VR_CURSAVE_STRIDE * VR_CURSAVE_ROWS)
+#define VR_PATT_STRIDE     16
+#define VR_PATT_ROWS       16
+/* Styled lines (src/vdi/vdi.c, style_line): one row of the style, written
+ * twice like a pattern row, for a horizontal line; then a 16-byte column --
+ * one byte per row, all-set or all-clear -- replicated by the blitter to
+ * VR_LINE_V_ROWS, so a vertical line of any screen height is one blit. */
+#define VR_LINE_H          (VR_PATT + (uint32_t)VR_PATT_STRIDE * VR_PATT_ROWS)
+#define VR_LINE_V          (VR_LINE_H + VR_PATT_STRIDE)
+#define VR_LINE_V_ROWS     256
+#define VR_FONT            0x31000UL            /* 4bpp glyph masks, both
+                                                   parities: 18 KB -> $357FF */
+/* The AES's save buffer for menu drop-downs and alerts (bb_save /
+ * bb_restore): a whole screen's worth, laid out exactly like the screen, so
+ * a save is a same-coordinates vro_cpyfm between the two and always a blit.
+ * The donor keeps 25 character columns by the screen height and overflows
+ * on a wider drop-down; a full screen costs nothing here.               */
+#define VR_SAVE            0x40000UL            /* 76,800 -> $52BFF         */
+/* $53000+ free: window backing stores, icons, patterns */
 
 /* ---- MEMAC A window --------------------------------------------------- */
 /* 4 KB at $8000.  NOT MEMAC B: that is fixed at $4000-$7FFF, where U1MB's
@@ -138,6 +160,12 @@ void     blit_fill(uint32_t dst, uint16_t stride, uint16_t bytes,
                    uint16_t rows, uint8_t value);
 void     blit_copy(uint32_t src, uint16_t sstride, uint32_t dst,
                    uint16_t dstride, uint16_t bytes, uint16_t rows);
+/* A copy whose source and destination may overlap (a window being moved):
+ * runs backwards, from the last byte of the last row, when the destination
+ * is the higher address.  The BCB's steps are signed -- X a byte, Y 13
+ * bits -- which is what makes it one blit either way. */
+void     blit_move(uint32_t src, uint16_t sstride, uint32_t dst,
+                   uint16_t dstride, uint16_t bytes, uint16_t rows);
 /* Read-modify-write with a constant source.  Used for the odd-nibble edges of
  * a 4bpp rectangle: AND away the nibble to keep, then OR the colour in. */
 void     blit_and(uint32_t dst, uint16_t stride, uint16_t bytes,
@@ -153,6 +181,14 @@ void     vram_write8(uint32_t addr, uint8_t v);
 void     blit_mask(uint32_t src, uint16_t sstride, uint32_t dst,
                    uint16_t dstride, uint16_t bytes, uint16_t rows,
                    uint8_t and_mask, uint8_t xor_mask, uint8_t mode);
+/* blit_mask with the source read cyclically: after `repeat` bytes the source
+ * pointer returns to the START OF THE CURRENT ROW (not to the byte the row's
+ * read began at), so the repeat unit must be laid out from the row start.
+ * How a small pattern tile fills any width in one control block. 1..64. */
+void     blit_pattern(uint32_t src, uint16_t sstride, uint32_t dst,
+                      uint16_t dstride, uint16_t bytes, uint16_t rows,
+                      uint8_t and_mask, uint8_t xor_mask, uint8_t mode,
+                      uint8_t repeat);
 uint8_t  blit_pending(void);
 void     blit_run(void);                              /* upload, start, wait */
 void     blit_start(void);                            /* upload and start only */

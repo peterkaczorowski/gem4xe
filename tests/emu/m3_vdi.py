@@ -26,7 +26,12 @@ from vdiref import (V_CLRWK, V_PLINE, VSL_TYPE, VSL_COLOR, VSF_INTERIOR,      # 
 from vdiref import (VST_COLOR, VSWR_MODE, VRT_CPYFM, pack_mfdb,           # noqa: E402
                      VSC_FORM, V_SHOW_C, V_HIDE_C, V_LOCATOR,
                      VSIN_MODE, VQIN_MODE, VEX_TIMV, VSL_UDSTY, VQ_MOUSE,
-                     VST_HEIGHT, VQT_ATTRIBUTES, V_ESCAPE)
+                     VST_HEIGHT, VQT_ATTRIBUTES, V_ESCAPE, VSF_STYLE, VSF_UDPAT)
+
+# A user fill pattern with every row different -- a diagonal -- so that a
+# fill anchored to the wrong row, or to the rectangle instead of the screen,
+# cannot pass.
+UD_DIAG = tuple(0x8000 >> i for i in range(16))
 
 # A GEM-style arrow: mask is the outline+body, data is the white interior.
 # Painted mask-then-data, so a mask bit with no data bit is the outline.
@@ -101,9 +106,83 @@ CASES = [
         (VSF_COLOR, (), (4,)), (VR_RECFL, (30, 20, 39, 40), ()),
         (VSF_COLOR, (), (3,)), (VR_RECFL, (40, 20, 40, 40), ())]),
 
-    ("hollow fill draws nothing", [
-        (VSF_COLOR, (), (2,)), (VSF_INTERIOR, (), (0,)),
-        (VR_RECFL, (10, 10, 100, 100), ()),
+    # A hollow fill is a pattern with no bits set, and what a clear bit does
+    # is the writing mode's decision: replace paints pen 0 (white -- GEM
+    # dialogs are opaque because of this), erase paints the pen, and the
+    # transparent and XOR modes leave the screen alone.
+    ("hollow fill: white in replace, pen in erase, else nothing", [
+        (VSF_COLOR, (), (2,)), (VR_RECFL, (10, 10, 100, 100), ()),
+        (VSF_INTERIOR, (), (0,)),
+        (VR_RECFL, (21, 20, 80, 60), ()),
+        (VSWR_MODE, (), (2,)), (VR_RECFL, (30, 70, 90, 95), ()),
+        (VSWR_MODE, (), (3,)), (VR_RECFL, (0, 0, 15, 15), ()),
+        (VSWR_MODE, (), (4,)), (VSF_COLOR, (), (5,)),
+        (VR_RECFL, (0, 90, 120, 110), ()),
+        (VSWR_MODE, (), (1,)), (VSF_INTERIOR, (), (1,))]),
+
+    # Pattern fills.  The pattern is anchored to the screen (row y AND mask,
+    # bit 15 at every 16th pixel), so two fills that abut must tile as one.
+    ("dither fill, replace, odd edges, abutting fills tile", [
+        (VSF_INTERIOR, (), (2,)), (VSF_STYLE, (), (4,)), (VSF_COLOR, (), (1,)),
+        (VR_RECFL, (3, 5, 200, 90), ()),
+        (VSF_COLOR, (), (3,)), (VR_RECFL, (201, 5, 300, 90), ()),
+        (VSF_STYLE, (), (2,)), (VR_RECFL, (7, 91, 13, 108), ()),
+        (VSF_INTERIOR, (), (1,))]),
+
+    ("OEM pattern over a coloured field in all four modes", [
+        (VSF_COLOR, (), (2,)), (VR_RECFL, (0, 0, 319, 119), ()),
+        (VSF_INTERIOR, (), (2,)), (VSF_STYLE, (), (9,)), (VSF_COLOR, (), (1,)),
+        (VSWR_MODE, (), (1,)), (VR_RECFL, (10, 10, 79, 50), ()),
+        (VSWR_MODE, (), (2,)), (VR_RECFL, (90, 10, 159, 50), ()),
+        (VSWR_MODE, (), (3,)), (VR_RECFL, (170, 10, 239, 50), ()),
+        (VSWR_MODE, (), (4,)), (VR_RECFL, (250, 10, 319, 50), ()),
+        (VSF_STYLE, (), (17,)), (VSF_COLOR, (), (7,)),
+        (VSWR_MODE, (), (2,)), (VR_RECFL, (11, 60, 78, 100), ()),
+        (VSWR_MODE, (), (4,)), (VR_RECFL, (91, 60, 158, 100), ()),
+        (VSWR_MODE, (), (1,)), (VSF_INTERIOR, (), (1,))]),
+
+    # Pen 0 is hardware nibble 0, which the blitter's stencil mode cannot
+    # write: transparent and erase fills in pen 0 take a different path.
+    ("pattern fill in pen 0 clears pixels in transparent and erase", [
+        (VSF_COLOR, (), (4,)), (VR_RECFL, (0, 0, 199, 99), ()),
+        (VSF_INTERIOR, (), (2,)), (VSF_STYLE, (), (12,)), (VSF_COLOR, (), (0,)),
+        (VSWR_MODE, (), (2,)), (VR_RECFL, (5, 5, 90, 60), ()),
+        (VSWR_MODE, (), (4,)), (VR_RECFL, (101, 5, 190, 60), ()),
+        (VSWR_MODE, (), (2,)), (VR_RECFL, (20, 70, 20, 95), ()),
+        (VSWR_MODE, (), (4,)), (VR_RECFL, (23, 70, 23, 95), ()),
+        (VSWR_MODE, (), (1,)), (VR_RECFL, (30, 70, 180, 95), ()),
+        (VSF_INTERIOR, (), (1,))]),
+
+    # The expansion holds 16 rows; taller fills go in bands, and a band
+    # boundary must not show.  Fine hatches have 16 distinct rows.
+    ("hatch fills across the 16-row band boundaries", [
+        (VSF_INTERIOR, (), (3,)), (VSF_STYLE, (), (9,)), (VSF_COLOR, (), (6,)),
+        (VR_RECFL, (0, 0, 639, 239), ()),                # the whole screen, 15 bands
+        (VSF_STYLE, (), (7,)), (VSF_COLOR, (), (1,)),
+        (VR_RECFL, (10, 13, 100, 70), ()),
+        (VSF_STYLE, (), (3,)), (VSF_COLOR, (), (2,)),
+        (VR_RECFL, (110, 31, 200, 33), ()),
+        (VSF_STYLE, (), (12,)), (VR_RECFL, (210, 47, 300, 48), ()),
+        (VSF_INTERIOR, (), (1,))]),
+
+    ("user pattern: XOR twice restores, and clips", [
+        (VSF_COLOR, (), (3,)), (VR_RECFL, (0, 0, 159, 79), ()),
+        (VSF_UDPAT, (), UD_DIAG),
+        (VSF_INTERIOR, (), (4,)), (VSF_COLOR, (), (5,)),
+        (VS_CLIP, (21, 9, 140, 60), (1,)),
+        (VSWR_MODE, (), (3,)), (VR_RECFL, (0, 0, 200, 100), ()),
+        (VR_RECFL, (60, 30, 200, 100), ()),
+        (VS_CLIP, (0, 0, 639, 239), (0,)),
+        (VSWR_MODE, (), (1,)), (VR_RECFL, (160, 0, 319, 79), ()),
+        (VSF_INTERIOR, (), (1,))]),
+
+    ("vsf_udpat takes 16 words and nothing else", [
+        (VSF_UDPAT, (), UD_DIAG),
+        (VSF_UDPAT, (), (0xFFFF,) * 8),                 # refused: pattern stays
+        (VSF_INTERIOR, (), (4,)), (VSF_COLOR, (), (1,)),
+        (VR_RECFL, (0, 0, 63, 47), ()),
+        (VSF_UDPAT, (), (0x00FF,) * 16),                # a new one takes effect
+        (VR_RECFL, (64, 0, 127, 47), ()),
         (VSF_INTERIOR, (), (1,))]),
 
     ("clipping to an odd-edged window", [
@@ -317,6 +396,11 @@ CASES = [
         (VSL_COLOR, (), (7,)), (VSL_COLOR, (), (99,)),      # out of range -> 1
         (VSF_COLOR, (), (3,)), (VSF_COLOR, (), (-4,)),
         (VSF_INTERIOR, (), (2,)), (VSF_INTERIOR, (), (9,)),  # -> 0
+        (VSF_INTERIOR, (), (2,)), (VSF_STYLE, (), (24,)),
+        (VSF_STYLE, (), (25,)), (VSF_STYLE, (), (0,)),       # -> 1, 1
+        (VSF_INTERIOR, (), (3,)), (VSF_STYLE, (), (12,)),
+        (VSF_STYLE, (), (13,)),                              # -> 1
+        (VSF_INTERIOR, (), (1,)), (VSF_STYLE, (), (20,)),    # solid: hatch range -> 1
         (VST_COLOR, (), (5,)),
         (VSWR_MODE, (), (3,)), (VSWR_MODE, (), (7,))]),      # -> replace
 
@@ -334,6 +418,42 @@ CASES = [
         (VQ_MOUSE, (), ()),
         (V_LOCATOR, (-5, -5), ()),
         (VQ_MOUSE, (), ())]),
+
+    # Axis-aligned styled lines are pattern blits (style_line in vdi.c): the
+    # style anchored to the line's first point, in either direction, at odd
+    # ends, in every writing mode, and clipped without losing its phase.
+    ("styled lines: backwards, vertical, odd ends, every mode, clipped", [
+        (VSL_COLOR, (), (1,)), (VSL_TYPE, (), (3,)),
+        (V_PLINE, (401, 20, 11, 20), ()),
+        (V_PLINE, (11, 22, 401, 22), ()),
+        (V_PLINE, (20, 30, 20, 199), ()),
+        (V_PLINE, (23, 199, 23, 30), ()),
+        (VSL_UDSTY, (), (0x5555,)), (VSL_TYPE, (), (7,)),
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (4,)),
+        (VR_RECFL, (40, 40, 200, 120), ()),
+        (VSWR_MODE, (), (3,)),
+        (V_PLINE, (30, 60, 300, 60), ()),
+        (V_PLINE, (100, 30, 100, 150), ()),
+        (V_PLINE, (300, 62, 30, 62), ()),
+        (V_PLINE, (300, 62, 30, 62), ()),
+        (VSWR_MODE, (), (2,)), (VSL_COLOR, (), (6,)),
+        (V_PLINE, (30, 80, 300, 80), ()),
+        (V_PLINE, (101, 30, 101, 150), ()),
+        (VSWR_MODE, (), (4,)),
+        (V_PLINE, (30, 100, 300, 100), ()),
+        (V_PLINE, (102, 30, 102, 150), ()),
+        (VSWR_MODE, (), (2,)), (VSL_COLOR, (), (0,)),
+        (V_PLINE, (30, 110, 300, 110), ()),
+        (V_PLINE, (103, 30, 103, 150), ()),
+        (VSWR_MODE, (), (4,)),
+        (V_PLINE, (30, 112, 300, 112), ()),
+        (V_PLINE, (104, 30, 104, 150), ()),
+        (VSWR_MODE, (), (1,)), (VSL_COLOR, (), (1,)),
+        (VS_CLIP, (50, 50, 150, 150), (1,)),
+        (V_PLINE, (0, 55, 639, 55), ()),
+        (V_PLINE, (61, 239, 61, 0), ()),
+        (VS_CLIP, (0, 0, 0, 0), (0,)),
+        (VSL_TYPE, (), (1,))]),
 
     ("vex_timv reports the tick length", [
         (VEX_TIMV, (), ())]),
@@ -364,13 +484,60 @@ CASES = [
         (VSF_COLOR, (), (4,)), (VR_RECFL, (20, 20, 79, 59), ()),
         (VSF_COLOR, (), (6,)), (VR_RECFL, (30, 30, 49, 49), ()),
         (VRO_CPYFM, (20, 20, 79, 59, 40, 40, 99, 79), (3,))]),
+
+    # --- forms in VRAM.  An MFDB with fd_addr != 0 names a form off the
+    # screen; the AES's menu and alert save buffer (bb_save / bb_restore) is
+    # one.  "to_save" copies screen -> buffer, "from_save" buffer -> screen.
+    ("cpyfm to the save form and back", [
+        (VSF_COLOR, (), (2,)), (VR_RECFL, (20, 20, 79, 59), ()),
+        (VSF_COLOR, (), (6,)), (VR_RECFL, (30, 30, 49, 49), ()),
+        (VRO_CPYFM, (20, 20, 79, 59, 20, 20, 79, 59), (3,), "to_save"),
+        (VSF_COLOR, (), (0,)), (VR_RECFL, (0, 0, 99, 99), ()),
+        (VSF_COLOR, (), (3,)), (VR_RECFL, (40, 40, 44, 44), ()),
+        (VRO_CPYFM, (20, 20, 79, 59, 20, 20, 79, 59), (3,), "from_save")]),
+
+    ("cpyfm save form at odd x, odd width: the pixel path into a form", [
+        (VSF_COLOR, (), (5,)), (VR_RECFL, (21, 20, 79, 59), ()),
+        (VSF_COLOR, (), (1,)), (VR_RECFL, (33, 30, 49, 49), ()),
+        (VRO_CPYFM, (21, 20, 79, 59, 21, 20, 79, 59), (3,), "to_save"),
+        (VSF_COLOR, (), (0,)), (VR_RECFL, (0, 0, 99, 99), ()),
+        (VRO_CPYFM, (21, 20, 79, 59, 21, 20, 79, 59), (3,), "from_save"),
+        (VRO_CPYFM, (21, 20, 79, 59, 200, 100, 258, 139), (3,), "from_save")]),
+
+    ("cpyfm from a form, destination clipped by the screen edge", [
+        (VSF_COLOR, (), (4,)), (VR_RECFL, (0, 0, 39, 19), ()),
+        (VSF_COLOR, (), (7,)), (VR_RECFL, (10, 5, 29, 14), ()),
+        (VRO_CPYFM, (0, 0, 39, 19, 0, 0, 39, 19), (3,), "to_save"),
+        (VRO_CPYFM, (0, 0, 39, 19, 620, 230, 659, 249), (3,), "from_save")]),
+
+    # The workstation's clip rectangle applies to the screen only: a save
+    # under a clip that excludes it must still take the whole rectangle,
+    # or the restore after the clip is lifted comes back short.
+    ("cpyfm to a form ignores the clip rectangle", [
+        (VSF_COLOR, (), (2,)), (VR_RECFL, (100, 50, 179, 89), ()),
+        (VS_CLIP, (0, 0, 9, 9), (1,)),
+        (VRO_CPYFM, (100, 50, 179, 89, 100, 50, 179, 89), (3,), "to_save"),
+        (VS_CLIP, (0, 0, 0, 0), (0,)),
+        (VSF_COLOR, (), (0,)), (VR_RECFL, (90, 40, 189, 99), ()),
+        (VRO_CPYFM, (100, 50, 179, 89, 100, 50, 179, 89), (3,), "from_save")]),
+
+    # A source past the edge of its form is clipped, and the destination
+    # loses the same span.  The donor reads on past the edge instead.
+    ("cpyfm source off the screen edge is clipped", [
+        (VSF_COLOR, (), (4,)), (VR_RECFL, (0, 0, 29, 19), ()),
+        (VSF_COLOR, (), (2,)), (VR_RECFL, (610, 220, 639, 239), ()),
+        (VRO_CPYFM, (-10, -10, 29, 19, 100, 100, 139, 129), (3,)),
+        (VRO_CPYFM, (620, 230, 659, 269, 200, 100, 239, 139), (3,))]),
 ]
 
 
-def poke_script(b, addr, script, mfdb_addr=0):
-    words = vdiref.encode(script, mfdb_addr)
+def poke_script(b, addr, script, mfdb_addr=0, room=None, screen_mfdb=0):
+    words = vdiref.encode(script, mfdb_addr, screen_mfdb)
     data = b"".join(struct.pack("<h", w if w < 32768 else w - 65536)
                     for w in words)
+    # The runner stops at the end of its buffer, mid-script, and the words
+    # past it land on whatever follows.
+    assert room is None or len(data) <= room, (len(data), room)
     b.memload(addr, data)
 
 
@@ -393,9 +560,15 @@ def main(argv):
 
     syms = symfile.load(SYMS)
     script_addr = syms["vdi_script"]
+    script_room = min(a for a in syms.values() if a > script_addr) - script_addr
     scratch_addr = syms["vdi_scratch"]
     results_addr = syms["vdi_results"]
     count_addr = syms["vdi_result_count"]
+    scratch_room = min(a for a in syms.values() if a > scratch_addr) - scratch_addr
+    assert 552 + 20 <= scratch_room, "the MFDBs must fit vdi_scratch"
+    save = vdiref.VramForm.save_buffer(scratch_addr + 552)
+    FORMS = {"icon": (ICON_BITS, ICON_WDW),
+             "to_save": (None, save), "from_save": (save, None)}
 
     emu = launch(tag="m3", memsize="1088K", extra_args=["--disk", DISK])
     b = emu.bridge
@@ -420,23 +593,27 @@ def main(argv):
         for idx, (name, script) in enumerate(CASES):
             if only is not None and idx != only:
                 continue
-            # v_opnwk first: it resets driver state (cursor included), which
-            # the host reference gets for free by constructing a new VDI and
-            # the target must be told to do.
-            full = [(1,), (V_CLRWK,)] + script
+            # v_opnwk first, with the AES's work_in: it resets driver state
+            # (cursor included), which the host reference gets for free by
+            # constructing a new VDI and the target must be told to do.
+            full = [(vdiref.V_OPNWK, (), vdiref.WORK_IN), (V_CLRWK,)] + script
 
             resolved = [
                 (r[0], r[1] if len(r) > 1 else (), r[2] if len(r) > 2 else (),
-                 (ICON_BITS, ICON_WDW) if len(r) > 3 else None)
+                 FORMS[r[3]] if len(r) > 3 else None)
                 for r in full]
             ref = vdiref.VDI()
             ref.run(resolved)
 
-            # Stage the form and its MFDB where the driver will read them.
+            # Stage the forms' MFDBs where the driver will read them: the
+            # icon's, the screen's (fd_addr 0) and the save buffer's.
             b.memload(scratch_addr, ICON_BITS)
             b.memload(scratch_addr + 512,
                       pack_mfdb(scratch_addr, ICON_W, ICON_H, ICON_WDW))
-            poke_script(b, script_addr, resolved, scratch_addr + 512)
+            b.memload(scratch_addr + 532, pack_mfdb(0, 0, 0, 0))
+            b.memload(scratch_addr + 552, save.pack())
+            poke_script(b, script_addr, resolved, scratch_addr + 512, script_room,
+                        screen_mfdb=scratch_addr + 532)
             b.poke(STATUS + ST_DONE, 0)
             b.poke(STATUS + ST_GO, 1)
             if not wait_done(b):
@@ -452,11 +629,9 @@ def main(argv):
             if nres != len(ref.results):
                 err = f"{nres} calls recorded, expected {len(ref.results)}"
             else:
-                got = b.memdump(results_addr, nres * 16)
-                for i in range(nres):
-                    rec = tuple(
-                        int.from_bytes(bytes(got[i * 16 + k * 2:i * 16 + k * 2 + 2]),
-                                       "little", signed=True) for k in range(8))
+                got = vdiref.decode(
+                    b.memdump(results_addr, nres * vdiref.RESULT_WORDS * 2), nres)
+                for i, rec in enumerate(got):
                     if rec != ref.results[i]:
                         err = (f"call {i} (op {full[i][0]}) returned {rec}, "
                                f"expected {ref.results[i]}")

@@ -85,6 +85,16 @@ class Surface:
     def copy(self, src, sstride, dst, dstride, nbytes, rows):
         self.blit(src, sstride, dst, dstride, nbytes, rows, and_mask=0xFF)
 
+    def move(self, src, sstride, dst, dstride, nbytes, rows):
+        """An overlap-safe copy (vbxe.c blit_move): backwards, from the
+        last byte of the last row, when the destination is higher."""
+        if dst <= src:
+            self.copy(src, sstride, dst, dstride, nbytes, rows)
+            return
+        self.blit(src + (rows - 1) * sstride + nbytes - 1, -sstride,
+                  dst + (rows - 1) * dstride + nbytes - 1, -dstride,
+                  nbytes, rows, and_mask=0xFF, sxstep=-1, dxstep=-1)
+
     def rmw(self, dst, stride, nbytes, rows, value, mode):
         """Constant-source read-modify-write: the 4bpp edge primitive."""
         self.blit(0, 0, dst, stride, nbytes, rows,

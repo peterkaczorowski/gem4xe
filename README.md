@@ -24,21 +24,38 @@ full-screen repaints.
 
 | Gate | | |
 |---|---|---|
-| `make test-host` | 19/19 | pointer device layer, .xex far-code staging |
+| `make test-host` | 29/29 | pointer device layer, .xex far-code staging |
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
-| `make test-m3` | 49/49 | VDI conformance — pixels *and* return values |
-| `make test-m4` | 4/4 | AES `objc_draw` / `objc_find` |
+| `make test-m3` | 61/61 | VDI conformance — pixels *and* return values |
+| `make test-m4` | 12/12 | AES object library: draw, find, change, edit, centre |
 | `make test-m5` | PASS | linear RAM probed: banks `$02-$EF`, 14.9 MB |
-| `make test-m6` | PASS | far code copied up and running in bank `$01` |
+| `make test-m6` | PASS | far code copied up and running in bank `$01`; bank `$00` on the fast bus |
+| `make test-m7` | 10/10 | `evnt_*`, `form_do`, `form_dial`, `graf_watchbox` under host-driven input |
+| `make test-m8` | 12/12 | the window manager and the control manager: rectangle lists, moves, gadgets, `WM_*` |
+| `make test-m9` | 4/4 | menus: the bar, drop-downs, `MN_SELECTED`, screenshotted inside the wait |
+| `make check-cc` | PASS | the five compiler bugs worked around, in the vendor's simulator |
 
 `make test` runs them all. Per-phase notes, including the bugs and what caught
 them, are in `docs/`.
 
 The 37 VDI opcodes the AES and the GEM Desktop actually use are complete. The
-AES object library draws and hit-tests. Next is `form_do` and the window
-manager.
+AES object library draws, hit-tests and edits; `form_do` runs a dialog under
+keyboard and pointer input; the window manager keeps dirty-rectangle lists
+and blits a window across the screen (x snapped to even: the blitter has no
+shifter); the control manager turns a press on a frame into `WM_*` messages
+and holds the mouse until the button is up, as the ROM does; menus drop, are
+saved and restored through a VRAM form, and report `MN_SELECTED` — all
+compared call for call and pixel for pixel against the host model
+(`docs/phase8.md`). Next is `form_alert` and the desktop.
+
+Phase 7 also found that the Rapidus resets with all of bank `$00` on the
+1.79 MHz bus, and that gem4xe had run its data, stack and direct page there
+for six phases without a gate noticing (`docs/phase7.md`, Step 4).
+`src/sys/rapidus.c` derives the speed map from the linker's placement and
+the MEMAC window rather than restating either, and `make test-m6` reads the
+registers back.
 
 Code lives in **bank `$01`**, not bank `$00`. A `.xex` segment header is two
 16-bit addresses, so a DOS loader cannot place anything above `$FFFF`; the far
@@ -61,6 +78,12 @@ running on emulated hardware with all three boards fitted.
 
 Nothing here is asserted by eye. Two of the bugs found so far were invisible on
 screen and only a pixel diff caught them.
+
+Calypsi cc65816 5.18 has five code generation defects this tree has met, each
+reproduced in the vendor's own simulator and worked around at the source (or,
+for the divide flags, with a linker override). `tools/ccbug/README.md` lists
+them and the rules the sources follow; `make check-cc` reports when one is
+fixed upstream so its workaround can go.
 
 ## Building
 

@@ -8,6 +8,7 @@ decoder, and the guarantee that its table has not drifted from the reference.
 """
 import os
 import re
+import subprocess
 import sys
 import unittest
 
@@ -15,8 +16,12 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import vdiref  # noqa: E402
 
+sys.path.insert(0, os.path.join(ROOT, "tools", "ccbug"))
+import check as ccbug  # noqa: E402  (the simulator driver)
+
 POINTER_C = os.path.join(ROOT, "src", "vdi", "pointer.c")
 GRAY = (0, 1, 3, 2)          # the quadrature phase order, one full cycle
+CALYPSI = os.environ.get("CALYPSI", os.path.expanduser("~/dev/toolchains/calypsi-65816"))
 
 
 def c_table():
@@ -90,6 +95,75 @@ class TestTabletScaling(unittest.TestCase):
 
     def test_vertical_is_about_one_to_one(self):
         self.assertLessEqual(abs(239 / self.POT_MAX - 1.0), 0.1)
+
+
+class TestXem1(unittest.TestCase):
+    """mouSTer's XEM1 mode: the decode in tools/vdiref.py follows the
+    adapter's sample driver instruction by instruction; these pin what that
+    arithmetic means, and the last one runs the target's C over every pair
+    of readings in the compiler's simulator and compares."""
+
+    def test_readings_are_64_to_191(self):
+        self.assertEqual([p for p in range(256) if vdiref.xem1_valid(p)],
+                         list(range(64, 192)))
+        self.assertFalse(vdiref.xem1_valid(228))     # an empty port
+
+    def test_no_change_is_no_movement(self):
+        for p in range(64, 192):
+            self.assertEqual(vdiref.decode_xem1(p, p), (0, p))
+
+    def test_low_bit_is_noise_and_accumulates(self):
+        """One count halves to nothing and does not move the reference, so
+        a second count a frame later delivers the pixel."""
+        d, ref = vdiref.decode_xem1(128, 129)
+        self.assertEqual((d, ref), (0, 128))
+        self.assertEqual(vdiref.decode_xem1(ref, 130), (1, 130))
+        self.assertEqual(vdiref.decode_xem1(128, 127), (0, 128))
+        self.assertEqual(vdiref.decode_xem1(128, 126), (-1, 126))
+
+    def test_halves_toward_zero(self):
+        self.assertEqual(vdiref.decode_xem1(128, 131)[0], 1)
+        self.assertEqual(vdiref.decode_xem1(128, 125)[0], -1)
+        self.assertEqual(vdiref.decode_xem1(128, 191)[0], 31)
+        self.assertEqual(vdiref.decode_xem1(128, 64)[0], -32)
+
+    def test_counter_wraps_at_seven_bits(self):
+        """191 -> 64 is one step forward, not 127 back."""
+        self.assertEqual(vdiref.decode_xem1(190, 65), (1, 65))    # +3
+        self.assertEqual(vdiref.decode_xem1(65, 190), (-1, 190))  # -3
+        self.assertEqual(vdiref.decode_xem1(191, 64), (0, 191))   # +1: noise
+
+    def test_target_decode_matches_reference(self):
+        cc = os.path.join(CALYPSI, "bin", "cc65816")
+        if not os.path.exists(cc):
+            self.skipTest("Calypsi not installed")
+        ld, db = (os.path.join(CALYPSI, "bin", t) for t in ("ln65816", "db65816"))
+        scm = os.path.join(CALYPSI, "example", "minimal", "linker.scm")
+        out = os.path.join(ROOT, "build", "xem1")
+        os.makedirs(out, exist_ok=True)
+        objs = []
+        for src in (POINTER_C, os.path.join(ROOT, "tests", "host", "xem1_sim.c")):
+            obj = os.path.join(out, os.path.basename(src)[:-2] + ".o")
+            subprocess.run([cc, "-g", "--code-model=large", "--data-model=small",
+                            "-O2", "-I", os.path.join(ROOT, "src"), "-o", obj, src],
+                           check=True)
+            objs.append(obj)
+        elf = os.path.join(out, "xem1.elf")
+        subprocess.run([ld, "-g", scm] + objs + ["-o", elf, "clib-lc-sd.a",
+                        "--rtattr", "exit=simplified"], check=True)
+        names = ["r_hash", "r_valid", "r_wrap", "r_neg"]
+        got = ccbug.simulate(db, elf, names)
+
+        h = v = 0
+        for p in range(256):
+            v = (v * 3 + (1 if vdiref.xem1_valid(p) else 0)) & 0xFFFFFFFF
+        for ref in range(64, 192):
+            for now in range(64, 192):
+                h = (h * 31 + (vdiref.decode_xem1(ref, now)[0] & 0xFF)) & 0xFFFFFFFF
+        self.assertEqual(got["r_wrap"], 1)
+        self.assertEqual(got["r_neg"], -1)
+        self.assertEqual(got["r_valid"] & 0xFFFFFFFF, v)
+        self.assertEqual(got["r_hash"] & 0xFFFFFFFF, h)
 
 
 if __name__ == "__main__":

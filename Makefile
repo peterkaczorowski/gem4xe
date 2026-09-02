@@ -4,6 +4,10 @@
 #   make test-emu   Phase 0 hardware gate (VBXE / Rapidus / MEMAC / CPU switch)
 #   make test-m1    Milestone 1: Calypsi C running on the 65C816
 #   make test-m6    the far code really is in, and running from, bank $01
+#   make test-m7    evnt_* and form_do under host-driven input
+#   make test-m8    the window manager: rectangle lists, moves, WM_REDRAW
+#   make test-m9    menus: the bar, drop-downs, MN_SELECTED under host input
+#   make check-cc   the compiler bugs we work around, in the vendor's simulator
 #   make test       all of them
 #   make emu-stop   kill leftover emulators (never use pkill -f: it kills the shell)
 
@@ -19,13 +23,15 @@ LIB       = clib-lc-sd.a
 # -- globals and constants are addressed through the data bank register, so
 # they have to remain in bank $00 (see the linker script).
 CFLAGS    = --code-model=large --data-model=small -O2
-LDFLAGS   = --rtattr exit=simplified
+# --override lets src/sys/div16.o replace the library's _Div16/_Mod16, which
+# leave the wrong flags for the compiler's own `beq` (see that file).
+LDFLAGS   = --rtattr exit=simplified --override _Div16 --override _Mod16
 
 SRC_DOS  ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['dos']['sd_dos2'])" 2>/dev/null)
 
-HELLO_OBJS = build/crt_atari.o build/farload.o build/hello.o
-M2_OBJS    = build/crt_atari.o build/farload.o build/m2_vbxe.o build/vbxe.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/farmem.o build/font8x8.o build/vbxe.o
+HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
+M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/font8x8.o build/fillpat.o build/vbxe.o
 
 all: build/hello-boot.atr build/m2-boot.atr build/m3-boot.atr
 
@@ -56,7 +62,43 @@ build/objc.o: src/aes/objc.c src/aes/aes.h src/vdi/vdi.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
+build/graf.o: src/aes/graf.c src/aes/aes.h src/vdi/vdi.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/event.o: src/aes/event.c src/aes/aes.h src/vdi/vdi.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/grlib.o: src/aes/grlib.c src/aes/aes.h src/vdi/vdi.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/form.o: src/aes/form.c src/aes/aes.h src/vdi/vdi.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/wind.o: src/aes/wind.c src/aes/aes.h src/vdi/vdi.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/ctrl.o: src/aes/ctrl.c src/aes/aes.h src/vdi/vdi.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/menu.o: src/aes/menu.c src/aes/aes.h src/vdi/vdi.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/div16.o: src/sys/div16.s
+	@mkdir -p build
+	$(AS) -o $@ $<
+
 build/farmem.o: src/sys/farmem.c src/sys/farmem.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/rapidus.o: src/sys/rapidus.c src/sys/rapidus.h src/vbxe/vbxe.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -69,11 +111,20 @@ build/font8x8.o: src/vdi/font8x8.c
 src/vdi/font8x8.c:
 	python3 tools/fontconv.py $(EMUTOS)/bios/fnt_st_8x8.c $@
 
+# The standard fill patterns -- dithers, OEM patterns, hatches -- extracted
+# from EmuTOS's vdi_fill.c by patconv.py, likewise checked in.
+build/fillpat.o: src/vdi/fillpat.c src/vdi/vdi.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+src/vdi/fillpat.c:
+	python3 tools/patconv.py $(EMUTOS)/vdi/vdi_fill.c $@
+
 build/hello.elf: $(HELLO_OBJS) src/gem4xe.scm
-	$(LD) src/gem4xe.scm $(HELLO_OBJS) -o $@ $(LIB) $(LDFLAGS) -l --list-file build/hello.map
+	$(LD) src/gem4xe.scm $(HELLO_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/hello.map
 
 build/m2.elf: $(M2_OBJS) src/gem4xe.scm
-	$(LD) src/gem4xe.scm $(M2_OBJS) -o $@ $(LIB) $(LDFLAGS) -l --list-file build/m2.map
+	$(LD) src/gem4xe.scm $(M2_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/m2.map
 
 # _atari_entry, not __program_start: the stub must disable NMI/IRQ in emulation
 # mode before the library startup's `xce`.  See src/crt_atari.s.
@@ -81,7 +132,7 @@ build/hello.xex: build/hello.elf
 	python3 tools/mkxex.py $< $@ --entry _atari_entry
 
 build/m3.elf: $(M3_OBJS) src/gem4xe.scm
-	$(LD) src/gem4xe.scm $(M3_OBJS) -o $@ $(LIB) $(LDFLAGS) -l --list-file build/m3.map
+	$(LD) src/gem4xe.scm $(M3_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/m3.map
 
 build/m2.xex: build/m2.elf
 	python3 tools/mkxex.py $< $@ --entry _atari_entry
@@ -106,7 +157,13 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM
 
-test: test-host test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9
+
+# The cc65816 code generation bugs gem4xe works around, run in the vendor's
+# own simulator: fails only if a workaround shape has stopped compiling
+# right; a bug that has gone away is reported so its workaround can go.
+check-cc:
+	python3 tools/ccbug/check.py --calypsi $(CALYPSI)
 
 test-host:
 	python3 -m unittest discover -s tests/host -t .
@@ -132,6 +189,24 @@ test-m5: build/m3-boot.atr
 test-m6: build/m3-boot.atr
 	python3 tests/emu/m6_farcode.py
 
+# The event and form layer driven from the host: keys through POKEY, the
+# pointer through ptr_state, frames counted -- and the reference walks the
+# same input plan.
+test-m7: build/m3-boot.atr
+	python3 tests/emu/m7_form.py
+
+# The window manager: wind_* against the reference's model of the rectangle
+# lists, with the redraw messages the application would get and the pixels
+# of every uncover, move and slider change.
+test-m8: build/m3-boot.atr
+	python3 tests/emu/m8_wind.py
+
+# The menu library: menu_bar and the calls that change a menu tree, then
+# hovers and presses through the bar while the application waits, with
+# screenshots taken inside the wait for the drop-downs themselves.
+test-m9: build/m3-boot.atr
+	python3 tests/emu/m9_menu.py
+
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.
 demo: build/m3-boot.atr
@@ -150,4 +225,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all test test-host test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 demo emu-stop clean
+.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 demo emu-stop clean

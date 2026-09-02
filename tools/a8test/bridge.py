@@ -134,7 +134,20 @@ class Bridge:
         return self.ok(f"POKE ${addr:04X} ${value & 0xFF:02X}")
 
     def key(self, name, shift=False, ctrl=False):
-        return self.ok(f"KEY {name}" + (" shift" if shift else "") + (" ctrl" if ctrl else ""))
+        """Press a key for one frame, with modifiers in the OS's sense.
+
+        AltirraSDL's KEY verb has its modifier bits swapped: its `shift` word
+        sets KBCODE bit 7 and `ctrl` sets bit 6, but the XL OS keyboard table
+        (KEYDEF, $79) is laid out plain / shift=bit 6 / control=bit 7 --
+        measured by injecting KEY A: `shift` yields ctrl-A ($01) and `ctrl`
+        yields 'A'.  So the words are crossed over here, and a caller's
+        `shift=True` means what SHIFT on the keyboard means.
+
+        The key reaches the program only if POKEY's keyboard IRQ is enabled
+        (IRQEN bit 6) and acknowledged after every key; otherwise the bridge
+        queues it forever.  The key is held for a single frame.
+        """
+        return self.ok(f"KEY {name}" + (" ctrl" if shift else "") + (" shift" if ctrl else ""))
 
     def screenshot(self, path):
         path = os.path.abspath(path)

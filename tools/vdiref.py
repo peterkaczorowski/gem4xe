@@ -27,8 +27,11 @@ V_GTEXT = 8
 VRT_CPYFM = 121
 VSC_FORM, V_SHOW_C, V_HIDE_C, VQ_MOUSE = 111, 122, 123, 124
 VSIN_MODE, VQIN_MODE, VEX_TIMV, VSL_UDSTY = 33, 115, 118, 113
+VEX_BUTV, VEX_MOTV = 125, 126
 VST_HEIGHT, VQT_ATTRIBUTES, V_ESCAPE = 12, 38, 5
 V_LOCATOR = 28
+V_STRING, VQ_KEY_S = 31, 128
+VSF_UDPAT = 112
 MD_REPLACE, MD_TRANS, MD_XOR, MD_ERASE = 1, 2, 3, 4
 
 LINE_STYLES = [0xFFFF, 0xFFFF, 0xFFF0, 0xE0E0, 0xFF18, 0xFF00, 0xF191, 0xFFFF]
@@ -52,6 +55,34 @@ def _load_font():
 
 FONT = _load_font()
 
+# The fill patterns, likewise read from the generated file the target links
+# (tools/patconv.py from EmuTOS's vdi_fill.c).  tests/host/test_fillpat.py
+# holds that file to the donor.  Interior styles, as vsf_interior takes them:
+FIS_HOLLOW, FIS_SOLID, FIS_PATTERN, FIS_HATCH, FIS_USER = 0, 1, 2, 3, 4
+MAX_FILL_PATTERN, MAX_FILL_HATCH = 24, 12
+# The work_in the AES opens the screen with: every attribute 1 -- line style
+# 1, colours 1 (black), SOLID fill, index 1 -- and raster coordinates.  A
+# workstation opened without a work_in gets this one.
+WORK_IN = (1,) * 10 + (2,)
+_PAT_C = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                      "..", "src", "vdi", "fillpat.c")
+
+
+def _load_patterns():
+    text = open(_PAT_C).read()
+    out = {}
+    for m in re.finditer(r"const UWORD (\w+)\[(\d+)\]\s*=\s*\{(.*?)\};", text, re.S):
+        words = [int(w, 16) for w in re.findall(r"0x([0-9A-Fa-f]{4})", m.group(3))]
+        if len(words) != int(m.group(2)):
+            raise RuntimeError(f"{_PAT_C}: {m.group(1)} has {len(words)} words")
+        out[m.group(1)] = words
+    return out
+
+
+_PAT = _load_patterns()
+FILL_DITHER, FILL_OEM = _PAT["fill_dither"], _PAT["fill_oem"]
+FILL_HATCH0, FILL_HATCH1 = _PAT["fill_hatch0"], _PAT["fill_hatch1"]
+
 # GEM's standard palette order: pen 0 is WHITE, pen 1 is BLACK.
 GEM_PAL = bytes((
     0xFF, 0xFF, 0xFF,  0x00, 0x00, 0x00,  0xFF, 0x00, 0x00,  0x00, 0xFF, 0x00,
@@ -59,11 +90,53 @@ GEM_PAL = bytes((
     0xBB, 0xBB, 0xBB,  0x77, 0x77, 0x77,  0xBB, 0x00, 0x00,  0x00, 0xBB, 0x00,
     0x00, 0x00, 0xBB,  0x00, 0xBB, 0xBB,  0xBB, 0xBB, 0x00,  0xBB, 0x00, 0xBB))
 
+# VDI pen -> hardware pen (map_col[] in src/vdi/vdi.c).  XOR mode complements
+# pixel bits, and the AES needs black <-> white to survive that, so black is
+# stored as 15 and white as 0; the palette is loaded in hardware order.
+MAP_COL = (0, 15, 1, 2, 4, 6, 3, 5, 7, 8, 9, 10, 12, 14, 11, 13)
+HW_PAL = bytearray(48)
+for _pen in range(16):
+    HW_PAL[MAP_COL[_pen] * 3:MAP_COL[_pen] * 3 + 3] = GEM_PAL[_pen * 3:_pen * 3 + 3]
+HW_PAL = bytes(HW_PAL)
+
+
+
+# The target's result record (src/m3_vdi.c): contrl[2], contrl[4], then
+# RESULT_INTOUT words of intout and three of ptsout.  Fifteen intout words
+# because evnt_multi returns seven values and an eight-word message.
+RESULT_INTOUT = 15
+RESULT_WORDS = 2 + RESULT_INTOUT + 3
+
+
+def record(c2, c4, intout, ptsout):
+    """The target's result record, (contrl[2], contrl[4], intout[0..14],
+    ptsout[0..2]): only the declared words are non-zero."""
+    io = tuple((intout[k] if k < len(intout) else 0) if c4 > k else 0
+               for k in range(RESULT_INTOUT))
+    po = (ptsout[0] if c2 > 0 else 0,
+          ptsout[1] if c2 > 0 else 0,
+          ptsout[2] if c2 > 1 else 0)
+    return (c2, c4) + io + po
+
+
+def decode(blob, n):
+    """The n result records in a dump of the target's results area, as the
+    tuples record() builds."""
+    size = RESULT_WORDS * 2
+    return [tuple(int.from_bytes(bytes(blob[i * size + k * 2:i * size + k * 2 + 2]),
+                                 "little", signed=True)
+                  for k in range(RESULT_WORDS))
+            for i in range(n)]
+
 
 class VDI:
     def __init__(self):
-        self.s = vbxeref.Surface(0x20000)
+        self.s = vbxeref.Surface()          # all 512 KB: forms live above the screen
         self.base = 0
+        # The input vectors and the button edge detector are the driver's,
+        # not the workstation's: v_opnwk does not reset them (vdi.c).
+        self.vec_motv = self.vec_butv = self.vec_timv = None
+        self.last_buttons = 0
         self.reset()
         self.s.fill(self.base, STRIDE, STRIDE, SCR_H, 0x00)   # pen 0 = white
 
@@ -71,9 +144,9 @@ class VDI:
         self.clip = 0
         self.xmn, self.ymn, self.xmx, self.ymx = 0, 0, SCR_W - 1, SCR_H - 1
         self.wrt_mode = 0
-        self.line_color, self.line_width, self.line_index = 1, 1, 1
-        self.fill_color, self.fill_index, self.fill_style = 1, 1, 1
-        self.text_color = 1
+        self.line_width = 1
+        self.ud_patrn = [0] * 16
+        self._init_wk(WORK_IN)
         # mouse cursor
         self.cur_xhot = self.cur_yhot = 0
         self.cur_bg, self.cur_fg = 0, 1
@@ -84,6 +157,10 @@ class VDI:
         self.sv = None             # (bx, y, nb, nr, bytes)
         self.ptr_x, self.ptr_y = 0, 0
         self.buttons = 0
+        # The keyboard: codes waiting to be read one per v_string, and the
+        # modifier bits vq_key_s reports for the key held right now.
+        self.keys = []
+        self.key_mods = 0
         self.in_mode = [0, 2, 2, 2, 2]
         self.line_styles = list(LINE_STYLES)
         self.contrl2 = self.contrl4 = 0
@@ -99,11 +176,12 @@ class VDI:
         x2 = min(x2, SCR_W - 1); y2 = min(y2, SCR_H - 1)
         return (x1, y1, x2, y2) if (x1 <= x2 and y1 <= y2) else None
 
-    def _fill_rect_dev(self, x1, y1, x2, y2, color):
-        """Mirrors fill_rect_dev() in src/vdi/vdi.c exactly, edges included."""
+    def _fill_rect_dev(self, x1, y1, x2, y2, hwpen):
+        """Mirrors fill_rect_dev() in src/vdi/vdi.c exactly, edges included.
+        Takes a HARDWARE pen, like the C: callers map through MAP_COL."""
         base = self.base + y1 * STRIDE
         rows = y2 - y1 + 1
-        c = ((color & 0x0F) << 4) | (color & 0x0F)
+        c = ((hwpen & 0x0F) << 4) | (hwpen & 0x0F)
         bl, br = x1 >> 1, x2 >> 1
         if bl == br:
             if (x1 & 1) == 0 and (x2 & 1) == 1:
@@ -126,18 +204,130 @@ class VDI:
         if br >= bl:
             self.s.fill(base + bl, STRIDE, br - bl + 1, rows, c)
 
-    def _plot(self, x, y, color):
+    def _xor_rect_dev(self, x1, y1, x2, y2):
+        """Mirrors xor_rect_dev(): complement every pixel, edges by nibble."""
+        base = self.base + y1 * STRIDE
+        rows = y2 - y1 + 1
+        bl, br = x1 >> 1, x2 >> 1
+        if bl == br:
+            m = 0x0F if (x1 & 1) else (0xF0 if (x2 & 1) == 0 else 0xFF)
+            self.s.rmw(base + bl, STRIDE, 1, rows, m, 5)
+            return
+        if x1 & 1:
+            self.s.rmw(base + bl, STRIDE, 1, rows, 0x0F, 5)
+            bl += 1
+        if (x2 & 1) == 0:
+            self.s.rmw(base + br, STRIDE, 1, rows, 0xF0, 5)
+            br -= 1
+        if br >= bl:
+            self.s.rmw(base + bl, STRIDE, br - bl + 1, rows, 0xFF, 5)
+
+    def _visible(self, x, y):
         if self.clip and not (self.xmn <= x <= self.xmx and
                               self.ymn <= y <= self.ymx):
-            return
-        if not (0 <= x < SCR_W and 0 <= y < SCR_H):
+            return False
+        return 0 <= x < SCR_W and 0 <= y < SCR_H
+
+    def _plot(self, x, y, hwpen):
+        """Write one HARDWARE pen; callers map through MAP_COL."""
+        if not self._visible(x, y):
             return
         a = self.base + y * STRIDE + (x >> 1)
         b = self.s.mem[a]
         if x & 1:
-            self.s.mem[a] = (b & 0xF0) | (color & 0x0F)
+            self.s.mem[a] = (b & 0xF0) | (hwpen & 0x0F)
         else:
-            self.s.mem[a] = (b & 0x0F) | ((color & 0x0F) << 4)
+            self.s.mem[a] = (b & 0x0F) | ((hwpen & 0x0F) << 4)
+
+    def _plot_xor(self, x, y):
+        if not self._visible(x, y):
+            return
+        a = self.base + y * STRIDE + (x >> 1)
+        self.s.mem[a] ^= 0x0F if (x & 1) else 0xF0
+
+    def _init_wk(self, w):
+        """init_wk: the attributes a workstation opens with, from work_in,
+        validated as the setters validate them.  Donor names: fill_style is
+        the INTERIOR (hollow/solid/pattern/hatch/user), fill_index is
+        vsf_style's index minus one -- the minus one the ROM's init forgets,
+        which gem4xe does not reproduce."""
+        self.line_index = w[1] if 1 <= w[1] <= 7 else 1
+        self.line_color = w[2] if 0 <= w[2] <= 15 else 1
+        self.text_color = w[6] if 0 <= w[6] <= 15 else 1
+        self.fill_style = w[7] if FIS_HOLLOW <= w[7] <= FIS_USER else FIS_HOLLOW
+        top = MAX_FILL_PATTERN if self.fill_style == FIS_PATTERN else MAX_FILL_HATCH
+        self.fill_index = (w[8] if 1 <= w[8] <= top else 1) - 1
+        self.fill_color = w[9] if 0 <= w[9] <= 15 else 1
+
+    def _paint_pixel(self, x, y, pen, is_set):
+        """One pixel of a primitive in the current writing mode, given
+        whether the pattern bit is set there: replace = pen / pen 0,
+        transparent = pen where set, XOR = complement where set, erase =
+        pen where clear."""
+        m = self.wrt_mode + 1
+        if m == MD_TRANS:
+            if is_set:
+                self._plot(x, y, MAP_COL[pen & 15])
+        elif m == MD_XOR:
+            if is_set:
+                self._plot_xor(x, y)
+        elif m == MD_ERASE:
+            if not is_set:
+                self._plot(x, y, MAP_COL[pen & 15])
+        else:
+            self._plot(x, y, MAP_COL[pen & 15] if is_set else MAP_COL[0])
+
+    def _paint_rect(self, x1, y1, x2, y2, pen):
+        """A solid rectangle in the current writing mode (already clipped)."""
+        m = self.wrt_mode + 1
+        if m == MD_XOR:
+            self._xor_rect_dev(x1, y1, x2, y2)
+        elif m == MD_ERASE:
+            return
+        else:
+            self._fill_rect_dev(x1, y1, x2, y2, MAP_COL[pen & 15])
+
+    def _fill_pattern(self):
+        """st_fl_ptr: what the interior and index resolve to -- the rows of
+        the current fill pattern and the mask that picks a row from y.  A
+        hollow fill is a pattern of no bits, a solid one of all bits; the
+        writing mode then says what a clear bit does (replace writes pen 0
+        there, which is why a hollow box in replace mode is WHITE, not
+        untouched)."""
+        fs, fi = self.fill_style, self.fill_index
+        if fs == FIS_SOLID:
+            return [0xFFFF], 0
+        if fs == FIS_PATTERN:
+            if fi < 8:
+                return FILL_DITHER[fi * 4:fi * 4 + 4], 3
+            return FILL_OEM[(fi - 8) * 8:(fi - 8) * 8 + 8], 7
+        if fs == FIS_HATCH:
+            if fi < 6:
+                return FILL_HATCH0[fi * 8:fi * 8 + 8], 7
+            return FILL_HATCH1[(fi - 6) * 16:(fi - 6) * 16 + 16], 15
+        if fs == FIS_USER:
+            return list(self.ud_patrn), 15
+        return [0x0000], 0
+
+    def _patt_rect(self, x1, y1, x2, y2, pen):
+        """A rectangle in the current fill pattern and writing mode (already
+        clipped).  The pattern is anchored to the SCREEN, not the rectangle:
+        row y uses pattern row (y & mask), bit 15 is pixel x = 0 mod 16."""
+        rows, msk = self._fill_pattern()
+        if all(r == 0xFFFF for r in rows):
+            self._paint_rect(x1, y1, x2, y2, pen)
+            return
+        m = self.wrt_mode + 1
+        if all(r == 0 for r in rows):
+            if m == MD_REPLACE:
+                self._fill_rect_dev(x1, y1, x2, y2, MAP_COL[0])
+            elif m == MD_ERASE:
+                self._fill_rect_dev(x1, y1, x2, y2, MAP_COL[pen & 15])
+            return
+        for y in range(y1, y2 + 1):
+            r = rows[y & msk]
+            for x in range(x1, x2 + 1):
+                self._paint_pixel(x, y, pen, (r >> (15 - (x & 15))) & 1)
 
     def _line(self, x1, y1, x2, y2):
         mask = self.line_styles[self.line_index if 1 <= self.line_index <= 7 else 1]
@@ -145,21 +335,21 @@ class VDI:
             a, b = sorted((x1, x2))
             r = self._clip_rect(a, y1, b, y2)
             if r:
-                self._fill_rect_dev(*r, self.line_color)
+                self._paint_rect(*r, self.line_color)
             return
         if x1 == x2 and mask == 0xFFFF:
             a, b = sorted((y1, y2))
             r = self._clip_rect(x1, a, x2, b)
             if r:
-                self._fill_rect_dev(*r, self.line_color)
+                self._paint_rect(*r, self.line_color)
             return
         dx, dy = abs(x2 - x1), abs(y2 - y1)
         sx = 1 if x1 < x2 else -1
         sy = 1 if y1 < y2 else -1
         err, bit = dx - dy, 0
         while True:
-            if mask & (1 << (15 - (bit & 15))):
-                self._plot(x1, y1, self.line_color)
+            self._paint_pixel(x1, y1, self.line_color,
+                              mask & (1 << (15 - (bit & 15))))
             bit += 1
             if x1 == x2 and y1 == y2:
                 break
@@ -169,12 +359,32 @@ class VDI:
             if e2 < dx:
                 err += dx; y1 += sy
 
-    def _cpyfm(self, pts):
+    def _rform(self, f):
+        """(base, stride, w, h, is_screen) of a raster form: None is the
+        screen, otherwise a VramForm (vdi.c rform_of)."""
+        if f is None:
+            return self.base, STRIDE, SCR_W, SCR_H, True
+        return f.addr, f.stride, f.w, f.h, False
+
+    @staticmethod
+    def _clip_to(x1, y1, x2, y2, w, h):
+        x1 = max(x1, 0); y1 = max(y1, 0)
+        x2 = min(x2, w - 1); y2 = min(y2, h - 1)
+        return (x1, y1, x2, y2) if (x1 <= x2 and y1 <= y2) else None
+
+    def _cpyfm(self, pts, src=None, dst=None):
         """Mirrors vdi_vro_cpyfm(), including the alignment fast/slow split.
 
         The VBXE blitter has no shifter, so 4bpp pixels can only be moved
         between positions of the same parity.  Both paths must produce the
         same pixels -- that is what the conformance cases check.
+
+        src and dst are the forms: None for the screen, a VramForm for the
+        AES's save buffer.  The destination is clipped to the workstation's
+        rectangle and the screen when it IS the screen and to its own bounds
+        otherwise; the source is clipped to its form's bounds, each clip
+        dropping the same span from the other end -- the driver's rule, not
+        the donor's, which never clips a source.
         """
         sx1, sx2 = sorted((pts[0], pts[2]))
         sy1, sy2 = sorted((pts[1], pts[3]))
@@ -183,13 +393,31 @@ class VDI:
         w, h = sx2 - sx1 + 1, sy2 - sy1 + 1
         if w <= 0 or h <= 0:
             return
-        if dx1 < 0 or dy1 < 0 or dx1 + w > SCR_W or dy1 + h > SCR_H:
+        sb, ss, sw, sh, _ = self._rform(src)
+        db, ds, dw, dh, dscreen = self._rform(dst)
+        if dscreen:
+            c = self._clip_rect(dx1, dy1, dx1 + w - 1, dy1 + h - 1)
+        else:
+            c = self._clip_to(dx1, dy1, dx1 + w - 1, dy1 + h - 1, dw, dh)
+        if c is None:
             return
-        if sx1 < 0 or sy1 < 0 or sx2 >= SCR_W or sy2 >= SCR_H:
+        cx1, cy1, cx2, cy2 = c
+        sx1 += cx1 - dx1
+        sy1 += cy1 - dy1
+        dx1, dy1 = cx1, cy1
+        w, h = cx2 - cx1 + 1, cy2 - cy1 + 1
+        sx2, sy2 = sx1 + w - 1, sy1 + h - 1
+        c = self._clip_to(sx1, sy1, sx2, sy2, sw, sh)
+        if c is None:
             return
+        cx1, cy1, cx2, cy2 = c
+        dx1 += cx1 - sx1
+        dy1 += cy1 - sy1
+        sx1, sy1 = cx1, cy1
+        w, h = cx2 - cx1 + 1, cy2 - cy1 + 1
         if ((sx1 ^ dx1) & 1) == 0 and (sx1 & 1) == 0 and (w & 1) == 0:
-            self.s.copy(self.base + sy1 * STRIDE + (sx1 >> 1), STRIDE,
-                        self.base + dy1 * STRIDE + (dx1 >> 1), STRIDE,
+            self.s.move(sb + sy1 * ss + (sx1 >> 1), ss,
+                        db + dy1 * ds + (dx1 >> 1), ds,
                         w >> 1, h)
             return
         for y in range(h):
@@ -198,8 +426,14 @@ class VDI:
             for i in range(w):
                 sx = (sx1 + w - 1 - i) if dx1 > sx1 else (sx1 + i)
                 dx = (dx1 + w - 1 - i) if dx1 > sx1 else (dx1 + i)
-                v = self.s.mem[self.base + sy * STRIDE + (sx >> 1)]
-                self._plot(dx, dy, (v & 0x0F) if (sx & 1) else (v >> 4))
+                v = self.s.mem[sb + sy * ss + (sx >> 1)]
+                pen = (v & 0x0F) if (sx & 1) else (v >> 4)
+                a = db + dy * ds + (dx >> 1)
+                b = self.s.mem[a]
+                if dx & 1:
+                    self.s.mem[a] = (b & 0xF0) | pen
+                else:
+                    self.s.mem[a] = (b & 0x0F) | (pen << 4)
 
     def _vrt_cpyfm(self, pts, ints, form):
         """Mirrors vdi_vrt_cpyfm(): a 1-plane source expanded into colours.
@@ -208,7 +442,8 @@ class VDI:
         target's scratch area, MSB-first, rows fd_wdwidth WORDS apart.
         """
         bits, wdwidth = form
-        mode, fg, bg = ints[0], ints[1], ints[2]
+        mode = ints[0]
+        fg, bg = MAP_COL[ints[1] & 15], MAP_COL[ints[2] & 15]
         sx1, sx2 = sorted((pts[0], pts[2]))
         sy1, sy2 = sorted((pts[1], pts[3]))
         dx1, dy1 = pts[4], pts[5]
@@ -227,9 +462,7 @@ class VDI:
                         self._plot(dx, dy, fg)
                 elif mode == MD_XOR:
                     if on:
-                        v = self.s.mem[self.base + dy * STRIDE + (dx >> 1)]
-                        old = (v & 0x0F) if (dx & 1) else (v >> 4)
-                        self._plot(dx, dy, old ^ 0x0F)
+                        self._plot_xor(dx, dy)
                 elif mode == MD_ERASE:
                     if not on:
                         self._plot(dx, dy, bg)
@@ -238,27 +471,46 @@ class VDI:
 
     def _gtext(self, pts, ints):
         """Mirrors vdi_v_gtext().  Left/baseline alignment: y is the BASELINE
-        and the cell top is y - FONT_TOP.  Replace mode paints pen 0 behind
-        the glyph; transparent mode does not."""
+        and the cell top is y - FONT_TOP.  Each glyph pixel goes through the
+        writing-mode rules of _paint_pixel (replace paints pen 0 behind the
+        glyph, transparent does not, XOR complements, erase paints the
+        paper)."""
         x, y = pts[0], pts[1]
         cy = y - FONT_TOP
-        opaque = (self.wrt_mode == 0)
         for i, code in enumerate(ints):
             cx = x + i * FONT_W
             for row in range(FONT_H):
                 b = FONT[row * FONT_STRIDE + (code & 0xFF)]
                 for col in range(FONT_W):
-                    if b & (0x80 >> col):
-                        self._plot(cx + col, cy + row, self.text_color)
-                    elif opaque:
-                        self._plot(cx + col, cy + row, 0)
+                    self._paint_pixel(cx + col, cy + row, self.text_color,
+                                      b & (0x80 >> col))
 
     def _workout(self):
-        """The first three intout and ptsout words of v_opnwk's work_out, which
-        is all the per-call record carries.  Must match fill_workout() in
-        src/vdi/vdi.c."""
-        self.intout = [SCR_W - 1, SCR_H - 1, 0]
-        self.ptsout = [8, 8, 8]
+        """v_opnwk's work_out, in full: the per-call record carries only the
+        first three words of each, but the AES reads further in (pixel size
+        at intout[3..4], the character cell at ptsout[0..3]) and derives its
+        layout from them.  Must match fill_workout() in src/vdi/vdi.c."""
+        self.intout = [0] * 45
+        self.ptsout = [0] * 12
+        self.intout[0:15] = [SCR_W - 1, SCR_H - 1, 0,
+                             372, 372,          # pixel width/height, microns
+                             1, 7, 1, 6, 8, 1,  # char heights, line types,
+                                                # widths, marker types/sizes,
+                                                # faces
+                             24, 12, 16, 0]     # patterns, hatches, colours,
+                                                # GDPs
+        self.intout[35:43] = [1, 0, 1, 0, 16, 1, 1, 1]
+        self.ptsout[0:4] = [FONT_W, FONT_H, FONT_W, FONT_H]
+        self.ptsout[4:8] = [1, 0, 1, 0]         # line width range
+        self.contrl2, self.contrl4 = 6, 45
+
+    def _extnd1(self):
+        """vq_extnd(1): the second capability block.  intout[4] = planes is
+        the one the AES reads (gsx_start), intout[1] = 16 the one the
+        harness records."""
+        self.intout = [0] * 45
+        self.ptsout = [0] * 12
+        self.intout[0:7] = [0, 16, 0, 0, 4, 1, 1]
         self.contrl2, self.contrl4 = 6, 45
 
     # -- cursor ----------------------------------------------------------
@@ -292,9 +544,9 @@ class VDI:
             for col in range(16):
                 bit = 0x8000 >> col
                 if m & bit:
-                    self._plot(cx + col, cy + row, self.cur_bg)
+                    self._plot(cx + col, cy + row, MAP_COL[self.cur_bg & 15])
                 if d & bit:
-                    self._plot(cx + col, cy + row, self.cur_fg)
+                    self._plot(cx + col, cy + row, MAP_COL[self.cur_fg & 15])
 
     def _cursor_show_now(self):
         cx, cy = self.ptr_x - self.cur_xhot, self.ptr_y - self.cur_yhot
@@ -322,14 +574,12 @@ class VDI:
             keep = (self.ptr_x, self.ptr_y)
             self.reset()
             self.ptr_x, self.ptr_y = keep
+            if len(ints) >= 11:
+                self._init_wk(ints)
             self._workout()
         elif op == VQ_EXTND:
             if ints and ints[0]:
-                # second capability block; intout[4] = planes is the one the
-                # AES actually reads (gsx_nplanes)
-                self.intout = [0, 16, 0]
-                self.ptsout = [0, 0, 0]
-                self.contrl2, self.contrl4 = 6, 45
+                self._extnd1()
             else:
                 self._workout()
         elif op == VS_CLIP:
@@ -345,10 +595,13 @@ class VDI:
             x1, x2 = sorted((pts[0], pts[2]))
             y1, y2 = sorted((pts[1], pts[3]))
             r = self._clip_rect(x1, y1, x2, y2)
-            if r and self.fill_index != 0:
-                self._fill_rect_dev(*r, self.fill_color)
+            if r:
+                self._patt_rect(*r, self.fill_color)
         elif op == VRO_CPYFM:
-            self._cpyfm(pts)
+            if form:
+                self._cpyfm(pts, form[0], form[1])
+            else:
+                self._cpyfm(pts)
         elif op == V_LOCATOR:
             if pts:
                 self.ptr_x = max(0, min(pts[0], SCR_W - 1))
@@ -371,11 +624,16 @@ class VDI:
             self.intout[0] = self.in_mode[dev] if 1 <= dev <= 4 else 2
             self.contrl4 = 1
         elif op == VST_HEIGHT:
-            self.ptsout = [FONT_W, FONT_H, FONT_W]     # 4th word not recorded
+            # char w, char h, cell w, cell h -- and "char height" is the
+            # font's TOP (baseline to top of cell), as the ST ROM and EmuTOS
+            # both return it; the AES adds it to a cell top for v_gtext.
+            self.ptsout = [FONT_W, FONT_TOP, FONT_W, FONT_H]
             self.contrl2 = 2
         elif op == VQT_ATTRIBUTES:
-            self.intout = [1, self.text_color, 0]
-            self.ptsout = [FONT_W, FONT_H, FONT_W]
+            # font, colour, rotation, h/v alignment (never set here), and
+            # the writing mode as vswr_mode numbers it (1 = replace)
+            self.intout = [1, self.text_color, 0, 0, 0, self.wrt_mode + 1]
+            self.ptsout = [FONT_W, FONT_TOP, FONT_W, FONT_H]
             self.contrl2, self.contrl4 = 2, 6
         elif op == VEX_TIMV:
             self.intout[0] = 20          # 50 Hz PAL frame, in ms
@@ -417,13 +675,22 @@ class VDI:
             self.intout[0] = self.line_color
             self.contrl4 = 1
         elif op == VSF_INTERIOR:
-            self.fill_index = ints[0] if 0 <= ints[0] <= 4 else 0
-            self.intout[0] = self.fill_index
-            self.contrl4 = 1
-        elif op == VSF_STYLE:
-            self.fill_style = max(1, ints[0])
+            self.fill_style = ints[0] if 0 <= ints[0] <= 4 else FIS_HOLLOW
             self.intout[0] = self.fill_style
             self.contrl4 = 1
+        elif op == VSF_STYLE:
+            # The range depends on the interior in force: 1..24 for patterns,
+            # 1..12 for hatches; anything else becomes 1.  Stored minus one.
+            top = MAX_FILL_PATTERN if self.fill_style == FIS_PATTERN else MAX_FILL_HATCH
+            fi = ints[0] if 1 <= ints[0] <= top else 1
+            self.fill_index = fi - 1
+            self.intout[0] = fi
+            self.contrl4 = 1
+        elif op == VSF_UDPAT:
+            # Only a 16-word (single-plane) pattern is accepted; anything
+            # else leaves the old one alone.  Nothing is returned.
+            if len(ints) == 16:
+                self.ud_patrn = [w & 0xFFFF for w in ints]
         elif op == VSF_COLOR:
             self.fill_color = ints[0] if 0 <= ints[0] <= 15 else 1
             self.intout[0] = self.fill_color
@@ -436,7 +703,35 @@ class VDI:
             self.wrt_mode = (ints[0] - 1) if 1 <= ints[0] <= 4 else 0
             self.intout[0] = self.wrt_mode + 1
             self.contrl4 = 1
+        elif op == V_STRING:
+            # one key per call; contrl[4] = 0 says there was none
+            if self.keys:
+                self.intout[0] = self.keys.pop(0)
+                self.contrl4 = 1
+        elif op == VQ_KEY_S:
+            self.intout[0] = self.key_mods
+            self.contrl4 = 1
         # everything else is a documented no-op on this driver
+
+    def input_poll(self, tick=False):
+        """vdi_input_poll(): motion every pass, the button vector on a
+        change, the timer vector once per frame.  The key poll has no
+        counterpart here -- a plan step puts its key straight in `keys` --
+        and the cursor never moves because it is never shown.  `tick` says
+        this pass is the first of a frame, where VCOUNT's wrap lands."""
+        if self.vec_motv:
+            self.vec_motv()
+        if self.buttons != self.last_buttons:
+            self.last_buttons = self.buttons
+            if self.vec_butv:
+                self.vec_butv()
+        if tick and self.vec_timv:
+            self.vec_timv()
+
+    def result(self):
+        """The record src/m3_vdi.c writes for the last call, with
+        the same masking as the target: only the declared words count."""
+        return record(self.contrl2, self.contrl4, self.intout, self.ptsout)
 
     def run(self, script):
         self.results = []
@@ -445,35 +740,74 @@ class VDI:
                       rec[1] if len(rec) > 1 else (),
                       rec[2] if len(rec) > 2 else (),
                       rec[3] if len(rec) > 3 else None)
-            # Same masking as the target: only the declared words count.
-            i_, p_, n, m = self.intout, self.ptsout, self.contrl4, self.contrl2
-            self.results.append((self.contrl2, self.contrl4,
-                                 i_[0] if n > 0 else 0,
-                                 i_[1] if n > 1 else 0,
-                                 i_[2] if n > 2 else 0,
-                                 p_[0] if m > 0 else 0,
-                                 p_[1] if m > 0 else 0,
-                                 p_[2] if m > 1 else 0))
+            self.results.append(self.result())
 
     def to_rgb(self):
-        return self.s.to_rgb(self.base, GEM_PAL)
+        return self.s.to_rgb(self.base, HW_PAL)
 
 
-def encode(script, mfdb_addr=0):
+_VBXE_H = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "..", "src", "vbxe", "vbxe.h")
+
+
+def vram_symbol(name):
+    """A VRAM address from vbxe.h's map, read rather than restated, so the
+    reference's picture of VRAM cannot drift from the driver's."""
+    m = re.search(r"#define\s+%s\s+0x([0-9A-Fa-f]+)UL" % name, open(_VBXE_H).read())
+    if not m:
+        raise KeyError(name)
+    return int(m.group(1), 16)
+
+
+class VramForm:
+    """An MFDB whose fd_addr is a VRAM address -- the AES's save buffer
+    (vbxe.h VR_SAVE), which bb_save and bb_restore copy the screen to and
+    from.  mfdb_addr is where the harness staged the 20-byte MFDB on the
+    target, for encode(); the reference reads the form's fields directly."""
+
+    def __init__(self, addr, w, h, wdwidth, planes=4, mfdb_addr=0):
+        self.addr, self.w, self.h = addr, w, h
+        self.wdwidth, self.planes, self.mfdb_addr = wdwidth, planes, mfdb_addr
+
+    @classmethod
+    def save_buffer(cls, mfdb_addr=0):
+        """The AES's: a whole screen at VR_SAVE, laid out like the screen."""
+        return cls(vram_symbol("VR_SAVE"), SCR_W, SCR_H, SCR_W // 16, 4,
+                   mfdb_addr)
+
+    @property
+    def stride(self):
+        return self.wdwidth * 2 * self.planes
+
+    def pack(self):
+        return pack_mfdb(self.addr, self.w, self.h, self.wdwidth, self.planes)
+
+
+def encode(script, mfdb_addr=0, screen_mfdb=0):
     """Serialise a script into the WORD stream src/m3_vdi.c expects.
 
     A record carrying a `form` gets mfdb_addr planted in contrl[7..8], which is
-    where the harness has staged the MFDB on the target.
+    where the harness has staged the MFDB on the target.  A vro_cpyfm record's
+    form is the (source, destination) pair of VramForm-or-None, planted in
+    contrl[7..8] and contrl[9..10]: None becomes screen_mfdb, the address of
+    a staged MFDB with fd_addr 0 (or 0, which the driver takes as the screen).
     """
+    def addr_of(f):
+        return screen_mfdb if f is None else f.mfdb_addr
+
     out = []
     for rec in script:
         op = rec[0]
         pts = list(rec[1]) if len(rec) > 1 else []
         ints = list(rec[2]) if len(rec) > 2 else []
         form = rec[3] if len(rec) > 3 else None
-        c7 = mfdb_addr & 0xFFFF if form else 0
-        c8 = (mfdb_addr >> 16) & 0xFFFF if form else 0
-        out += [op, len(pts) // 2, len(ints), c7, c8, 0, 0]
+        c7 = c8 = c9 = c10 = 0
+        if form and op == VRO_CPYFM:
+            c7, c9 = addr_of(form[0]), addr_of(form[1])
+        elif form:
+            c7 = mfdb_addr & 0xFFFF
+            c8 = (mfdb_addr >> 16) & 0xFFFF
+        out += [op, len(pts) // 2, len(ints), c7, c8, c9, c10]
         out += pts
         out += ints
     out.append(0)
@@ -494,7 +828,41 @@ def decode_quad(prev, now):
     return table[((prev & 3) << 2) | (now & 3)]
 
 
-def pack_mfdb(bits_addr, w, h, wdwidth):
+def xem1_valid(pot):
+    """A mouSTer XEM1 pot reading is 64..191: bit 6 and bit 7 differ."""
+    return (((pot >> 1) ^ pot) & 0x40) != 0
+
+
+def decode_xem1(old, now):
+    """Reference for ptr_decode_xem1() in src/vdi/pointer.c: the movement
+    between two XEM1 readings, and the reading to measure the next from.
+
+    This is the firmware's sample driver (Mad-Pascal samples/a8/mouSTer/
+    vbl.asm, calcDX) followed instruction by instruction rather than a
+    formula of my own, so that what the C is checked against is what the
+    device's author wrote: the 7-bit difference, sign-extended from bit 6
+    by the rol/eor/and/eor trick, halved toward zero by cmp/ror/adc, and a
+    reading that halves to nothing left as the reference for next time.
+    """
+    a = (now - old) & 0xFF                      # txa; sec; sbc oldX
+    if a == 0:                                  # beq endCalcX
+        return 0, old
+    t = a                                       # sta @+
+    a = (a << 1) & 0xFF                         # rol (the carry in is masked out below)
+    a ^= t                                      # eor @: -- bit 7 = d6 ^ d7
+    a &= 0x80                                   # and #$80
+    a ^= t                                      # eor @- -- bit 7 := d6
+    c = 1 if a >= 0x80 else 0                   # cmp #$80
+    c, a = a & 1, (a >> 1) | (c << 7)           # ror
+    if a & 0x80:                                # bpl @+
+        a = (a + c) & 0xFF                      # adc #0
+    if a == 0:                                  # @ beq endcalcX
+        return 0, old
+    return (a - 256 if a & 0x80 else a), now    # stx oldX
+
+
+def pack_mfdb(bits_addr, w, h, wdwidth, planes=1):
     """The 20-byte MFDB the target reads, little-endian."""
     import struct
-    return struct.pack("<Ihhhhhhhh", bits_addr, w, h, wdwidth, 0, 1, 0, 0, 0)
+    return struct.pack("<Ihhhhhhhh", bits_addr, w, h, wdwidth, 0, planes,
+                       0, 0, 0)

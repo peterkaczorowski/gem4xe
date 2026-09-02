@@ -260,7 +260,8 @@ _fl_running_bank:
 ;;; bug.
 ;;;
 ;;; `switch` shares the range and is interleaved inside it, so .sectionEnd
-;;; farcode already covers it (assembler manual, section operators).
+;;; farcode already covers it (assembler manual, section operators); `cfar`
+;;; is placed ahead of the code (src/gem4xe.scm), so it is covered too.
               .section farcode
               .section cdata, rodata
 _fl_heap_bank: .byte  .byte2 (.sectionEnd farcode + 0x10000)
