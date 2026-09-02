@@ -159,58 +159,6 @@ static void xor_rect_dev(WORD x1, WORD y1, WORD x2, WORD y2)
         blit_xor(base + bl, SCR_STRIDE, (uint16_t)(br - bl + 1), rows, 0xFF);
 }
 
-/* Single pixel, read-modify-write through the MEMAC window.  The blitter
- * cannot help with one pixel, and a Bresenham line is the one primitive it
- * does not accelerate at all.  `hwpen` is a HARDWARE pen: callers map. */
-static WORD plot_visible(WORD x, WORD y)
-{
-    if (vwk.clip && (x < vwk.xmn_clip || x > vwk.xmx_clip ||
-                     y < vwk.ymn_clip || y > vwk.ymx_clip))
-        return 0;
-    return (x >= 0 && y >= 0 && x < SCR_W && y < SCR_H);
-}
-
-static void plot(WORD x, WORD y, WORD hwpen)
-{
-    uint32_t a;
-    uint8_t b;
-    if (!plot_visible(x, y))
-        return;
-    a = VR_SCREEN0 + (uint32_t)y * SCR_STRIDE + (uint32_t)(x >> 1);
-    b = vram_read8(a);
-    if (x & 1)
-        b = (uint8_t)((b & 0xF0) | (hwpen & 0x0F));
-    else
-        b = (uint8_t)((b & 0x0F) | ((hwpen & 0x0F) << 4));
-    vram_write8(a, b);
-}
-
-static void plot_xor(WORD x, WORD y)
-{
-    uint32_t a;
-    if (!plot_visible(x, y))
-        return;
-    a = VR_SCREEN0 + (uint32_t)y * SCR_STRIDE + (uint32_t)(x >> 1);
-    vram_write8(a, (uint8_t)(vram_read8(a) ^ ((x & 1) ? 0x0F : 0xF0)));
-}
-
-/* Paint one pixel of a primitive in the current writing mode, given whether
- * the primitive's pattern bit is SET there.  These are the VDI's rules:
- *   replace      pen where set, pen 0 where clear
- *   transparent  pen where set
- *   XOR          complement where set
- *   erase        pen where CLEAR ("reverse transparent")
- */
-static void paint_pixel(WORD x, WORD y, WORD pen, WORD set)
-{
-    switch (vwk.wrt_mode + 1) {
-    case MD_TRANS:   if (set) plot(x, y, HW(pen));           break;
-    case MD_XOR:     if (set) plot_xor(x, y);                break;
-    case MD_ERASE:   if (!set) plot(x, y, HW(pen));          break;
-    default:         plot(x, y, set ? HW(pen) : HW(0));      break;
-    }
-}
-
 /* The same for a solid rectangle -- every pattern bit set -- which lets the
  * blitter do it.  Clipping is the caller's job. */
 static void paint_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen)
@@ -896,18 +844,310 @@ static void draw_glyph(WORD ch, WORD cx, WORD cy, WORD hwink, WORD cleared)
                   c, 0x00, BLT_MODE_OR);
 }
 
-/* Pixel-by-pixel fallback: a glyph the clipping rectangle cuts, or a writing
- * mode the two-blit path does not do (XOR, erase).  Correct everywhere, and
- * about fifty times slower than the blitter path. */
+/* ---------------------------------------------------------------------- */
+/* 1bpp rasters: icons and cut glyphs                                     */
+/* ---------------------------------------------------------------------- */
+
+/* Expand a rectangle of a ONE-PLANE form into the screen in writing mode
+ * `mode` (MD_*), with HARDWARE pens `fg` and `bg`.  This is vrt_cpyfm, and
+ * v_gtext's fallback for a glyph the clip cuts or a mode the glyph blits do
+ * not do.
+ *
+ * The source lives in RAM, not VRAM, so the blitter cannot read it; but it
+ * can do the writing.  The CPU expands the clipped destination rectangle
+ * into one 4bpp strip at VR_STRIP through one MEMAC mapping, and one blit
+ * applies it; the strip holds most of a page, so a wide form goes in bands.
+ *
+ * The rules per mode, pixel by pixel, are the VDI's and tools/vdiref.py's:
+ *   replace      fg where set, bg where clear
+ *   transparent  fg where set
+ *   XOR          complement where set
+ *   erase        bg where CLEAR
+ * and a pixel outside the clip rectangle or the screen is left alone.
+ * Clipping is to the pixel.
+ *
+ * Which blit applies the strip depends on the pens.  Blitter mode 6, the
+ * nibble stencil, writes each non-zero nibble of its source and leaves the
+ * pixel under a zero one alone: so a strip holding the pen wherever a pixel
+ * is written and 0 elsewhere -- clipped pixels included -- is the whole
+ * raster in one blit, as long as no pen written is hardware 0, white, the
+ * one nibble mode 6 cannot write.  A raster that writes only white is one
+ * AND strip, 0 where written and $F elsewhere; XOR is one XOR strip, $F
+ * where set.  A replace with white in it is a plain copy of the strip when
+ * every strip byte lies wholly inside the clip; when the first or the last
+ * does not, the strip is ORed in under an AND blit whose source is ONE row
+ * -- $00 inside, $F over the pixel outside, the same on every row -- that
+ * the blitter reads at a source step of zero.  The second strip of earlier
+ * versions, a band of AND bytes for every raster, is gone: half the
+ * slow-bus stores, and one control block instead of two.
+ *
+ * Eight source pixels -- one byte -- at a time: each nibble indexes a
+ * 16-entry table of strip WORDS, the two strip bytes for four pixels, so a
+ * source byte becomes four strip bytes in two indexed loads and stores.
+ * Only a strip byte with a pixel outside the clip -- the first and the
+ * last of a row -- and up to three bytes of remainder are built pixel by
+ * pixel.  The tables are rebuilt only when the mode or a pen changes.  The
+ * expander's state is in the direct page: the 65816 reaches it in two-byte
+ * instructions and indexes through it, where a stack local costs a
+ * three-byte one and cannot be indexed.  The first version did every pixel
+ * on its own, ~120 instructions each; the second went four pixels at a time
+ * through a shift register, ~80 per four; the third built two strips
+ * (docs/phase8c.md).
+ *
+ * Source bits are MSB-first within each byte, rows `stride` bytes apart --
+ * the VDI's own layout, kept exactly (see the MFDB note in vdi.h).  The form
+ * is in bank $00: `bits` is a near pointer. */
+#define R1_ROW   ((uint16_t)(VR_STRIP_LEN - 512))   /* the AND row's place */
+                                        /* in the page; the strip is below  */
+#define R1_TWO   0xFF                   /* r1_kind: the AND row and an OR   */
+
+static uint8_t r1_pv[4];                /* two pixels (even<<1|odd) -> byte */
+static UWORD   r1_v16[16];              /* four pixels -> two strip bytes,  */
+                                        /* the first in the low byte        */
+static uint8_t r1_out;                  /* the nibble of a pixel left alone */
+static uint8_t r1_kind;                 /* BLT_MODE_* of the blit, or R1_TWO */
+static UWORD   r1_sig = 0xFFFF;         /* what the tables were built for   */
+static const uint8_t bit_of[8] = {0x80, 0x40, 0x20, 0x10, 8, 4, 2, 1};
+
+/* the row expander's state, in the direct page */
+static const uint8_t    * __attribute__((tiny)) r1_s;   /* next source byte */
+static volatile UWORD   * __attribute__((tiny)) r1_w;   /* next strip word  */
+static __attribute__((tiny)) UWORD r1_n;                /* bytes to go      */
+static __attribute__((tiny)) UWORD r1_b;                /* the source byte  */
+static __attribute__((tiny)) UWORD r1_rsh;              /* 8 - shift        */
+static __attribute__((tiny)) UWORD r1_hi, r1_lo;        /* the two nibbles' */
+                                                        /* table offsets    */
+/* A strip word from the table, by byte offset: one indexed load, the offset
+ * held in the direct page rather than derived at each use. */
+#define T16(t, off)  (*(const UWORD *)((const uint8_t *)(t) + (off)))
+
+/* Build the table for a mode and a pair of pens, unless it stands, and
+ * choose the blit.  `edges` says a strip byte has a pixel outside the
+ * clip, which only a replace with white in it cares about. */
+static void r1_tables(WORD mode, uint8_t fg, uint8_t bg, WORD edges)
+{
+    UWORD sig = (UWORD)(((UWORD)mode << 9) | ((UWORD)edges << 8) |
+                        ((UWORD)fg << 4) | bg);
+    uint8_t set_v, clr_v;
+    WORD i;
+
+    if (sig == r1_sig)
+        return;
+    r1_sig = sig;
+    /* What a set and a clear source bit put in the strip. */
+    switch (mode) {
+    case MD_TRANS:
+        if (fg) { set_v = fg;  clr_v = 0x0; r1_kind = BLT_MODE_HR;  }
+        else    { set_v = 0x0; clr_v = 0xF; r1_kind = BLT_MODE_AND; }
+        break;
+    case MD_ERASE:
+        if (bg) { set_v = 0x0; clr_v = bg;  r1_kind = BLT_MODE_HR;  }
+        else    { set_v = 0xF; clr_v = 0x0; r1_kind = BLT_MODE_AND; }
+        break;
+    case MD_XOR:
+        set_v = 0xF;  clr_v = 0x0;  r1_kind = BLT_MODE_XOR;
+        break;
+    default:                                            /* replace */
+        set_v = fg;  clr_v = bg;
+        r1_kind = (uint8_t)((fg && bg)   ? BLT_MODE_HR
+                          : (!fg && !bg) ? BLT_MODE_AND
+                          : edges        ? R1_TWO
+                          :                BLT_MODE_COPY);
+        break;
+    }
+    r1_out = (uint8_t)(r1_kind == BLT_MODE_AND ? 0xF : 0x0);
+    for (i = 0; i < 4; i++)
+        r1_pv[i] = (uint8_t)((((i & 2) ? set_v : clr_v) << 4) |
+                             ((i & 1) ? set_v : clr_v));
+    for (i = 0; i < 16; i++)
+        r1_v16[i] = (UWORD)(r1_pv[i >> 2] | ((UWORD)r1_pv[i & 3] << 8));
+}
+
+/* r1_n source bytes that lie on the strip's byte boundaries: four strip
+ * bytes each. */
+static void expand_aligned(void)
+{
+    do {
+        r1_b = *r1_s++;
+        r1_hi = (UWORD)((r1_b >> 4) << 1);
+        r1_lo = (UWORD)((r1_b & 15) << 1);
+        r1_w[0] = T16(r1_v16, r1_hi);
+        r1_w[1] = T16(r1_v16, r1_lo);
+        r1_w += 2;
+    } while (--r1_n);
+}
+
+/* The same, with the source r1_rsh bits to the right of the strip's byte
+ * boundaries: each output byte straddles two source bytes.  The last one
+ * reads one byte past the row it needs, inside the form or just after it:
+ * bank $00 RAM, and only the bits above the boundary are used. */
+static void expand_shifted(void)
+{
+    do {
+        r1_b = (UWORD)((((UWORD)r1_s[0] << 8) | r1_s[1]) >> r1_rsh) & 0xFF;
+        r1_s++;
+        r1_hi = (UWORD)((r1_b >> 4) << 1);
+        r1_lo = (UWORD)((r1_b & 15) << 1);
+        r1_w[0] = T16(r1_v16, r1_hi);
+        r1_w[1] = T16(r1_v16, r1_lo);
+        r1_w += 2;
+    } while (--r1_n);
+}
+
+/* One strip byte for a pixel pair, `i` its bits (even<<1|odd), with the
+ * pixel outside the clip -- if there is one -- left alone. */
+static void edge_byte(WORD i, WORD in_even, WORD in_odd, volatile uint8_t *pv)
+{
+    uint8_t vb = r1_pv[i];
+    if (!in_even) vb = (uint8_t)((vb & 0x0F) | (r1_out << 4));
+    if (!in_odd)  vb = (uint8_t)((vb & 0xF0) | r1_out);
+    *pv = vb;
+}
+
+/* source pixel p of a row, as 0 or 1 */
+#define SRC_BIT(row, p) (((row)[(UWORD)(p) >> 3] & bit_of[(p) & 7]) ? 1 : 0)
+
+static void raster_1bpp(const uint8_t *bits, uint16_t stride,
+                        WORD sx1, WORD sy1, WORD w, WORD h,
+                        WORD dx1, WORD dy1, WORD mode, uint8_t fg, uint8_t bg)
+{
+    WORD cx0, cy0, cx1, cy1, bx0, nb, band, y;
+    WORD first_part, last_part, n8, rem, sxf, sh, px_first, px_rem, px_last;
+
+    if (w <= 0 || h <= 0)
+        return;
+    /* The destination, clipped to the pixel: the clip rectangle when one is
+     * set, then the screen. */
+    cx0 = dx1;  cy0 = dy1;
+    cx1 = (WORD)(dx1 + w - 1);  cy1 = (WORD)(dy1 + h - 1);
+    if (vwk.clip) {
+        if (cx0 < vwk.xmn_clip) cx0 = vwk.xmn_clip;
+        if (cy0 < vwk.ymn_clip) cy0 = vwk.ymn_clip;
+        if (cx1 > vwk.xmx_clip) cx1 = vwk.xmx_clip;
+        if (cy1 > vwk.ymx_clip) cy1 = vwk.ymx_clip;
+    }
+    if (cx0 < 0) cx0 = 0;
+    if (cy0 < 0) cy0 = 0;
+    if (cx1 > SCR_W - 1) cx1 = SCR_W - 1;
+    if (cy1 > SCR_H - 1) cy1 = SCR_H - 1;
+    if (cx1 < cx0 || cy1 < cy0)
+        return;
+    bx0 = (WORD)(cx0 >> 1);
+    nb  = (WORD)((cx1 >> 1) - bx0 + 1);
+
+    /* A strip byte with a pixel outside the clip is built on its own: the
+     * first when the clip starts at odd x, the last when it ends at even x.
+     * The bytes between go a source byte -- four strip bytes -- at a time,
+     * and up to three remain: a pair of strip bytes from the high nibble of
+     * the next source byte, then a single one built from its pixels. */
+    first_part = (WORD)(cx0 & 1);
+    last_part  = (WORD)(!(cx1 & 1));
+    {
+        WORD nf = (WORD)(nb - first_part - last_part);
+        n8  = (WORD)(nf >> 2);
+        rem = (WORD)(nf & 3);
+        /* source x under the first whole byte's even pixel, and under the
+         * even pixel of each byte built on its own */
+        sxf = (WORD)(sx1 + (bx0 * 2 + first_part * 2 - dx1));
+        sh  = (WORD)(sxf & 7);
+        px_first = (WORD)(sxf - 1);                     /* its odd pixel   */
+        px_rem   = (WORD)(sxf + n8 * 8 + ((rem & 2) ? 4 : 0));
+        px_last  = (WORD)(sx1 + (cx1 - dx1));
+    }
+    r1_rsh = (UWORD)(8 - sh);
+    r1_tables(mode, fg, bg, (WORD)(first_part | last_part));
+
+    band = (WORD)(R1_ROW / (uint16_t)nb);       /* rows a band holds */
+    if (band > 256)
+        band = 256;
+    if (blit_pending())     /* the last raster may still read the strip */
+        blit_run();
+    if (r1_kind == R1_TWO) {
+        /* the AND row: everything inside cleared, the outside pixel kept */
+        volatile uint8_t *pa = vram_win(VR_STRIP) + R1_ROW;
+        WORD k;
+        for (k = 0; k < nb; k++)
+            pa[k] = 0x00;
+        if (first_part) pa[0] = 0xF0;
+        if (last_part)  pa[nb - 1] |= 0x0F;
+    }
+    /* the source row under the first clipped destination row */
+    bits += (uint16_t)(sy1 + (cy0 - dy1)) * stride;
+    for (y = cy0; y <= cy1; y += band) {
+        WORD rows = (WORD)(cy1 - y + 1);
+        volatile uint8_t *pv;
+        uint32_t dst;
+        WORD r;
+
+        if (rows > band)
+            rows = band;
+        if (blit_pending())     /* the last band may still read the strip */
+            blit_run();
+        pv = vram_win(VR_STRIP);
+        for (r = 0; r < rows; r++, bits += stride) {
+            if (first_part) {
+                edge_byte(SRC_BIT(bits, px_first), 0, 1, pv);
+                pv++;
+            }
+            if (n8) {
+                r1_s = bits + ((UWORD)sxf >> 3);
+                r1_w = (volatile UWORD *)pv;
+                r1_n = (UWORD)n8;
+                if (sh)
+                    expand_shifted();
+                else
+                    expand_aligned();
+                pv += n8 * 4;
+            }
+            if (rem & 2) {
+                WORD p = (WORD)(sxf + n8 * 8);
+                WORD i = (WORD)((SRC_BIT(bits, p) << 3) |
+                                (SRC_BIT(bits, p + 1) << 2) |
+                                (SRC_BIT(bits, p + 2) << 1) |
+                                 SRC_BIT(bits, p + 3));
+                *(volatile UWORD *)pv = r1_v16[i];
+                pv += 2;
+            }
+            if (rem & 1) {
+                edge_byte((WORD)((SRC_BIT(bits, px_rem) << 1) |
+                                  SRC_BIT(bits, px_rem + 1)), 1, 1, pv);
+                pv++;
+            }
+            if (last_part) {
+                edge_byte((WORD)(SRC_BIT(bits, px_last) << 1), 1, 0, pv);
+                pv++;
+            }
+        }
+        dst = VR_SCREEN0 + (uint32_t)y * SCR_STRIDE + (uint32_t)bx0;
+        if (r1_kind == R1_TWO) {
+            blit_mask(VR_STRIP + R1_ROW, 0, dst, SCR_STRIDE,
+                      (uint16_t)nb, (uint16_t)rows, 0xFF, 0x00,
+                      BLT_MODE_AND);
+            blit_mask(VR_STRIP, (uint16_t)nb, dst, SCR_STRIDE,
+                      (uint16_t)nb, (uint16_t)rows, 0xFF, 0x00,
+                      BLT_MODE_OR);
+        } else {
+            blit_mask(VR_STRIP, (uint16_t)nb, dst, SCR_STRIDE,
+                      (uint16_t)nb, (uint16_t)rows, 0xFF, 0x00, r1_kind);
+        }
+        if (blit_pending())
+            blit_run();
+    }
+}
+
+/* A glyph the clipping rectangle or the screen cuts, or a writing mode the
+ * two-blit path does not do (XOR, erase): its eight rows go through the same
+ * 1bpp raster path as an icon.  Erase paints the text colour where the glyph
+ * is CLEAR, so that is the "background" it is given. */
 static void draw_glyph_cpu(WORD ch, WORD cx, WORD cy)
 {
-    WORD row, col;
-    for (row = 0; row < FONT_H; row++) {
-        uint8_t b = font8x8[row * FONT_STRIDE + (ch & 0xFF)];
-        for (col = 0; col < FONT_W; col++)
-            paint_pixel((WORD)(cx + col), (WORD)(cy + row), vwk.text_color,
-                        (WORD)(b & (0x80 >> col)));
-    }
+    uint8_t g[FONT_H];
+    WORD row, mode = (WORD)(vwk.wrt_mode + 1);
+    uint8_t ink = (uint8_t)HW(vwk.text_color);
+    for (row = 0; row < FONT_H; row++)
+        g[row] = font8x8[row * FONT_STRIDE + (ch & 0xFF)];
+    raster_1bpp(g, 1, 0, 0, FONT_W, FONT_H, cx, cy, mode, ink,
+                (uint8_t)(mode == MD_ERASE ? ink : HW(0)));
 }
 
 /* v_gtext.  Alignment is left/baseline (vst_alignment is not implemented, so
@@ -1115,6 +1355,148 @@ static void vdi_vr_recfl(void)
     fill_rect(x1, y1, x2, y2, vwk.fill_color);
 }
 
+/* A diagonal: Bresenham, one pixel at a time through the MEMAC window, the
+ * one primitive the blitter does not accelerate.  The pixel rules are
+ * tools/vdiref.py's _paint_pixel: replace writes the pen where the style bit
+ * is set and pen 0 where it is clear, transparent the pen where set, XOR the
+ * complement where set, erase the pen where clear.  The style's bit 15 is
+ * the first pixel and it rotates once per pixel, on and off the screen.
+ *
+ * Every mode is one read-modify-write, (byte & am) ^ xv, with am and xv
+ * chosen by the style bit and the pixel's parity -- four entries -- and a
+ * pixel a mode leaves alone is skipped before the window is touched.  The
+ * stepper's state is in the direct page (see the raster section).  The
+ * first version called paint_pixel(), plot(), plot_visible() and two VRAM
+ * accessors per step, ~200 instructions; the second kept everything in
+ * stack locals, ~150 (docs/phase8c.md). */
+#define WIN ((volatile uint8_t *)MEMAC_WIN_ADDR)   /* the window, fixed  */
+
+static __attribute__((tiny)) WORD  ld_x, ld_y, ld_i;
+static __attribute__((tiny)) WORD  ld_dx, ld_dy, ld_ndy, ld_sx, ld_sy, ld_err;
+static __attribute__((tiny)) UWORD ld_n;                /* pixels to go        */
+static __attribute__((tiny)) UWORD ld_m;                /* the style, rotating */
+static __attribute__((tiny)) UWORD ld_cx0, ld_cy0, ld_cw, ld_ch;
+static __attribute__((tiny)) UWORD ld_page;             /* the 4K page mapped  */
+static __attribute__((tiny)) UWORD ld_rpage;            /* the row's page ...  */
+static __attribute__((tiny)) WORD  ld_roff, ld_rstep;   /* ... and offset in it */
+static __attribute__((tiny)) UWORD ld_off, ld_pg;
+static __attribute__((tiny)) UWORD ld_inside;           /* no pixel needs the */
+                                                        /* clip test          */
+static __attribute__((tiny)) uint8_t ld_a, ld_v;
+static uint8_t ld_am[4], ld_xv[4], ld_skip[4];  /* [style bit << 1 | x & 1] */
+                                /* not tiny: cc65816 5.18 dies on an indexed  */
+                                /* direct-page array (docs/phase8c.md)        */
+
+static void line_diag(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask)
+{
+    WORD cx0 = 0, cy0 = 0, cx1 = SCR_W - 1, cy1 = SCR_H - 1;
+    WORD lo, hi, i;
+    uint8_t pen = (uint8_t)HW(vwk.line_color), pen0 = (uint8_t)HW(0);
+
+    if (vwk.clip) {
+        if (cx0 < vwk.xmn_clip) cx0 = vwk.xmn_clip;
+        if (cy0 < vwk.ymn_clip) cy0 = vwk.ymn_clip;
+        if (cx1 > vwk.xmx_clip) cx1 = vwk.xmx_clip;
+        if (cy1 > vwk.ymx_clip) cy1 = vwk.ymx_clip;
+    }
+    if (cx1 < cx0 || cy1 < cy0)
+        return;
+    /* a line whose box misses the clip has no pixel to plot */
+    lo = x1; hi = x2; order(&lo, &hi);
+    if (hi < cx0 || lo > cx1)
+        return;
+    lo = y1; hi = y2; order(&lo, &hi);
+    if (hi < cy0 || lo > cy1)
+        return;
+    ld_cx0 = (UWORD)cx0;  ld_cw = (UWORD)(cx1 - cx0);
+    ld_cy0 = (UWORD)cy0;  ld_ch = (UWORD)(cy1 - cy0);
+    /* both ends inside the clip: so is every pixel between them */
+    ld_inside = (UWORD)(x1 >= cx0 && x1 <= cx1 && x2 >= cx0 && x2 <= cx1 &&
+                        y1 >= cy0 && y1 <= cy1 && y2 >= cy0 && y2 <= cy1);
+
+    /* the four (style bit, parity) cases: what the byte keeps, what flips */
+    for (i = 0; i < 4; i++) {
+        WORD set = (WORD)(i & 2), odd = (WORD)(i & 1);
+        uint8_t keep = (uint8_t)(odd ? 0xF0 : 0x0F);   /* the other pixel */
+        uint8_t am = 0xFF, xv = 0;
+        switch (vwk.wrt_mode + 1) {
+        case MD_TRANS:
+            if (set) { am = keep; xv = pen; }
+            break;
+        case MD_XOR:
+            if (set) xv = 0xF;
+            break;
+        case MD_ERASE:
+            if (!set) { am = keep; xv = pen; }
+            break;
+        default:
+            am = keep; xv = set ? pen : pen0;
+            break;
+        }
+        ld_am[i] = am;
+        ld_xv[i] = (uint8_t)(odd ? xv : (xv << 4));
+        ld_skip[i] = (uint8_t)(am == 0xFF && xv == 0);
+    }
+
+    ld_x = x1;  ld_y = y1;
+    ld_dx = (WORD)(x2 - x1); if (ld_dx < 0) ld_dx = (WORD)-ld_dx;
+    ld_dy = (WORD)(y2 - y1); if (ld_dy < 0) ld_dy = (WORD)-ld_dy;
+    ld_ndy = (WORD)-ld_dy;
+    ld_sx = (WORD)(x1 < x2 ? 1 : -1);
+    ld_sy = (WORD)(y1 < y2 ? 1 : -1);
+    ld_err = (WORD)(ld_dx - ld_dy);
+    /* Bresenham steps the major axis every time, so the pixel count is
+     * known: no endpoint compare in the loop */
+    ld_n = (UWORD)((ld_dx > ld_dy ? ld_dx : ld_dy) + 1);
+    ld_m = mask;
+    ld_page = 0xFFFF;
+    /* The row address as a 4K page and an offset in it, so that a step is
+     * 16-bit arithmetic with a carry test.  y1 may be negative here: the
+     * page is then negative too, and counts back up onto the screen. */
+    {
+        int32_t row = (int32_t)VR_SCREEN0 + (int32_t)y1 * (int32_t)SCR_STRIDE;
+        ld_rpage = (UWORD)(row >> 12);
+        ld_roff  = (WORD)(row & 0x0FFF);
+    }
+    ld_rstep = (WORD)(ld_sy > 0 ? SCR_STRIDE : -SCR_STRIDE);
+    for (;;) {
+        WORD e2;
+        if (ld_m != 0xFFFF)     /* a solid style rotates into itself */
+            ld_m = (UWORD)((ld_m << 1) | (ld_m >> 15));
+        ld_i = (WORD)(((ld_m & 1) << 1) | (ld_x & 1));
+        if (!ld_skip[ld_i] &&
+            (ld_inside || ((UWORD)(ld_x - ld_cx0) <= ld_cw &&
+                           (UWORD)(ld_y - ld_cy0) <= ld_ch))) {
+            ld_off = (UWORD)(ld_roff + ((UWORD)ld_x >> 1));
+            ld_pg  = ld_rpage;
+            if (ld_off >= 0x1000) {
+                ld_off -= 0x1000;
+                ld_pg++;
+            }
+            if (ld_pg != ld_page) {
+                ld_page = ld_pg;
+                vram_map_page((uint8_t)ld_pg);
+            }
+            ld_a = ld_am[ld_i];
+            ld_v = ld_xv[ld_i];
+            WIN[ld_off] = (uint8_t)((WIN[ld_off] & ld_a) ^ ld_v);
+        }
+        if (--ld_n == 0)
+            break;
+        e2 = (WORD)(ld_err << 1);
+        if (e2 > ld_ndy) { ld_err = (WORD)(ld_err - ld_dy); ld_x = (WORD)(ld_x + ld_sx); }
+        if (e2 <  ld_dx) {
+            ld_err = (WORD)(ld_err + ld_dx);
+            ld_y = (WORD)(ld_y + ld_sy);
+            ld_roff = (WORD)(ld_roff + ld_rstep);
+            if ((UWORD)ld_roff >= 0x1000) {      /* crossed a page, either way */
+                if (ld_roff < 0) { ld_roff += 0x1000; ld_rpage--; }
+                else             { ld_roff -= 0x1000; ld_rpage++; }
+            }
+        }
+    }
+}
+
 /* v_pline.  Horizontal and vertical runs go through the blitter as 1-row and
  * 1-column rectangles; that covers essentially every line the AES draws, since
  * it builds boxes out of axis-aligned polylines and never calls the GDPs.
@@ -1123,7 +1505,6 @@ static void draw_line(WORD x1, WORD y1, WORD x2, WORD y2)
 {
     UWORD mask = line_styles[(vwk.line_index >= 1 && vwk.line_index <= 7)
                              ? vwk.line_index : 1];
-    WORD dx, dy, sx, sy, err, e2, bit = 0;
 
     if ((y1 == y2 || x1 == x2) && mask != 0xFFFF) {
         style_line(x1, y1, x2, y2, mask);
@@ -1144,21 +1525,7 @@ static void draw_line(WORD x1, WORD y1, WORD x2, WORD y2)
         return;
     }
 
-    dx = (WORD)(x2 - x1); if (dx < 0) dx = (WORD)-dx;
-    dy = (WORD)(y2 - y1); if (dy < 0) dy = (WORD)-dy;
-    sx = (WORD)(x1 < x2 ? 1 : -1);
-    sy = (WORD)(y1 < y2 ? 1 : -1);
-    err = (WORD)(dx - dy);
-    for (;;) {
-        paint_pixel(x1, y1, vwk.line_color,
-                    (WORD)(mask & (1u << (15 - (bit & 15)))));
-        bit++;
-        if (x1 == x2 && y1 == y2)
-            break;
-        e2 = (WORD)(err << 1);
-        if (e2 > -dy) { err = (WORD)(err - dy); x1 = (WORD)(x1 + sx); }
-        if (e2 <  dx) { err = (WORD)(err + dx); y1 = (WORD)(y1 + sy); }
-    }
+    line_diag(x1, y1, x2, y2, mask);
 }
 
 static void vdi_v_pline(void)
@@ -1394,168 +1761,28 @@ static void vdi_vro_cpyfm(void)
 }
 
 /* vrt_cpyfm -- transparent raster copy: a ONE-PLANE source expanded into the
- * device's colours.  This is how the AES draws icons and glyph masks.
- *
- * The source form lives in RAM, not VRAM, so the blitter cannot read it; but
- * it can do the writing.  The CPU expands the clipped destination rectangle
- * into two 4bpp strips at VR_STRIP -- an AND strip and an OR strip, the same
- * pair the pointer and the text path use -- through one MEMAC mapping, and
- * two blits apply them; XOR mode is one XOR blit of a single strip.  The
- * strips hold half a page each, so a wide form goes in bands.  The first
- * version plotted pixel by pixel: a read and a write on the 1.79 MHz bus per
- * pixel, ~60 us each, three frames for a 32x24 icon (docs/phase8b.md).
- *
- * The rules per mode, pixel by pixel, are the VDI's and tools/vdiref.py's:
- *   replace      fg where set, bg where clear
- *   transparent  fg where set
- *   XOR          complement where set
- *   erase        bg where CLEAR
- * and a pixel outside the clip rectangle or the screen is left alone: AND
- * $F, OR $0 (XOR $0).  Clipping is to the pixel here, as plot() clipped.
- *
- * Source bits are MSB-first within each byte, rows are fd_wdwidth WORDS apart
- * -- the VDI's own layout, kept exactly (see the MFDB note in vdi.h).
- */
-#define STRIP_HALF  ((uint16_t)(VR_STRIP_LEN / 2))
-
+ * device's colours.  This is how the AES draws icons and glyph masks.  The
+ * work is raster_1bpp()'s, above; the field goes through a scalar on purpose.
+ * `src->fd_wdwidth * 2u` here -- src spilled to the stack by the order()
+ * calls and dead after this line -- is miscompiled by Calypsi 5.18 into an
+ * in-place shift of src's own stack slot: stride became src << 1 and the
+ * field was never read, which is what made every row after the first read
+ * unrelated memory in Phase 2b (B5 in tools/ccbug/, `make check-cc`). */
 static void vdi_vrt_cpyfm(void)
 {
     MFDB *src = (MFDB *)(uint16_t)contrl[7];   /* forms live in bank $00 */
-    WORD mode = intin[0];
-    uint8_t fg = (uint8_t)HW(intin[1]), bg = (uint8_t)HW(intin[2]);
     WORD sx1 = ptsin[0], sy1 = ptsin[1], sx2 = ptsin[2], sy2 = ptsin[3];
-    WORD dx1 = ptsin[4], dy1 = ptsin[5];
-    const uint8_t *bits;
-    WORD w, h, wdwidth;
-    uint16_t stride;
-    WORD cx0, cy0, cx1, cy1, bx0, nb, band, y;
-    uint8_t set_a, set_o, clr_a, clr_o, out_a;
+    WORD wdwidth;
 
     if (!src || !src->fd_addr)
         return;
     order(&sx1, &sx2); order(&sy1, &sy2);
-    w = (WORD)(sx2 - sx1 + 1);
-    h = (WORD)(sy2 - sy1 + 1);
-    if (w <= 0 || h <= 0)
-        return;
-    bits    = (const uint8_t *)(uint16_t)src->fd_addr;
-    /* The field goes through a scalar on purpose.  `src->fd_wdwidth * 2u`
-     * here -- src spilled to the stack by the order() calls and dead after
-     * this line -- is miscompiled by Calypsi 5.18 into an in-place shift of
-     * src's own stack slot: stride became src << 1 and the field was never
-     * read, which is what made every row after the first read unrelated
-     * memory in Phase 2b (B5 in tools/ccbug/, `make check-cc`). */
     wdwidth = src->fd_wdwidth;                              /* WORDS */
-    stride  = (uint16_t)((uint16_t)wdwidth * 2u);
-
-    /* The destination, clipped as plot() clipped: the clip rectangle when
-     * one is set, then the screen. */
-    cx0 = dx1;  cy0 = dy1;
-    cx1 = (WORD)(dx1 + w - 1);  cy1 = (WORD)(dy1 + h - 1);
-    if (vwk.clip) {
-        if (cx0 < vwk.xmn_clip) cx0 = vwk.xmn_clip;
-        if (cy0 < vwk.ymn_clip) cy0 = vwk.ymn_clip;
-        if (cx1 > vwk.xmx_clip) cx1 = vwk.xmx_clip;
-        if (cy1 > vwk.ymx_clip) cy1 = vwk.ymx_clip;
-    }
-    if (cx0 < 0) cx0 = 0;
-    if (cy0 < 0) cy0 = 0;
-    if (cx1 > SCR_W - 1) cx1 = SCR_W - 1;
-    if (cy1 > SCR_H - 1) cy1 = SCR_H - 1;
-    if (cx1 < cx0 || cy1 < cy0)
-        return;
-    bx0 = (WORD)(cx0 >> 1);
-    nb  = (WORD)((cx1 >> 1) - bx0 + 1);
-
-    /* What a set and a clear source bit contribute, per mode. */
-    switch (mode) {
-    case MD_TRANS: set_a = 0x0; set_o = fg; clr_a = 0xF; clr_o = 0;  break;
-    case MD_ERASE: set_a = 0xF; set_o = 0;  clr_a = 0x0; clr_o = bg; break;
-    case MD_XOR:   set_a = 0xF; set_o = 0;  clr_a = 0x0; clr_o = 0;  break;
-    default:       set_a = 0x0; set_o = fg; clr_a = 0x0; clr_o = bg; break;
-    }
-    out_a = (mode == MD_XOR) ? 0x0 : 0xF;   /* the strip that is blitted */
-
-    band = (WORD)(STRIP_HALF / (uint16_t)nb);   /* rows a band holds */
-    if (band > 256)
-        band = 256;
-    /* the source row under the first clipped destination row */
-    bits += (uint16_t)(sy1 + (cy0 - dy1)) * stride;
-    for (y = cy0; y <= cy1; y += band) {
-        WORD rows = (WORD)(cy1 - y + 1);
-        volatile uint8_t *pa, *po;
-        uint32_t dst;
-        WORD r;
-        uint8_t and_all = 0xFF, or_any = 0, xor_any = 0;
-
-        if (rows > band)
-            rows = band;
-        if (blit_pending())     /* the last band may still read the strips */
-            blit_run();
-        pa = vram_win(VR_STRIP);
-        po = pa + STRIP_HALF;
-        for (r = 0; r < rows; r++, bits += stride) {
-            WORD x = (WORD)(bx0 * 2);
-            WORD b;
-            for (b = 0; b < nb; b++, x += 2) {
-                uint8_t ab, ob, an, on;
-                WORD sx;
-                /* the even pixel: high nibble */
-                if (x < cx0) {
-                    an = out_a; on = 0;
-                } else {
-                    sx = (WORD)(sx1 + (x - dx1));
-                    if (bits[(UWORD)sx >> 3] & (uint8_t)(0x80 >> (sx & 7))) {
-                        an = set_a; on = set_o;
-                    } else {
-                        an = clr_a; on = clr_o;
-                    }
-                }
-                ab = (uint8_t)(an << 4);
-                ob = (uint8_t)(on << 4);
-                /* the odd pixel: low nibble */
-                if (x + 1 > cx1) {
-                    an = out_a; on = 0;
-                } else {
-                    sx = (WORD)(sx1 + (x + 1 - dx1));
-                    if (bits[(UWORD)sx >> 3] & (uint8_t)(0x80 >> (sx & 7))) {
-                        an = set_a; on = set_o;
-                    } else {
-                        an = clr_a; on = clr_o;
-                    }
-                }
-                ab |= an;
-                ob |= on;
-                pa[b] = ab;
-                and_all &= ab;
-                xor_any |= ab;
-                if (mode != MD_XOR) {
-                    po[b] = ob;
-                    or_any |= ob;
-                }
-            }
-            pa += nb;
-            po += nb;
-        }
-        dst = VR_SCREEN0 + (uint32_t)y * SCR_STRIDE + (uint32_t)bx0;
-        if (mode == MD_XOR) {
-            if (xor_any)
-                blit_mask(VR_STRIP, (uint16_t)nb, dst, SCR_STRIDE,
-                          (uint16_t)nb, (uint16_t)rows, 0xFF, 0x00,
-                          BLT_MODE_XOR);
-        } else {
-            if (and_all != 0xFF)
-                blit_mask(VR_STRIP, (uint16_t)nb, dst, SCR_STRIDE,
-                          (uint16_t)nb, (uint16_t)rows, 0xFF, 0x00,
-                          BLT_MODE_AND);
-            if (or_any)
-                blit_mask(VR_STRIP + STRIP_HALF, (uint16_t)nb, dst, SCR_STRIDE,
-                          (uint16_t)nb, (uint16_t)rows, 0xFF, 0x00,
-                          BLT_MODE_OR);
-        }
-        if (blit_pending())
-            blit_run();
-    }
+    raster_1bpp((const uint8_t *)(uint16_t)src->fd_addr,
+                (uint16_t)((uint16_t)wdwidth * 2u),
+                sx1, sy1, (WORD)(sx2 - sx1 + 1), (WORD)(sy2 - sy1 + 1),
+                ptsin[4], ptsin[5], intin[0],
+                (uint8_t)HW(intin[1]), (uint8_t)HW(intin[2]));
 }
 
 /* vr_trnfm converts between VDI-standard and device-specific form.  This

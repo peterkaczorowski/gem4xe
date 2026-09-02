@@ -8,9 +8,24 @@ nearest symbol, with cycles per instruction -- the number that says
 whether the CPU is fast (about 0.4 at 11x, with the code in SRAM) or
 the code is long.  `docs/phase8b.md` has the readings this replaced.
 
-  python3 tests/emu/bench_vdi.py [--profile] [--top N] [NAME ...]
+  python3 tests/emu/bench_vdi.py [--profile] [--mode insns|functions|basicblock]
+                                 [--by-function] [--top N] [NAME ...]
+
+Addresses come back without their bank; ones inside a bank-$01 section of
+the map are resolved against bank-$01 symbols, the rest against bank $00.
+--by-function sums the whole profile per function instead of listing
+addresses, which is the number to compare a rewrite by: a function's
+instructions per op, idle polling and the runner's own work shown beside
+it.  The compiler's `?L` labels are not functions: a shared code fragment
+it factors out of one or more of them (`--assembly-source` shows which) is
+placed by the linker among the other small sections, far from any of them,
+so it is counted under its MODULE -- `vdi.o ?L` -- which is what the map
+records of it; the raster expander's store fragment is the usual one.
 """
+import bisect
+import collections
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -43,18 +58,69 @@ CASES = {
 }
 
 
-def nearest(syms, addr):
-    """The symbol at or below addr in bank $00 or $01 -- the profiler's
-    dump drops the bank, and the runner's code is in $01."""
+def far_ranges(mapfile):
+    """The bank-$01 section placements in the linker map, as (lo, hi)
+    pairs of their low 16 bits."""
+    out = []
+    with open(mapfile) as f:
+        for line in f:
+            mm = re.match(r"\s*\S+\s+01([0-9a-f]{4})-01([0-9a-f]{4})\s+[0-9a-f]{6}"
+                          r"\s+\S+\s+\d+\s*$", line)
+            if mm:
+                out.append((int(mm.group(1), 16), int(mm.group(2), 16)))
+    return out
+
+
+def placements(mapfile):
+    """Every placed section in the linker map, sorted: (lo, hi, name,
+    module), the addresses 24-bit.  A `?L` fragment's module is recorded
+    here and nowhere else."""
+    text = open(mapfile).read()
+    out = []
+    for mm in re.finditer(r"`?([?\w]+)`? in section '\w+'\s+placed at address "
+                          r"([0-9a-f]{6})-([0-9a-f]{6}) of size [0-9a-f]+\s*\n\((\S+)",
+                          text):
+        name, lo, hi, mod = mm.groups()
+        out.append((int(lo, 16), int(hi, 16), name, os.path.basename(mod)))
+    return sorted(out)
+
+
+def where(place, syms, ranges, addr):
+    """What a profile address (its bank dropped) belongs to: the function
+    whose section holds it -- a static one's section is named by a `?L`
+    label in the map, but the function's own symbol starts it -- or, for a
+    section holding no function, a fragment, its module: `vdi.o ?L`."""
+    bank = 1 if any(lo <= addr <= hi for lo, hi in ranges) else 0
+    a = (bank << 16) | addr
+    i = bisect.bisect_right(place, (a, 0xFFFFFF, "", "")) - 1
+    if i >= 0 and place[i][0] <= a <= place[i][1]:
+        lo, hi, name, mod = place[i]
+        if not name.startswith("?L"):
+            return name
+        best = None
+        for sym, sa in syms.items():
+            if lo <= sa <= a and not sym.startswith("?L") and \
+                    (best is None or sa > best[0]):
+                best = (sa, sym)
+        return best[1] if best else f"{mod} ?L"
+    return nearest(syms, ranges, addr).split("+")[0]
+
+
+def nearest(syms, ranges, addr):
+    """The symbol at or below addr: a bank-$01 one when addr lies in a
+    bank-$01 section, otherwise a bank-$00 one."""
+    bank = 1 if any(lo <= addr <= hi for lo, hi in ranges) else 0
     best = None
     for name, a in syms.items():
+        if (a >> 16) != bank:
+            continue
         lo = a & 0xFFFF
         if lo <= addr and (best is None or lo > best[0]):
             best = (lo, name)
     return f"{best[1]}+{addr - best[0]:x}" if best else "?"
 
 
-def run(b, syms, label, script, ops, profile, top):
+def run(b, syms, ranges, place, label, script, ops, profile, top, by_function):
     sa, sc = syms["vdi_script"], syms["vdi_scratch"]
     script_room = min(a for a in syms.values() if a > sa) - sa
     b.memload(sc, ONES)
@@ -67,7 +133,7 @@ def run(b, syms, label, script, ops, profile, top):
     m.poke_script(b, sa, resolved, sc + 512, script_room, screen_mfdb=sc + 532)
     b.poke(STATUS + ST_DONE, 0)
     if profile:
-        b.ok("PROFILE_START mode=insns")
+        b.ok(f"PROFILE_START mode={profile}")
     b.poke(STATUS + ST_GO, 1)
     f = 0
     for _ in range(3000):
@@ -79,24 +145,44 @@ def run(b, syms, label, script, ops, profile, top):
           f"{f * 20 / ops:5.1f} ms per op")
     if profile:
         b.ok("PROFILE_STOP")
-        r = b.ok(f"PROFILE_DUMP top={top}")
+        r = b.ok(f"PROFILE_DUMP top={4096 if by_function else top}")
         tc, ti = r["total_cycles"], r["total_insns"]
         print(f"    {ti} insns in {tc} machine cycles: {tc / max(ti, 1):.2f} cycles/insn, "
               f"{ti / ops:.0f} insns/op")
+        if by_function:
+            insns, cycles = collections.Counter(), collections.Counter()
+            for h in r["hot"]:
+                a = int(str(h["addr"]).lstrip("$"), 16)
+                fn = where(place, syms, ranges, a)
+                insns[fn] += h["insns"]
+                cycles[fn] += h["cycles"]
+            for fn, n in insns.most_common(top):
+                print(f"    {fn:30s} insns {n:7d} ({n / ops:6.0f}/op)  "
+                      f"cycles {cycles[fn]:7d} ({cycles[fn] / ops:6.0f}/op)")
+            return
         for h in r["hot"]:
             a = int(str(h["addr"]).lstrip("$"), 16)
-            print(f"    {a:04x} {nearest(syms, a):30s} insns {h['insns']:7d}  "
-                  f"cycles {h['cycles']:7d}  {h['cycles'] / max(h['insns'], 1):.2f}")
+            lab = nearest(syms, ranges, a)
+            if lab.startswith("?L"):
+                lab += f" ({where(place, syms, ranges, a)})"
+            print(f"    {a:04x} {lab:30s} insns {h['insns']:7d}  "
+                  f"cycles {h['cycles']:7d}  {h['cycles'] / max(h['insns'], 1):.2f}"
+                  + (f"  calls {h['calls']}" if profile != "insns" else ""))
 
 
 def main(argv):
-    profile = "--profile" in argv
+    profile = "insns" if "--profile" in argv else None
+    by_function = "--by-function" in argv
+    if by_function and not profile:
+        profile = "insns"
     top = 24
     names = []
-    it = iter(a for a in argv if a != "--profile")
+    it = iter(a for a in argv if a not in ("--profile", "--by-function"))
     for a in it:
         if a == "--top":
             top = int(next(it))
+        elif a == "--mode":
+            profile = next(it)
         else:
             names.append(a)
     names = names or list(CASES)
@@ -105,6 +191,9 @@ def main(argv):
             print(f"no such case: {n}; cases: {' '.join(CASES)}")
             return 2
     syms = symfile.load(m.SYMS)
+    mapfile = os.path.splitext(m.SYMS)[0] + ".map"
+    ranges = far_ranges(mapfile)
+    place = placements(mapfile)
     emu = launch(tag="bench", memsize="1088K", extra_args=["--disk", DISK])
     b = emu.bridge
     try:
@@ -123,7 +212,7 @@ def main(argv):
         print("rapidus: present %d  MCR %02x -> %02x  CMCR %02x  synced %02x" % tuple(st))
         for n in names:
             script, ops = CASES[n]
-            run(b, syms, n, script, ops, profile, top)
+            run(b, syms, ranges, place, n, script, ops, profile, top, by_function)
     finally:
         emu.stop()
     return 0

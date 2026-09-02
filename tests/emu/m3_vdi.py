@@ -289,6 +289,26 @@ CASES = [
         (V_GTEXT, (8, 34), tuple(b"second line here")),
         (VS_CLIP, (0, 0, 639, 239), (0,))]),
 
+    # XOR, erase and a glyph the screen edge cuts all take the 1bpp raster
+    # path (raster_1bpp in vdi.c), the same one vrt_cpyfm uses.
+    ("text in XOR and erase modes, and cut by the screen edge", [
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (3,)),
+        (VR_RECFL, (0, 0, 200, 60), ()),
+        (VSWR_MODE, (), (3,)), (VST_COLOR, (), (1,)),
+        (V_GTEXT, (16, 20), tuple(b"XOR text")),
+        (VSWR_MODE, (), (4,)), (VST_COLOR, (), (5,)),
+        (V_GTEXT, (16, 40), tuple(b"erase text")),
+        (VSWR_MODE, (), (1,)), (VST_COLOR, (), (1,)),
+        (V_GTEXT, (-3, 100), tuple(b"left edge")),
+        (V_GTEXT, (600, 120), tuple(b"right edge")),
+        (V_GTEXT, (300, 3), tuple(b"top")),
+        (V_GTEXT, (300, 243), tuple(b"bottom")),
+        (VSWR_MODE, (), (3,)),
+        (VS_CLIP, (21, 131, 100, 145), (1,)),
+        (V_GTEXT, (16, 140), tuple(b"XOR clipped")),
+        (VS_CLIP, (0, 0, 0, 0), (0,)),
+        (VSWR_MODE, (), (1,))]),
+
     ("text in every pen", [
         (VSWR_MODE, (), (2,))] + [
         rec for i in range(16)
@@ -355,6 +375,28 @@ CASES = [
          (1, 1, 0), "icon"),
         (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 621, 226, 0, 0),
          (2, 1, 0), "icon")]),
+
+    # Blitter mode 6, the nibble stencil, cannot write hardware 0, so white
+    # takes the other blits: a replace with a white pen is a plain copy of
+    # the strip when every strip byte lies inside the clip, and an OR strip
+    # under a one-row AND blit when the first or the last does not; a raster
+    # that writes only white is an AND strip.  Each of those, at even and odd
+    # x, from a shifted source, and cut by a clip.
+    ("vrt_cpyfm with white: the copy, the AND row, the AND strip", [
+        (VSF_COLOR, (), (6,)), (VR_RECFL, (0, 0, 300, 80), ()),
+        (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 16, 4, 0, 0),
+         (1, 1, 0), "icon"),
+        (VRT_CPYFM, (3, 2, 24, 21, 60, 4, 0, 0), (1, 0, 1), "icon"),
+        (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 101, 4, 0, 0),
+         (1, 1, 0), "icon"),
+        (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 150, 30, 0, 0),
+         (4, 3, 0), "icon"),
+        (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 201, 30, 0, 0),
+         (1, 0, 0), "icon"),
+        (VS_CLIP, (251, 33, 278, 50), (1,)),
+        (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 248, 30, 0, 0),
+         (1, 0, 1), "icon"),
+        (VS_CLIP, (0, 0, 639, 239), (0,))]),
 
     # --- mouse cursor.  The pointer is placed with v_locator, which is how
     # GEM itself sets the locator's initial position (gsx_setmousexy), so no
@@ -492,6 +534,38 @@ CASES = [
         (V_PLINE, (61, 239, 61, 0), ()),
         (VS_CLIP, (0, 0, 0, 0), (0,)),
         (VSL_TYPE, (), (1,))]),
+
+    # Diagonals step pixel by pixel through the MEMAC window (line_diag in
+    # vdi.c): the style rotates with the pixel count from the first point --
+    # and restarts at every vertex -- the writing mode decides what a clear
+    # style bit does, and the clip is applied per pixel without disturbing
+    # the phase, including the pixels a line spends off the screen.
+    ("diagonals: styled, every mode, clipped, off the screen", [
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (4,)),
+        (VR_RECFL, (40, 40, 300, 160), ()),
+        (VSL_COLOR, (), (1,)), (VSL_TYPE, (), (3,)),
+        (V_PLINE, (10, 10, 330, 90), ()),
+        (V_PLINE, (330, 95, 10, 15), ()),
+        (V_PLINE, (10, 200, 60, 230, 110, 200, 160, 235), ()),
+        (VSL_TYPE, (), (1,)), (VSWR_MODE, (), (2,)),
+        (V_PLINE, (20, 170, 200, 30), ()),
+        (VSL_TYPE, (), (5,)),
+        (V_PLINE, (25, 170, 205, 30), ()),
+        (VSWR_MODE, (), (3,)),
+        (V_PLINE, (30, 170, 210, 30), ()),
+        (VSWR_MODE, (), (4,)),
+        (V_PLINE, (35, 170, 215, 30), ()),
+        (VSWR_MODE, (), (1,)), (VSL_TYPE, (), (1,)),
+        (V_PLINE, (-20, -10, 120, 60), ()),
+        (V_PLINE, (600, 200, 700, 260), ()),
+        (VS_CLIP, (51, 61, 250, 141), (1,)),
+        (VSL_TYPE, (), (3,)),
+        (V_PLINE, (0, 0, 400, 200), ()),
+        (V_PLINE, (400, 0, 0, 200), ()),
+        (VSWR_MODE, (), (3,)),
+        (V_PLINE, (0, 200, 400, 0), ()),
+        (VS_CLIP, (0, 0, 0, 0), (0,)),
+        (VSWR_MODE, (), (1,)), (VSL_TYPE, (), (1,))]),
 
     ("vex_timv reports the tick length", [
         (VEX_TIMV, (), ())]),

@@ -98,6 +98,13 @@ def main():
             + [e for e in extra if not e.endswith(".o")])
         elfs[tag] = simulate(db, elf, names)
 
+    # B6 is a compiler crash: compile its file alone and read the outcome
+    b6 = subprocess.run([cc, "--code-model=large", "--data-model=small",
+                         f"-O{a.O}", "-o", os.path.join(a.out, "b6.o"),
+                         os.path.join(ROOT, "tools", "ccbug", "b6.c")],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    b6_present = b6.returncode != 0 and "internal error" in b6.stdout
+
     print(f"{version}, -O{a.O}, {os.path.relpath(scm, a.calypsi)}")
     bad = 0
     present = 0
@@ -119,12 +126,15 @@ def main():
             bad += 1
         print(f"  {'B2 with src/sys/div16.s':42s} want {want:5d} got {got:5d}   "
               f"{'ok' if got == want else 'BROKEN'}")
+    print(f"  {'B6 indexed direct-page array':42s} {'compiles':>16s}   "
+          f"{'still present' if b6_present else 'FIXED upstream'}")
+    present += b6_present
     print()
     if bad:
         print(f"check-cc: FAILED -- {bad} workaround shape(s) miscompile")
         return 1
     print(f"check-cc: PASSED -- every workaround shape is right; "
-          f"{present} of {sum(1 for v in RESULTS.values() if v[1] == 'bug')} "
+          f"{present} of {sum(1 for v in RESULTS.values() if v[1] == 'bug') + 1} "
           f"bug shapes still present")
     return 0
 

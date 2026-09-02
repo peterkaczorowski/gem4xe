@@ -242,4 +242,5 @@ native-mode vectors, overdue since Phase 3a; the return to DOS
 write-back; the per-pixel loops (`vrt_cpyfm`'s strip builder by
 nibble-pair table, `plot()` by row table and a rotating style mask, a
 line rejected against the clip before its loop) — the desktop draws
-icons by the dozen.
+icons by the dozen. *Done in Phase 8c (`docs/phase8c.md`): an icon is
+3.8 ms by frame count, and the strip builder lost its second strip.*

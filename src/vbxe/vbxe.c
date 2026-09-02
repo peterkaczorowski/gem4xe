@@ -67,14 +67,18 @@ static uint8_t memac_bank = 0xFF;           /* shadow: BANK_SEL is write-only
                                                in spirit and re-poking it on
                                                every byte would be wasteful */
 
+void vram_map_page(uint8_t page)
+{
+    if (page != memac_bank) {
+        memac_bank = page;
+        REG(FX_MEMAC_CONTROL)  = MEMAC_CTL_4K_8000;
+        REG(FX_MEMAC_BANK_SEL) = (uint8_t)(0x80 | page);
+    }
+}
+
 void vram_map(uint32_t addr)
 {
-    uint8_t bank = (uint8_t)(addr >> 12);
-    if (bank != memac_bank) {
-        memac_bank = bank;
-        REG(FX_MEMAC_CONTROL)  = MEMAC_CTL_4K_8000;
-        REG(FX_MEMAC_BANK_SEL) = (uint8_t)(0x80 | bank);
-    }
+    vram_map_page((uint8_t)(addr >> 12));
 }
 
 /* Force the next vram_map() to re-program the window.  Needed after anything

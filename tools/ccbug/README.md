@@ -1,16 +1,18 @@
 # tools/ccbug — the cc65816 bugs gem4xe works around
 
-Five code generation defects in Calypsi cc65816 **5.18**, each reproduced in
-the vendor's own simulator from a shape lifted out of gem4xe, each with the
+Six defects in Calypsi cc65816 **5.18** — five in code generation and one
+crash — each reproduced from a shape lifted out of gem4xe, each with the
 shape the sources use instead. `make check-cc` builds `bugs.c` with the
 vendor's minimal linker script and C library, runs it under `db65816`, and
-reads the results back:
+reads the results back; `b6.c`, which the compiler cannot get through, is
+compiled on its own and the outcome read from the compiler:
 
     make check-cc
       B1 stack array element + operand           want   476 got   376   still present
       B1 through a scalar                        want   476 got   476   ok
       ...
-    check-cc: PASSED -- every workaround shape is right; 7 of 7 bug shapes still present
+      B6 indexed direct-page array                       compiles   still present
+    check-cc: PASSED -- every workaround shape is right; 8 of 8 bug shapes still present
 
 The run **fails only if a workaround shape stops compiling right**, because
 that is what would break gem4xe. A bug that has gone away is reported as
@@ -38,6 +40,10 @@ What the sources do, in one line each. The reasons follow.
 5. **Never shift or double a 16-bit load through a local pointer in the same
    expression.** `wd = p->field; stride = wd * 2;`, not
    `stride = p->field * 2;`.
+6. **Never index an array that lives in the direct page.** Direct-page
+   scalars and direct-page *pointers* are fine (`__attribute__((tiny))`,
+   not the `__tiny` keyword, on a pointer declarator); tables stay
+   ordinary statics and are indexed by a direct-page scalar.
 
 ## B1 — stack-array element plus operand compiles to a load
 
@@ -124,6 +130,33 @@ of the source read correctly (`0 * garbage`) and every later row read
 unrelated memory. Switching to an incrementing pointer happened to change the
 slot allocation so `stride` no longer landed on `src`. It is root-caused now
 — `docs/phase2b.md` is updated — and `check-cc` pins it.
+
+## B6 — an indexed direct-page array is an internal compiler error
+
+    static __attribute__((tiny)) uint8_t tbl[4];
+    static __attribute__((tiny)) int i;
+    uint8_t f(void) { return tbl[i]; }
+
+    internal error: Translator/Target/WDC65816/Compiler/CGHelpers.hs:
+    (662,1)-(663,59): Non-exhaustive patterns in function mem8Reg
+
+Any variable index — a direct-page scalar, a parameter, a plain global —
+into an array placed in the direct page, with 8- or 16-bit elements, at
+every `-O` level. A constant index compiles. Direct-page scalars and
+direct-page pointers (`lda (.tiny p)`, `sta (.tiny p)`, `inc dp:.tiny p`)
+are what the fast loops want anyway, and an ordinary array indexed by a
+direct-page scalar is one instruction (`ldx dp:.tiny i; lda tbl,x`), so the
+sources keep every table out of the direct page.
+
+Two things next to it that are not bugs: the `__tiny` *keyword* on a
+pointer declarator (`uint8_t * __tiny p;`) is rejected with
+"expected identifier or '('", and the guide says to use
+`__attribute__((tiny))` where the keyword form is refused; and
+`--assembly-source` is the only way to see what a loop compiled to,
+since there is no per-function optimisation pragma.
+
+Found in Phase 8c while moving the line stepper's state into the direct
+page (`docs/phase8c.md`).
 
 ## The simulator recipe
 

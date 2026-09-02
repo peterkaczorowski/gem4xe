@@ -28,14 +28,14 @@ full-screen repaints.
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
-| `make test-m3` | 65/65 | VDI conformance — pixels *and* return values |
+| `make test-m3` | 68/68 | VDI conformance — pixels *and* return values |
 | `make test-m4` | 12/12 | AES object library: draw, find, change, edit, centre |
 | `make test-m5` | PASS | linear RAM probed: banks `$02-$EF`, 14.9 MB |
 | `make test-m6` | PASS | far code copied up and running in bank `$01`; bank `$00` on the fast bus |
 | `make test-m7` | 10/10 | `evnt_*`, `form_do`, `form_dial`, `graf_watchbox` under host-driven input |
 | `make test-m8` | 12/12 | the window manager and the control manager: rectangle lists, moves, gadgets, `WM_*` |
 | `make test-m9` | 4/4 | menus: the bar, drop-downs, `MN_SELECTED`, screenshotted inside the wait |
-| `make check-cc` | PASS | the five compiler bugs worked around, in the vendor's simulator |
+| `make check-cc` | PASS | the six compiler bugs worked around, in the vendor's simulator |
 | `make movie` | PASS | a session with the AES itself, filmed frame by frame and checked as a gate: `build/movie/gem4xe.mp4` |
 
 `make test` runs them all. Per-phase notes, including the bugs and what caught
@@ -55,8 +55,12 @@ double-click, dragged, sized, covered by the dialog, fulled and closed —
 screenshotting every frame, with every returned word and every shot
 checked against the model. Making it pass found that a pixel plotted
 through the MEMAC window costs 60–80 µs, so the pointer and `vrt_cpyfm`
-now go through the blitter like text does (`docs/phase8b.md`). Next is
-`form_alert` and the desktop.
+now go through the blitter like text does (`docs/phase8b.md`); reading
+the compiler's listing then cut the strip builder and the line stepper
+to a third of their instructions, and a blitter mode written off in
+Phase 2b turned out to do the whole icon in one blit — 60 ms an icon in
+Phase 8, 2 ms now (`docs/phase8c.md`). Next is `form_alert` and the
+desktop.
 
 Phase 7 also found that the Rapidus resets with all of bank `$00` on the
 1.79 MHz bus, and that gem4xe had run its data, stack and direct page there
@@ -87,9 +91,10 @@ running on emulated hardware with all three boards fitted.
 Nothing here is asserted by eye. Two of the bugs found so far were invisible on
 screen and only a pixel diff caught them.
 
-Calypsi cc65816 5.18 has five code generation defects this tree has met, each
-reproduced in the vendor's own simulator and worked around at the source (or,
-for the divide flags, with a linker override). `tools/ccbug/README.md` lists
+Calypsi cc65816 5.18 has six defects this tree has met — five in code
+generation and one crash — each reproduced in the vendor's own simulator (the
+crash, in the compiler itself) and worked around at the source (or, for the
+divide flags, with a linker override). `tools/ccbug/README.md` lists
 them and the rules the sources follow; `make check-cc` reports when one is
 fixed upstream so its workaround can go.
 
