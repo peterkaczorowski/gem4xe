@@ -35,8 +35,9 @@ full-screen repaints.
 | `make test-m7` | 10/10 | `evnt_*`, `form_do`, `form_dial`, `graf_watchbox` under host-driven input |
 | `make test-m8` | 12/12 | the window manager and the control manager: rectangle lists, moves, gadgets, `WM_*` |
 | `make test-m9` | 4/4 | menus: the bar, drop-downs, `MN_SELECTED`, screenshotted inside the wait |
-| `make check-cc` | PASS | the six compiler bugs worked around, in the vendor's simulator |
+| `make check-cc` | PASS | the seven compiler bugs worked around, in the vendor's simulator |
 | `make movie` | PASS | a session with the AES itself, filmed frame by frame and checked as a gate: `build/movie/gem4xe.mp4` |
+| `make bench` | — | GEMBench's tests on this machine, in milliseconds, not a gate (`docs/bench.md`) |
 
 `make test` runs them all. Per-phase notes, including the bugs and what caught
 them, are in `docs/`.
@@ -59,8 +60,14 @@ now go through the blitter like text does (`docs/phase8b.md`); reading
 the compiler's listing then cut the strip builder and the line stepper
 to a third of their instructions, and a blitter mode written off in
 Phase 2b turned out to do the whole icon in one blit — 60 ms an icon in
-Phase 8, 2 ms now (`docs/phase8c.md`). Next is `form_alert` and the
-desktop.
+Phase 8, 2 ms now (`docs/phase8c.md`). `make bench` then put GEMBench's
+headings on the machine — absolute milliseconds, since GEMBench's source
+is private and there is no ST here — and its first profile named the
+control-block builder and the VRAM upload: the dialog went from 78 to
+51 ms and a 40-character line from 27 to 15 ms, and a seventh compiler
+defect turned up under the rewrite (`docs/bench.md`). Next is
+`form_alert` and the desktop, with the multiply-per-glyph and the upload
+loop still on the benchmark's list.
 
 Phase 7 also found that the Rapidus resets with all of bank `$00` on the
 1.79 MHz bus, and that gem4xe had run its data, stack and direct page there
@@ -91,10 +98,11 @@ running on emulated hardware with all three boards fitted.
 Nothing here is asserted by eye. Two of the bugs found so far were invisible on
 screen and only a pixel diff caught them.
 
-Calypsi cc65816 5.18 has six defects this tree has met — five in code
-generation and one crash — each reproduced in the vendor's own simulator (the
-crash, in the compiler itself) and worked around at the source (or, for the
-divide flags, with a linker override). `tools/ccbug/README.md` lists
+Calypsi cc65816 5.18 has seven defects this tree has met — five in code
+generation, one crash and one in the front end's constant arithmetic — each
+reproduced in the vendor's own simulator (the crash, in the compiler itself)
+and worked around at the source (or, for the divide flags, with a linker
+override). `tools/ccbug/README.md` lists
 them and the rules the sources follow; `make check-cc` reports when one is
 fixed upstream so its workaround can go.
 

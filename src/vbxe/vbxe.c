@@ -91,17 +91,31 @@ volatile uint8_t *vram_win(uint32_t addr)
     return WIN + (addr & 0x0FFF);
 }
 
+/* Words, not bytes: the CPU is 16-bit and needs no alignment, so a word
+ * store is two bus writes for one instruction.  As a byte loop this was
+ * 20 instructions a byte and the second-hottest code in every AES row of
+ * docs/bench.md; with the pointers and the count in the direct page it is
+ * 15 a word.  The window pointer is not volatile: the compiler will not
+ * store a word through a volatile pointer without a stack temporary, and
+ * a store through a pointer it cannot see past is not one it can drop. */
+static __attribute__((tiny)) uint16_t vw_n;
+static const uint16_t * __attribute__((tiny)) vw_s;
+static uint16_t * __attribute__((tiny)) vw_w;
+
 void vram_write(uint32_t addr, const uint8_t *src, uint16_t len)
 {
     while (len) {
         uint16_t off = (uint16_t)(addr & 0x0FFF);
         uint16_t n   = (uint16_t)(MEMAC_WIN_SIZE - off);
-        uint16_t i;
         if (n > len)
             n = len;
         vram_map(addr);
-        for (i = 0; i < n; i++)
-            WIN[off + i] = src[i];
+        vw_w = (uint16_t *)(WIN + off);
+        vw_s = (const uint16_t *)src;
+        if ((vw_n = n >> 1) != 0)
+            do *vw_w++ = *vw_s++; while (--vw_n);
+        if (n & 1)
+            *(uint8_t *)vw_w = *(const uint8_t *)vw_s;
         addr += n;
         src  += n;
         len  = (uint16_t)(len - n);
@@ -230,30 +244,41 @@ static uint8_t *bcb_new(void)
     return p;
 }
 
+/* The 21 bytes of a BCB as the fields they are, so the block is written
+ * in a dozen stores: the byte-indexed version cleared it in a loop first,
+ * 20 instructions a byte, and was the hottest function in every AES row of
+ * docs/bench.md.  The code generator pads nothing and the CPU has no
+ * alignment rule, so the words sit where the layout puts them -- but
+ * `sizeof` of this struct must not be used where a constant expression is
+ * required, where it is padded (compiler bug B7, tools/ccbug); BCB_SIZE is
+ * the byte count and check-cc pins the layout. */
+typedef struct {
+    uint16_t src;      uint8_t src_bank;  uint16_t sstride;  uint8_t sxstep;
+    uint16_t dst;      uint8_t dst_bank;  uint16_t dstride;  uint8_t dxstep;
+    uint16_t width;    uint8_t height;    /* both minus one; width 9 bits  */
+    uint16_t masks;                       /* [15] AND, [16] XOR: callers'  */
+    uint16_t coll_zoom;                   /* [17] collision mask, [18] zoom */
+    uint16_t patt_ctl;                    /* [19] pattern, [20] mode|next   */
+} BCB;
+
 static void bcb_common(uint8_t *p, uint32_t src, uint16_t sstride,
                        uint32_t dst, uint16_t dstride,
                        uint16_t bytes, uint16_t rows)
 {
-    uint16_t w1 = (uint16_t)(bytes - 1);          /* NINE bits, 1..512      */
-    uint8_t i;
-    for (i = 0; i < BCB_SIZE; i++)
-        p[i] = 0;
-    p[0]  = (uint8_t)(src);
-    p[1]  = (uint8_t)(src >> 8);
-    p[2]  = (uint8_t)(src >> 16);
-    p[3]  = (uint8_t)(sstride);
-    p[4]  = (uint8_t)(sstride >> 8);
-    p[5]  = 1;                                    /* source X step          */
-    p[6]  = (uint8_t)(dst);
-    p[7]  = (uint8_t)(dst >> 8);
-    p[8]  = (uint8_t)(dst >> 16);
-    p[9]  = (uint8_t)(dstride);
-    p[10] = (uint8_t)(dstride >> 8);
-    p[11] = 1;                                    /* dest X step            */
-    p[12] = (uint8_t)(w1 & 0xFF);
-    p[13] = (uint8_t)((w1 >> 8) & 0x01);          /* the 9th width bit      */
-    p[14] = (uint8_t)(rows - 1);                  /* height, 1..256         */
-    p[18] = 0x00;                                 /* zoom 1x1               */
+    BCB *b = (BCB *)p;
+    b->src      = (uint16_t)src;
+    b->src_bank = (uint8_t)(src >> 16);
+    b->sstride  = sstride;
+    b->sxstep   = 1;
+    b->dst      = (uint16_t)dst;
+    b->dst_bank = (uint8_t)(dst >> 16);
+    b->dstride  = dstride;
+    b->dxstep   = 1;
+    b->width    = (uint16_t)((bytes - 1) & 0x01FF);       /* 1..512        */
+    b->height   = (uint8_t)(rows - 1);                    /* 1..256        */
+    b->masks    = 0;
+    b->coll_zoom = 0;                                     /* zoom 1x1      */
+    b->patt_ctl = 0;
 }
 
 /* Solid fill.  and_mask == 0 takes the blitter's constant-source path: it

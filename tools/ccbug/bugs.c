@@ -9,8 +9,9 @@
  *
  * The shapes are lifted from where each bug was met: everyobj() in
  * src/aes/objc.c (B1), gsx_tcalc() in src/aes/graf.c (B2, B3), ob_sst()
- * in src/aes/objc.c (B4) and vdi_vrt_cpyfm() in src/vdi/vdi.c (B5).  Keep
- * them recognisable rather than minimal.
+ * in src/aes/objc.c (B4), vdi_vrt_cpyfm() in src/vdi/vdi.c (B5) and the
+ * BCB overlay in src/vbxe/vbxe.c (B7).  Keep them recognisable rather than
+ * minimal.
  */
 #include <stdint.h>
 
@@ -159,6 +160,31 @@ WORD b5_fix(void)
     return b5_walk(bits, sy1, stride);
 }
 
+/* ---- B7: sizeof a struct is padded where a constant expression is needed - */
+
+/* The code generator lays a struct out with no padding -- a 16-bit member
+ * sits at an odd offset if that is where it falls, the 65816 having no
+ * alignment rule -- and `sizeof` in an ordinary expression says so.  But
+ * `sizeof` where an integer constant expression is required (an enum, an
+ * array bound, _Static_assert) is evaluated with 16-bit members aligned to
+ * 2 and comes out larger.  A stride taken from such a constant walks off
+ * the elements.  Write the byte count out instead (BCB_SIZE, src/vbxe). */
+typedef struct { uint16_t a; uint8_t b; uint16_t c; } B7_S;      /* 5 bytes */
+enum { B7_STRIDE = sizeof(B7_S) };                                /* says 6 */
+B7_S b7_arr[3];
+
+static WORD b7_bug(void)
+{
+    const uint8_t *p = (const uint8_t *)b7_arr + B7_STRIDE;
+    return (WORD)((const B7_S *)p)->c;
+}
+
+static WORD b7_fix(void)
+{
+    const uint8_t *p = (const uint8_t *)b7_arr + 5;
+    return (WORD)((const B7_S *)p)->c;
+}
+
 /* ---- results ------------------------------------------------------------ */
 
 volatile WORD r_b1_bug, r_b1_fix;                       /* want 476 */
@@ -166,6 +192,7 @@ volatile WORD r_b2_eq, r_b2_lt, r_b2_mod;               /* want 7, 0, 0 */
 volatile WORD r_b3_bug, r_b3_fix;                       /* want 7 */
 volatile WORD r_b4_bug, r_b4_fix;                       /* want -2 */
 volatile WORD r_b5_bug, r_b5_fix;                       /* want 120 */
+volatile WORD r_b7_bug, r_b7_fix;                       /* want 801 */
 
 __task int main(void)
 {
@@ -192,5 +219,10 @@ __task int main(void)
     b5_ptsin[1] = 1; b5_ptsin[3] = 4;
     r_b5_bug = b5_bug();                        /* rows 1..4: 12+24+36+48 */
     r_b5_fix = b5_fix();
+
+    b7_arr[1].a = 0x1111; b7_arr[1].b = 0x22; b7_arr[1].c = 801;
+    b7_arr[2].a = 0x4444; b7_arr[2].b = 0x55; b7_arr[2].c = 0x6666;
+    r_b7_bug = b7_bug();                        /* element 1's c, by stride */
+    r_b7_fix = b7_fix();
     return 0;
 }

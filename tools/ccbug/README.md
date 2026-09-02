@@ -1,8 +1,8 @@
 # tools/ccbug — the cc65816 bugs gem4xe works around
 
-Six defects in Calypsi cc65816 **5.18** — five in code generation and one
-crash — each reproduced from a shape lifted out of gem4xe, each with the
-shape the sources use instead. `make check-cc` builds `bugs.c` with the
+Seven defects in Calypsi cc65816 **5.18** — five in code generation, one
+crash and one in the front end's arithmetic — each reproduced from a shape
+lifted out of gem4xe, each with the shape the sources use instead. `make check-cc` builds `bugs.c` with the
 vendor's minimal linker script and C library, runs it under `db65816`, and
 reads the results back; `b6.c`, which the compiler cannot get through, is
 compiled on its own and the outcome read from the compiler:
@@ -12,7 +12,7 @@ compiled on its own and the outcome read from the compiler:
       B1 through a scalar                        want   476 got   476   ok
       ...
       B6 indexed direct-page array                       compiles   still present
-    check-cc: PASSED -- every workaround shape is right; 8 of 8 bug shapes still present
+    check-cc: PASSED -- every workaround shape is right; 9 of 9 bug shapes still present
 
 The run **fails only if a workaround shape stops compiling right**, because
 that is what would break gem4xe. A bug that has gone away is reported as
@@ -44,6 +44,9 @@ What the sources do, in one line each. The reasons follow.
    scalars and direct-page *pointers* are fine (`__attribute__((tiny))`,
    not the `__tiny` keyword, on a pointer declarator); tables stay
    ordinary statics and are indexed by a direct-page scalar.
+7. **Never `sizeof` a struct where an integer constant expression is
+   required** — an enum, an array bound, `_Static_assert`. It is padded
+   there and not in the code. Write the byte count out (`BCB_SIZE`).
 
 ## B1 — stack-array element plus operand compiles to a load
 
@@ -157,6 +160,27 @@ since there is no per-function optimisation pragma.
 
 Found in Phase 8c while moving the line stepper's state into the direct
 page (`docs/phase8c.md`).
+
+## B7 — `sizeof` a struct is padded where a constant expression is required
+
+    typedef struct { uint16_t a; uint8_t b; uint16_t c; } S;   /* laid out in 5 bytes */
+    enum { STRIDE = sizeof(S) };                                /* 6 */
+
+The code generator lays a struct out with no padding — a 16-bit member
+sits at an odd offset if that is where it falls, the 65816 having no
+alignment rule — and `sizeof(S)` in an ordinary expression is 5, `S x[2]`
+is 10 bytes and `x[1].c` is read at offset 8. But where the language
+requires an integer constant expression — an enum, an array bound,
+`_Static_assert` — `sizeof(S)` is evaluated with 16-bit members aligned to
+2 and is 6. `char buf[sizeof(S)]` merely over-allocates; a stride or an
+offset taken from such a constant reads the wrong bytes, and
+`_Static_assert(sizeof(S) == 5)` fails on a struct that *is* 5 bytes,
+which is how this was found: the BCB overlay in `src/vbxe/vbxe.c` was
+given exactly that assertion as a guard. All `-O` levels.
+
+The sources write the byte count out where a constant is needed
+(`BCB_SIZE`) and `check-cc` reads element 1 of a three-element array
+through both strides.
 
 ## The simulator recipe
 

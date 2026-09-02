@@ -8,6 +8,7 @@
 #   make test-m8    the window manager: rectangle lists, moves, WM_REDRAW
 #   make test-m9    menus: the bar, drop-downs, MN_SELECTED under host input
 #   make check-cc   the compiler bugs we work around, in the vendor's simulator
+#   make bench      GEMBench's tests on this machine, in milliseconds (docs/bench.md)
 #   make test       all of them
 #   make emu-stop   kill leftover emulators (never use pkill -f: it kills the shell)
 
@@ -220,6 +221,12 @@ demo: build/m3-boot.atr
 movie: build/m3-boot.atr
 	python3 tests/emu/demo_aes.py
 
+# GEMBench's tests, shaped for this machine: the dialog, text, graphics,
+# window, divide, float, RAM, ROM and blit rows timed to a VCOUNT tick
+# and reported in milliseconds.  Not a gate; the baseline is docs/bench.md.
+bench: build/m3-boot.atr
+	python3 tests/emu/bench_gem.py
+
 # NEVER `pkill -f AltirraSDL` here: the pattern matches this shell too and
 # takes the session with it.  pgrep -x matches the process NAME only.
 # An emulator halted at a debugger breakpoint ignores SIGTERM, so escalate
@@ -233,4 +240,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 demo movie emu-stop clean
+.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 demo movie bench emu-stop clean

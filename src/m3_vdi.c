@@ -24,6 +24,12 @@
  *
  * vdi_scratch[] is where the host stages MFDBs and their bitmaps, so a case
  * can pass a real source form without anything being compiled in.
+ *
+ * An opcode of 2000+n is a benchmark op (tests/emu/bench_gem.py): the CPU
+ * and the memory it can reach, which no VDI or AES call exercises on its
+ * own.  intin[0] is the iteration count and the op returns a checksum in
+ * intout[0].  The host times a script from the VCOUNT the runner stamps at
+ * ST_VC_GO and ST_VC_DONE, against the emulator's cycle counter.
  */
 #include "vdi/vdi.h"
 #include "vdi/pointer.h"
@@ -35,10 +41,20 @@
 #define STATUS ((volatile unsigned char *) 0x0600)
 
 /* STATUS[0..1] 'V','D'   STATUS[2] stage   STATUS[3] go   STATUS[4] done
- * The host writes STATUS[3]; the runner answers on STATUS[4].              */
-#define ST_STAGE 2
-#define ST_GO    3
-#define ST_DONE  4
+ * The host writes STATUS[3]; the runner answers on STATUS[4].
+ * STATUS[5..6] are VCOUNT when GO was seen and just before DONE was set,
+ * STATUS[7] the number of VCOUNT values in a frame, measured at start-up:
+ * with no interrupts there is no free-running clock, and VCOUNT is what
+ * the target can stamp a script's start and end with.  The host reads the
+ * emulator's cycle counter at the frame boundaries around a script and
+ * takes the idle tail off with the stamps (tests/emu/bench_gem.py).      */
+#define ST_STAGE     2
+#define ST_GO        3
+#define ST_DONE      4
+#define ST_VC_GO     5
+#define ST_VC_DONE   6
+#define ST_VC_PERIOD 7
+#define VCOUNT (*(volatile uint8_t *)0xD40B)
 
 /* Both buffers are host-poked staging, so they go in the `teststage` section,
  * which src/gem4xe.scm gives a memory of its own.  Naming the section means
@@ -70,6 +86,131 @@ __attribute__((section("teststage")))
 volatile WORD vdi_result_count;
 
 
+/* How many values VCOUNT takes in a frame -- 156 on PAL, 131 on NTSC --
+ * read off the hardware rather than assumed: the largest value seen
+ * between two wraps, plus one.  Costs a frame or two, once. */
+static uint8_t vcount_period(void)
+{
+    uint8_t last = VCOUNT, max = 0, wraps = 0;
+    while (wraps < 2) {
+        uint8_t v = VCOUNT;
+        if (v < last)
+            wraps++;
+        if (v > max)
+            max = v;
+        last = v;
+    }
+    return (uint8_t)(max + 1);
+}
+
+
+/* ---- benchmark ops -------------------------------------------------------
+ * 2000+n.  The memory ops read, write or copy BENCH_BYTES at a time, n
+ * times, through a far pointer whatever the space, so the loop is the same
+ * and the spaces differ only in the bus behind them:
+ *   space 0  the 24-bit address in the next two intin words
+ *   space 1  VRAM at that address, mapped through the MEMAC window
+ *   space 2  a buffer on the runner's stack: bank $00, the fast SRAM
+ *   space 3  a second such buffer, for a bank-$00 to bank-$00 copy
+ * The divide ops go through _Div16 (the override, tools/ccbug B2) and the
+ * library's 32-bit divide; the float op is whatever the library does. */
+#define BENCH_BYTES 256
+
+/* The memory loops move words, counting down, with the counter and the
+ * sum in the direct page (Phase 8c): as byte loops with stack locals they
+ * cost 24 instructions a byte, which buried the bus behind the loop.
+ * Scalars only -- an indexed direct-page array is compiler bug B6. */
+static __attribute__((tiny)) UWORD bench_j;
+static __attribute__((tiny)) UWORD bench_sum;
+
+static uint8_t __far *bench_place(WORD lo, WORD hi, WORD space, uint8_t *buf)
+{
+    uint32_t a = ((uint32_t)(UWORD)hi << 16) | (UWORD)lo;
+    switch (space) {
+    case 1:  return (uint8_t __far *)vram_win(a);
+    case 2:  return (uint8_t __far *)buf;
+    case 3:  return (uint8_t __far *)(buf + BENCH_BYTES);
+    default: return (uint8_t __far *)a;
+    }
+}
+
+static UWORD bench_op(WORD which)
+{
+    WORD n = intin[0], k;
+    UWORD sum = 0;
+    uint8_t buf[2 * BENCH_BYTES];
+    switch (which) {
+    case 1: {                                   /* 16-bit divide */
+        WORD a = 32767, b = 1;
+        for (k = 0; k < n; k++) {
+            sum += (UWORD)(a / b);
+            a -= 7;
+            b = (b & 15) + 1;
+        }
+        break;
+    }
+    case 2: {                                   /* 32-bit divide */
+        int32_t a = 0x7FFFFFFFL, b = 1;
+        for (k = 0; k < n; k++) {
+            sum += (UWORD)(a / b);
+            a -= 70001L;
+            b = (b & 15) + 1;
+        }
+        break;
+    }
+    case 3: {                                   /* float: mul, add, div */
+        float a = 1.5f;
+        for (k = 0; k < n; k++) {
+            a = a * 1.0001f + 0.5f;
+            a = a / 1.0002f;
+        }
+        sum = (UWORD)a;
+        break;
+    }
+    case 4:                                     /* read */
+        bench_sum = 0;
+        for (k = 0; k < n; k++) {
+            const UWORD __far *p = (const UWORD __far *)
+                bench_place(intin[1], intin[2], intin[3], buf);
+            bench_j = BENCH_BYTES / 2;
+            do bench_sum += *p++; while (--bench_j);
+        }
+        sum = bench_sum;
+        break;
+    case 5:                                     /* write */
+        for (k = 0; k < n; k++) {
+            UWORD __far *p = (UWORD __far *)
+                bench_place(intin[1], intin[2], intin[3], buf);
+            bench_j = BENCH_BYTES / 2;
+            do *p++ = bench_j; while (--bench_j);
+        }
+        sum = (UWORD)n;
+        break;
+    case 6:                                     /* copy: src, then dst */
+        for (k = 0; k < n; k++) {
+            const UWORD __far *s = (const UWORD __far *)
+                bench_place(intin[1], intin[2], intin[3], buf);
+            UWORD __far *d = (UWORD __far *)
+                bench_place(intin[4], intin[5], intin[6], buf);
+            bench_j = BENCH_BYTES / 2;
+            do *d++ = *s++; while (--bench_j);
+        }
+        sum = (UWORD)n;
+        break;
+    case 7: {                                   /* vram_write: the driver's upload */
+        uint32_t a = ((uint32_t)(UWORD)intin[2] << 16) | (UWORD)intin[1];
+        for (k = 0; k < n; k++)
+            vram_write(a, buf, BENCH_BYTES);
+        sum = (UWORD)n;
+        break;
+    }
+    default:
+        break;
+    }
+    return sum;
+}
+
+
 static void run_script(void)
 {
     WORD i = 0;
@@ -89,7 +230,11 @@ static void run_script(void)
             ptsin[k] = vdi_script[i++];
         for (k = 0; k < nint && k < INTIN_SIZE; k++)
             intin[k] = vdi_script[i++];
-        if (op >= 1000) {
+        if (op >= 2000) {
+            intout[0] = (WORD)bench_op((WORD)(op - 2000));
+            contrl[2] = 0;
+            contrl[4] = 1;
+        } else if (op >= 1000) {
             OBJECT *tree = (OBJECT *)(uint16_t)contrl[7];
             GRECT clip;
             WORD c2 = 0, c4 = 0;
@@ -473,6 +618,7 @@ __task void main(void)
      * references it -- the host is the only writer. */
     vdi_scratch[0] = 0;
     vdi_results[0] = 0;
+    STATUS[ST_VC_PERIOD] = vcount_period();
     STATUS[ST_STAGE] = 1;                       /* ready for scripts */
 
     for (;;) {
@@ -484,7 +630,9 @@ __task void main(void)
         if (STATUS[ST_GO]) {
             STATUS[ST_GO] = 0;
             STATUS[ST_DONE] = 0;
+            STATUS[ST_VC_GO] = VCOUNT;
             run_script();
+            STATUS[ST_VC_DONE] = VCOUNT;
             STATUS[ST_DONE] = 0xA5;
         }
     }
