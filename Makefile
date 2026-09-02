@@ -212,6 +212,14 @@ test-m9: build/m3-boot.atr
 demo: build/m3-boot.atr
 	python3 tests/emu/demo_desktop.py
 
+# A session with the AES itself -- menu, dialog, a window opened, dragged,
+# sized, fulled and closed -- driven through the emulator's input and
+# captured a frame at a time into build/movie/gem4xe.mp4 and .gif.  Every
+# result and screenshot is checked against the reference as the gates are.
+# `--keep-frames` keeps the PNGs; `--dry` runs the model only.
+movie: build/m3-boot.atr
+	python3 tests/emu/demo_aes.py
+
 # NEVER `pkill -f AltirraSDL` here: the pattern matches this shell too and
 # takes the session with it.  pgrep -x matches the process NAME only.
 # An emulator halted at a debugger breakpoint ignores SIGTERM, so escalate
@@ -225,4 +233,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 demo emu-stop clean
+.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 demo movie emu-stop clean

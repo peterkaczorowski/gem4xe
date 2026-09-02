@@ -47,11 +47,11 @@
 /* From src/farload.s -- reports the bank the far code is running in. */
 extern unsigned int _fl_running_bank(void);
 
-#define SCRIPT_WORDS 512
+#define SCRIPT_WORDS 1024
 __attribute__((section("teststage")))
 volatile WORD vdi_script[SCRIPT_WORDS];
 
-#define SCRATCH_BYTES 1024
+#define SCRATCH_BYTES 2048
 __attribute__((section("teststage")))
 volatile unsigned char vdi_scratch[SCRATCH_BYTES];
 

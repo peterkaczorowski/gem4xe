@@ -113,6 +113,16 @@
 #define VR_LINE_H          (VR_PATT + (uint32_t)VR_PATT_STRIDE * VR_PATT_ROWS)
 #define VR_LINE_V          (VR_LINE_H + VR_PATT_STRIDE)
 #define VR_LINE_V_ROWS     256
+/* The pointer form as blit sources (src/vdi/vdi.c, cursor_expand): for each
+ * parity of x an AND strip and an OR strip, VR_CURSOR_ROWS rows of
+ * VR_CURSOR_STRIDE bytes -- four strips, written through one MEMAC mapping,
+ * so they follow the line strips at the next 256-byte boundary and must not
+ * straddle a page (vdi.c checks).  A show is then the save copy and two
+ * blits wherever the pointer is; see the note above cursor_expand.        */
+#define VR_CURSOR          ((VR_LINE_V + VR_LINE_V_ROWS + 0xFFUL) & ~0xFFUL)
+#define VR_CURSOR_STRIDE   16
+#define VR_CURSOR_ROWS     16
+#define VR_CURSOR_LEN      ((uint32_t)VR_CURSOR_STRIDE * VR_CURSOR_ROWS * 4)
 #define VR_FONT            0x31000UL            /* 4bpp glyph masks, both
                                                    parities: 18 KB -> $357FF */
 /* The AES's save buffer for menu drop-downs and alerts (bb_save /
@@ -121,7 +131,12 @@
  * The donor keeps 25 character columns by the screen height and overflows
  * on a wider drop-down; a full screen costs nothing here.               */
 #define VR_SAVE            0x40000UL            /* 76,800 -> $52BFF         */
-/* $53000+ free: window backing stores, icons, patterns */
+/* Scratch for vrt_cpyfm (src/vdi/vdi.c): a monochrome form expanded to 4bpp
+ * AND and OR strips, half a page each, written through one MEMAC mapping
+ * and blitted in bands.  The first page boundary after the save buffer.  */
+#define VR_STRIP           ((VR_SAVE + SCR_BYTES + 0xFFFUL) & ~0xFFFUL)
+#define VR_STRIP_LEN       0x1000UL
+/* VR_STRIP + VR_STRIP_LEN onward is free: window backing stores, icons */
 
 /* ---- MEMAC A window --------------------------------------------------- */
 /* 4 KB at $8000.  NOT MEMAC B: that is fixed at $4000-$7FFF, where U1MB's

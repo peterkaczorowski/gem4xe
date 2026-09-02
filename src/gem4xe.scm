@@ -49,13 +49,14 @@
     ;; src/sys/rapidus.h), so nothing that runs often should land there.
     (memory Near       (address (#x3800 . #x3fff))
             (section code libcode cdata idata data_init_table))
-    (memory Near2      (address (#xa000 . #xafff))
+    (memory Near2      (address (#xa000 . #xa7ff))
             (section code libcode cdata idata data_init_table))
 
     ;; The conformance runner's host-poked buffers.  A bss section cannot share
     ;; a memory with sections that carry bits, so it gets its own -- which also
-    ;; means nothing else can land in it by accident.
-    (memory TestStage  (address (#xb000 . #xbffb))
+    ;; means nothing else can land in it by accident.  Near2 has never been
+    ;; needed, so the runner takes 6 KB of the region and leaves it 2 KB.
+    (memory TestStage  (address (#xa800 . #xbffb))
             (section teststage))
 
     ;; The load-time staging buffer, inside the MEMAC A window.  It holds no

@@ -2855,7 +2855,10 @@ class AES:
         elif fmd_type == FMD_SHRINK:
             self.gr_shrinkbox(pi, pt)
         elif fmd_type == FMD_FINISH:
+            # the desktop under the dialog, then WM_REDRAW to every window
+            # the dialog covered (w_update clips its rectangle in place)
             self.w_drawdesk(pt)
+            self.w_update(DESKWH, pt.copy(), DESKWH, False)
         return 1
 
     def form_keybd(self, obj, ch, nxt):
@@ -3278,9 +3281,19 @@ def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None):
     v = vdiref.VDI()
     v.ptr_x, v.ptr_y = pointer
     a = AES(v, tree, mem)
-    plan = dict(plan or {})
-    trees = trees or {}
-    a.trees = trees
+    a.trees = trees or {}
+    a.home = tree               # the tree a record that names none means
+    return v, a, resume(v, a, script, plan)
+
+
+def resume(v, a, script, plan=None, base=0):
+    """Run script on models that already have a history -- the target's
+    state carries from one script to the next unless a script starts it
+    over with GSX_START, and a session longer than the runner's buffers
+    hold is fed to it in pieces.  Plan keys index the script from base.
+    Returns the result records."""
+    plan = {k - base: v_ for k, v_ in (plan or {}).items()}
+    trees, tree = a.trees, a.home
     results = []
     for i, rec in enumerate(script):
         op = rec[0]
@@ -3316,22 +3329,27 @@ def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None):
             v.call(op, pts, ints, rec[3] if len(rec) > 3 else None)
             results.append(v.result())
     if plan:
-        raise ValueError(f"plan for records that do not exist: {sorted(plan)}")
-    return v, a, results
+        raise ValueError(f"plan for records that do not exist: "
+                         f"{sorted(k + base for k in plan)}")
+    return results
 
 
-def encode(script, tree_base):
+def encode(script, tree_base, mfdb_addr=0):
     """Serialise a script for src/m3_vdi.c: AES records carry the tree's
     address in the contrl[7] slot -- tree_base, or the record's own fourth
-    slot when it names another tree."""
+    slot when it names another tree.  A VDI raster record's form (its
+    fourth slot) is at mfdb_addr on the target, as vdiref.encode plants
+    it."""
     out = []
     for rec in script:
         op = rec[0]
         pts = list(rec[1]) if len(rec) > 1 else []
         ints = list(rec[2]) if len(rec) > 2 else []
-        c7 = 0
+        c7 = c8 = 0
         if op >= AES_OP:
             c7 = (rec[3] if len(rec) > 3 else tree_base) & 0xFFFF
-        out += [op, len(pts) // 2, len(ints), c7, 0, 0, 0] + pts + ints
+        elif len(rec) > 3 and rec[3] is not None:
+            c7, c8 = mfdb_addr & 0xFFFF, (mfdb_addr >> 16) & 0xFFFF
+        out += [op, len(pts) // 2, len(ints), c7, c8, 0, 0] + pts + ints
     out.append(0)
     return out

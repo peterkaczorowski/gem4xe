@@ -154,6 +154,7 @@ class VDI:
         self.cur_data = [0] * 16
         self.cur_hide = 1          # visible only at 0; starts hidden
         self.cur_drawn = False
+        self.cur_lastx = self.cur_lasty = -1
         self.sv = None             # (bx, y, nb, nr, bytes)
         self.ptr_x, self.ptr_y = 0, 0
         self.buttons = 0
@@ -231,6 +232,12 @@ class VDI:
     def _plot(self, x, y, hwpen):
         """Write one HARDWARE pen; callers map through MAP_COL."""
         if not self._visible(x, y):
+            return
+        self._plot_raw(x, y, hwpen)
+
+    def _plot_raw(self, x, y, hwpen):
+        """The same, clipped to the screen only -- the pointer."""
+        if not (0 <= x < SCR_W and 0 <= y < SCR_H):
             return
         a = self.base + y * STRIDE + (x >> 1)
         b = self.s.mem[a]
@@ -539,14 +546,17 @@ class VDI:
         self.sv = None
 
     def _cursor_paint(self, cx, cy):
+        """Data over mask over the screen.  Like real GEM's, the pointer
+        ignores vs_clip: it is drawn wherever it is on the screen.  (Both
+        this model and the target once clipped it -- agreeing, and wrong.)"""
         for row in range(16):
             m, d = self.cur_mask[row], self.cur_data[row]
             for col in range(16):
                 bit = 0x8000 >> col
                 if m & bit:
-                    self._plot(cx + col, cy + row, MAP_COL[self.cur_bg & 15])
+                    self._plot_raw(cx + col, cy + row, MAP_COL[self.cur_bg & 15])
                 if d & bit:
-                    self._plot(cx + col, cy + row, MAP_COL[self.cur_fg & 15])
+                    self._plot_raw(cx + col, cy + row, MAP_COL[self.cur_fg & 15])
 
     def _cursor_show_now(self):
         cx, cy = self.ptr_x - self.cur_xhot, self.ptr_y - self.cur_yhot
@@ -558,6 +568,18 @@ class VDI:
         if self.cur_drawn:
             self._cursor_restore()
             self.cur_drawn = False
+
+    def _cursor_move(self):
+        """vdi_cursor_move(): erase-move-redraw, only when the pointer
+        moved and the cursor is shown."""
+        if self.cur_hide:
+            return
+        if ((self.ptr_x, self.ptr_y) == (self.cur_lastx, self.cur_lasty)
+                and self.cur_drawn):
+            return
+        self._cursor_hide_now()
+        self.cur_lastx, self.cur_lasty = self.ptr_x, self.ptr_y
+        self._cursor_show_now()
 
     # -- dispatch --------------------------------------------------------
     def call(self, op, pts=(), ints=(), form=None):
@@ -714,11 +736,12 @@ class VDI:
         # everything else is a documented no-op on this driver
 
     def input_poll(self, tick=False):
-        """vdi_input_poll(): motion every pass, the button vector on a
-        change, the timer vector once per frame.  The key poll has no
-        counterpart here -- a plan step puts its key straight in `keys` --
-        and the cursor never moves because it is never shown.  `tick` says
-        this pass is the first of a frame, where VCOUNT's wrap lands."""
+        """vdi_input_poll(): the cursor follows the pointer, then motion
+        every pass, the button vector on a change, the timer vector once
+        per frame.  The key poll has no counterpart here -- a plan step
+        puts its key straight in `keys`.  `tick` says this pass is the
+        first of a frame, where VCOUNT's wrap lands."""
+        self._cursor_move()
         if self.vec_motv:
             self.vec_motv()
         if self.buttons != self.last_buttons:

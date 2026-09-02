@@ -244,8 +244,9 @@ the code, only since Phase 6.
 
 That is also why the linker map matters more than it looked: `stack`,
 `data`, `zdata` and the direct page all sit in `$2000-$2FFF`, inside the one
-window whose writes can go fast; `$A000-$AFFF` carries only code and
-constants, and `$B000-$BFFB` only the test runner's host-poked buffers.
+window whose writes can go fast; `$A000-$A7FF` carries only code and
+constants, and `$A800-$BFFB` only the test runner's host-poked buffers
+(the split was `$B000` until Phase 8b grew the runner's buffers).
 
 `src/sys/rapidus.c` fixes it by derivation, not by writing a constant:
 

@@ -297,8 +297,9 @@ CASES = [
 
     # --- vrt_cpyfm: a ONE-PLANE form expanded into device colours.  This is
     # how the AES draws icons.  The source lives in RAM, out of the blitter's
-    # reach, so it is honest CPU work -- acceptable because the AES only ever
-    # uses it for small forms.
+    # reach: the CPU expands it into AND/OR strips in VRAM and the blitter
+    # applies them (it was plotted pixel by pixel until Phase 8b measured
+    # that at three frames an icon).
     ("vrt_cpyfm replace: fg and bg both painted", [
         (VSF_COLOR, (), (8,)), (VR_RECFL, (0, 0, 200, 80), ()),
         (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 16, 16, 0, 0),
@@ -327,6 +328,33 @@ CASES = [
     ("vrt_cpyfm sub-rectangle of the form", [
         (VSF_COLOR, (), (0,)), (VR_RECFL, (0, 0, 200, 80), ()),
         (VRT_CPYFM, (8, 4, 23, 19, 40, 20, 0, 0), (1, 4, 6), "icon")]),
+
+    # The strip path clips to the pixel: a clip edge at odd x lands inside a
+    # byte, and every mode has its own "leave alone" pair.
+    ("vrt_cpyfm clipped by vs_clip at odd edges, every mode", [
+        (VSF_COLOR, (), (2,)), (VR_RECFL, (0, 0, 300, 80), ()),
+        (VS_CLIP, (19, 18, 140, 41), (1,)),
+        (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 16, 16, 0, 0),
+         (1, 4, 6), "icon"),
+        (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 50, 16, 0, 0),
+         (2, 1, 0), "icon"),
+        (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 84, 20, 0, 0),
+         (4, 0, 7), "icon"),
+        (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 118, 30, 0, 0),
+         (3, 0, 0), "icon"),
+        (VS_CLIP, (0, 0, 639, 239), (0,))]),
+
+    ("vrt_cpyfm transparent in pen 0: the AND strip alone", [
+        (VSF_COLOR, (), (8,)), (VR_RECFL, (0, 0, 200, 80), ()),
+        (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 17, 16, 0, 0),
+         (2, 0, 0), "icon")]),
+
+    ("vrt_cpyfm at the screen corners", [
+        (VSF_COLOR, (), (6,)), (VR_RECFL, (0, 0, 639, 239), ()),
+        (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, -5, -3, 0, 0),
+         (1, 1, 0), "icon"),
+        (VRT_CPYFM, (0, 0, ICON_W - 1, ICON_H - 1, 621, 226, 0, 0),
+         (2, 1, 0), "icon")]),
 
     # --- mouse cursor.  The pointer is placed with v_locator, which is how
     # GEM itself sets the locator's initial position (gsx_setmousexy), so no
@@ -371,6 +399,16 @@ CASES = [
         (VSC_FORM, (), cursor_form()),
         (V_LOCATOR, (2, 2), ()), (V_SHOW_C, (), (0,)), (V_HIDE_C, (), ()),
         (V_LOCATOR, (634, 234), ()), (V_SHOW_C, (), (0,))]),
+
+    # Real GEM's pointer is drawn wherever it is, whatever vs_clip says.
+    # Both the target and the model once clipped it -- and agreed.
+    ("cursor ignores vs_clip: drawn whole under a clip that excludes it", [
+        (VSF_COLOR, (), (4,)), (VR_RECFL, (0, 0, 200, 100), ()),
+        (VS_CLIP, (300, 150, 400, 200), (1,)),
+        (V_LOCATOR, (95, 45), ()),
+        (VSC_FORM, (), cursor_form()),
+        (V_SHOW_C, (), (0,)),
+        (VS_CLIP, (0, 0, 639, 239), (0,))]),
 
     ("hide nesting: two hides need two shows", [
         (VSF_COLOR, (), (7,)), (VR_RECFL, (0, 0, 200, 100), ()),

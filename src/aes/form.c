@@ -244,6 +244,8 @@ WORD fm_do(OBJECT *tree, WORD start_fld)
  * the dialog covered; FMD_START reserves the screen. */
 WORD fm_dial(WORD fmd_type, const GRECT *pi, const GRECT *pt)
 {
+    GRECT c;
+
     gsx_sclip(&gl_rscreen);
     switch (fmd_type) {
     case FMD_START:
@@ -255,9 +257,11 @@ WORD fm_dial(WORD fmd_type, const GRECT *pi, const GRECT *pt)
         gr_shrinkbox(pi, pt);
         break;
     case FMD_FINISH:
+        /* the desktop under the dialog, then WM_REDRAW to every window
+         * the dialog covered; w_update clips its rectangle in place */
         w_drawdesk(pt);
-        /* w_update(DESKWH, pt, DESKWH, FALSE): the windows' WM_REDRAWs,
-         * once there are windows */
+        c = *pt;
+        w_update(DESKWH, &c, DESKWH, FALSE);
         break;
     }
     return TRUE;

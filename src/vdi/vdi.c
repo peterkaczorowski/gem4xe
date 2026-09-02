@@ -555,6 +555,72 @@ static WORD  cur_hide = 1;          /* visible only at 0; starts hidden */
 static WORD  cur_drawn;             /* is the saved block valid?        */
 static WORD  sv_bx, sv_y, sv_nb, sv_nr;   /* what cursor_save() captured */
 
+/* The pointer is drawn by the blitter.  vsc_form expands the form to 4bpp
+ * strips, one pair per parity of x: an AND strip ($0 under the form, $F
+ * elsewhere) and an OR strip (the data colour under the data, the mask colour
+ * under the rest of the mask, $0 elsewhere).  A show is then the save copy
+ * and two blits, one chain, wherever the pointer is; a hide is one copy.
+ *
+ * The first version plotted the 256 pixels through the MEMAC window.  At
+ * ~60 us a pixel that was 12 ms a show -- most of a frame -- paid on every
+ * move and twice around every primitive the AES hides the pointer for, and
+ * it is what pushed the window sizer's release past the frame it was due in
+ * (docs/phase8b.md).  The four strips are a kilobyte written once per form.
+ *
+ * Like real GEM the pointer ignores the clipping rectangle: it is drawn
+ * wherever it is on the screen (the plotted version clipped it, and so did
+ * the model -- both were wrong the same way). */
+#define CUR_W          16
+#define CUR_ROWS       VR_CURSOR_ROWS
+#define CUR_STRIDE     VR_CURSOR_STRIDE
+#define CUR_BYTES      (CUR_W / 2 + 1)         /* the odd-x span; even pads */
+#define CUR_STRIP_LEN  ((uint32_t)CUR_STRIDE * CUR_ROWS)
+#define VR_CUR_AND(par) (VR_CURSOR + (uint32_t)(par) * 2 * CUR_STRIP_LEN)
+#define VR_CUR_OR(par)  (VR_CUR_AND(par) + CUR_STRIP_LEN)
+typedef char cursor_strips_fit_one_page
+    [((VR_CURSOR & 0xFFFUL) + VR_CURSOR_LEN <= 0x1000UL) ? 1 : -1];
+typedef char cursor_stride_holds_the_odd_span[(CUR_STRIDE >= CUR_BYTES) ? 1 : -1];
+
+static void cursor_expand(void)
+{
+    volatile uint8_t *w;
+    WORD par, row, p;
+    uint8_t fg = (uint8_t)HW(cur_fg), bg = (uint8_t)HW(cur_bg);
+
+    if (blit_pending())         /* a show may still be reading the strips */
+        blit_run();
+    w = vram_win(VR_CURSOR);
+    for (par = 0; par < 2; par++) {
+        volatile uint8_t *pa = w + (uint16_t)(par * 2 * CUR_STRIP_LEN);
+        volatile uint8_t *po = pa + (uint16_t)CUR_STRIP_LEN;
+        for (row = 0; row < CUR_ROWS; row++) {
+            UWORD m = cur_mask[row], d = cur_data[row];
+            uint8_t a = 0, o = 0;
+            /* strip pixel p holds form column p - par: at odd x the form
+             * starts in the low nibble of its first byte */
+            for (p = 0; p < 2 * CUR_BYTES; p++) {
+                WORD col = (WORD)(p - par);
+                uint8_t an = 0x0F, on = 0x00;
+                if (col >= 0 && col < CUR_W) {
+                    UWORD bit = (UWORD)(0x8000u >> col);
+                    if (d & bit)      { an = 0; on = fg; }
+                    else if (m & bit) { an = 0; on = bg; }
+                }
+                if (p & 1) {
+                    pa[p >> 1] = (uint8_t)(a | an);
+                    po[p >> 1] = (uint8_t)(o | on);
+                } else {
+                    a = (uint8_t)(an << 4);
+                    o = (uint8_t)(on << 4);
+                }
+            }
+            pa += CUR_STRIDE;
+            po += CUR_STRIDE;
+        }
+    }
+}
+
+/* Queue the copy of what is under the form.  The caller runs the chain. */
 static void cursor_save(WORD cx, WORD cy)
 {
     WORD bx0, bx1, y0, y1;
@@ -574,7 +640,6 @@ static void cursor_save(WORD cx, WORD cy)
     blit_copy(VR_SCREEN0 + (uint32_t)sv_y * SCR_STRIDE + (uint32_t)sv_bx,
               SCR_STRIDE, VR_CURSAVE, VR_CURSAVE_STRIDE,
               (uint16_t)sv_nb, (uint16_t)sv_nr);
-    blit_run();
 }
 
 static void cursor_restore(void)
@@ -588,29 +653,32 @@ static void cursor_restore(void)
     sv_nb = 0;
 }
 
-/* Plot the cursor form.  CPU work: 256 pixels is nothing next to a blit-list
- * upload, and the form is not byte-aligned in general. */
+/* Queue the two strip blits over the block cursor_save() described.  The
+ * strips are read from the same offset the screen edges clipped away. */
 static void cursor_paint(WORD cx, WORD cy)
 {
-    WORD row, col;
-    for (row = 0; row < 16; row++) {
-        UWORD m = cur_mask[row], d = cur_data[row];
-        for (col = 0; col < 16; col++) {
-            UWORD bit = (UWORD)(0x8000u >> col);
-            if (m & bit)
-                plot((WORD)(cx + col), (WORD)(cy + row), HW(cur_bg));
-            if (d & bit)
-                plot((WORD)(cx + col), (WORD)(cy + row), HW(cur_fg));
-        }
-    }
+    WORD par = (WORD)(cx & 1);
+    uint32_t off, dst;
+    if (!sv_nb)
+        return;
+    off = (uint32_t)(sv_y - cy) * CUR_STRIDE
+        + (uint32_t)(sv_bx - (WORD)(cx >> 1));
+    dst = VR_SCREEN0 + (uint32_t)sv_y * SCR_STRIDE + (uint32_t)sv_bx;
+    blit_mask(VR_CUR_AND(par) + off, CUR_STRIDE, dst, SCR_STRIDE,
+              (uint16_t)sv_nb, (uint16_t)sv_nr, 0xFF, 0x00, BLT_MODE_AND);
+    blit_mask(VR_CUR_OR(par) + off, CUR_STRIDE, dst, SCR_STRIDE,
+              (uint16_t)sv_nb, (uint16_t)sv_nr, 0xFF, 0x00, BLT_MODE_OR);
 }
 
 static void cursor_show_now(void)
 {
     WORD cx = (WORD)(ptr_seen.x - cur_xhot);
     WORD cy = (WORD)(ptr_seen.y - cur_yhot);
+    if (blit_pending())         /* room for the three blocks */
+        blit_run();
     cursor_save(cx, cy);
     cursor_paint(cx, cy);
+    blit_run();
     cur_drawn = 1;
 }
 
@@ -624,7 +692,7 @@ static void cursor_hide_now(void)
 
 /* Called by the input loop after ptr_poll().  Erase-move-redraw, and only when
  * the pointer actually moved -- redrawing a stationary cursor every frame
- * would cost two blits and 256 plots for nothing. */
+ * would cost three blits for nothing. */
 void vdi_cursor_move(void)
 {
     static WORD lastx = -1, lasty = -1;
@@ -650,6 +718,7 @@ static void vdi_vsc_form(void)
         cur_mask[i] = (UWORD)intin[5 + i];
         cur_data[i] = (UWORD)intin[21 + i];
     }
+    cursor_expand();
 }
 
 /* GEM's nesting rule: v_hide_c increments a counter and the cursor is visible
@@ -974,6 +1043,7 @@ static void vdi_v_opnwk(void)
     cur_hide  = 1;
     cur_drawn = 0;
     sv_nb     = 0;
+    cursor_expand();                /* strips for the form in force  */
     load_palette();
     fill_workout();
     contrl[6] = vwk.handle;
@@ -1326,22 +1396,40 @@ static void vdi_vro_cpyfm(void)
 /* vrt_cpyfm -- transparent raster copy: a ONE-PLANE source expanded into the
  * device's colours.  This is how the AES draws icons and glyph masks.
  *
- * The source form lives in RAM, not VRAM, so the blitter cannot reach it and
- * this is honest CPU work.  That is acceptable: the AES uses it for icons and
- * mouse forms, which are small, and never for anything full-screen.
+ * The source form lives in RAM, not VRAM, so the blitter cannot read it; but
+ * it can do the writing.  The CPU expands the clipped destination rectangle
+ * into two 4bpp strips at VR_STRIP -- an AND strip and an OR strip, the same
+ * pair the pointer and the text path use -- through one MEMAC mapping, and
+ * two blits apply them; XOR mode is one XOR blit of a single strip.  The
+ * strips hold half a page each, so a wide form goes in bands.  The first
+ * version plotted pixel by pixel: a read and a write on the 1.79 MHz bus per
+ * pixel, ~60 us each, three frames for a 32x24 icon (docs/phase8b.md).
+ *
+ * The rules per mode, pixel by pixel, are the VDI's and tools/vdiref.py's:
+ *   replace      fg where set, bg where clear
+ *   transparent  fg where set
+ *   XOR          complement where set
+ *   erase        bg where CLEAR
+ * and a pixel outside the clip rectangle or the screen is left alone: AND
+ * $F, OR $0 (XOR $0).  Clipping is to the pixel here, as plot() clipped.
  *
  * Source bits are MSB-first within each byte, rows are fd_wdwidth WORDS apart
  * -- the VDI's own layout, kept exactly (see the MFDB note in vdi.h).
  */
+#define STRIP_HALF  ((uint16_t)(VR_STRIP_LEN / 2))
+
 static void vdi_vrt_cpyfm(void)
 {
     MFDB *src = (MFDB *)(uint16_t)contrl[7];   /* forms live in bank $00 */
-    WORD mode = intin[0], fg = HW(intin[1]), bg = HW(intin[2]);
+    WORD mode = intin[0];
+    uint8_t fg = (uint8_t)HW(intin[1]), bg = (uint8_t)HW(intin[2]);
     WORD sx1 = ptsin[0], sy1 = ptsin[1], sx2 = ptsin[2], sy2 = ptsin[3];
     WORD dx1 = ptsin[4], dy1 = ptsin[5];
     const uint8_t *bits;
-    WORD w, h, row, col, wdwidth;
+    WORD w, h, wdwidth;
     uint16_t stride;
+    WORD cx0, cy0, cx1, cy1, bx0, nb, band, y;
+    uint8_t set_a, set_o, clr_a, clr_o, out_a;
 
     if (!src || !src->fd_addr)
         return;
@@ -1360,30 +1448,113 @@ static void vdi_vrt_cpyfm(void)
     wdwidth = src->fd_wdwidth;                              /* WORDS */
     stride  = (uint16_t)((uint16_t)wdwidth * 2u);
 
-    /* An incrementing pointer rather than bits + row * stride: cheaper, and
-     * it is the form the conformance suite has always proved. */
-    bits += (uint16_t)sy1 * (uint16_t)stride;
-    for (row = 0; row < h; row++, bits += (uint16_t)stride) {
-        for (col = 0; col < w; col++) {
-            WORD sx = (WORD)(sx1 + col);
-            uint8_t byte = bits[(uint16_t)sx >> 3];
-            WORD on = (byte >> (7 - (sx & 7))) & 1;
-            WORD dx = (WORD)(dx1 + col), dy = (WORD)(dy1 + row);
-            switch (mode) {
-            case MD_TRANS:                      /* fg where set, else leave */
-                if (on) plot(dx, dy, fg);
-                break;
-            case MD_XOR:
-                if (on) plot_xor(dx, dy);
-                break;
-            case MD_ERASE:                      /* bg where CLEAR, else leave */
-                if (!on) plot(dx, dy, bg);
-                break;
-            default:                            /* MD_REPLACE: paint both */
-                plot(dx, dy, on ? fg : bg);
-                break;
+    /* The destination, clipped as plot() clipped: the clip rectangle when
+     * one is set, then the screen. */
+    cx0 = dx1;  cy0 = dy1;
+    cx1 = (WORD)(dx1 + w - 1);  cy1 = (WORD)(dy1 + h - 1);
+    if (vwk.clip) {
+        if (cx0 < vwk.xmn_clip) cx0 = vwk.xmn_clip;
+        if (cy0 < vwk.ymn_clip) cy0 = vwk.ymn_clip;
+        if (cx1 > vwk.xmx_clip) cx1 = vwk.xmx_clip;
+        if (cy1 > vwk.ymx_clip) cy1 = vwk.ymx_clip;
+    }
+    if (cx0 < 0) cx0 = 0;
+    if (cy0 < 0) cy0 = 0;
+    if (cx1 > SCR_W - 1) cx1 = SCR_W - 1;
+    if (cy1 > SCR_H - 1) cy1 = SCR_H - 1;
+    if (cx1 < cx0 || cy1 < cy0)
+        return;
+    bx0 = (WORD)(cx0 >> 1);
+    nb  = (WORD)((cx1 >> 1) - bx0 + 1);
+
+    /* What a set and a clear source bit contribute, per mode. */
+    switch (mode) {
+    case MD_TRANS: set_a = 0x0; set_o = fg; clr_a = 0xF; clr_o = 0;  break;
+    case MD_ERASE: set_a = 0xF; set_o = 0;  clr_a = 0x0; clr_o = bg; break;
+    case MD_XOR:   set_a = 0xF; set_o = 0;  clr_a = 0x0; clr_o = 0;  break;
+    default:       set_a = 0x0; set_o = fg; clr_a = 0x0; clr_o = bg; break;
+    }
+    out_a = (mode == MD_XOR) ? 0x0 : 0xF;   /* the strip that is blitted */
+
+    band = (WORD)(STRIP_HALF / (uint16_t)nb);   /* rows a band holds */
+    if (band > 256)
+        band = 256;
+    /* the source row under the first clipped destination row */
+    bits += (uint16_t)(sy1 + (cy0 - dy1)) * stride;
+    for (y = cy0; y <= cy1; y += band) {
+        WORD rows = (WORD)(cy1 - y + 1);
+        volatile uint8_t *pa, *po;
+        uint32_t dst;
+        WORD r;
+        uint8_t and_all = 0xFF, or_any = 0, xor_any = 0;
+
+        if (rows > band)
+            rows = band;
+        if (blit_pending())     /* the last band may still read the strips */
+            blit_run();
+        pa = vram_win(VR_STRIP);
+        po = pa + STRIP_HALF;
+        for (r = 0; r < rows; r++, bits += stride) {
+            WORD x = (WORD)(bx0 * 2);
+            WORD b;
+            for (b = 0; b < nb; b++, x += 2) {
+                uint8_t ab, ob, an, on;
+                WORD sx;
+                /* the even pixel: high nibble */
+                if (x < cx0) {
+                    an = out_a; on = 0;
+                } else {
+                    sx = (WORD)(sx1 + (x - dx1));
+                    if (bits[(UWORD)sx >> 3] & (uint8_t)(0x80 >> (sx & 7))) {
+                        an = set_a; on = set_o;
+                    } else {
+                        an = clr_a; on = clr_o;
+                    }
+                }
+                ab = (uint8_t)(an << 4);
+                ob = (uint8_t)(on << 4);
+                /* the odd pixel: low nibble */
+                if (x + 1 > cx1) {
+                    an = out_a; on = 0;
+                } else {
+                    sx = (WORD)(sx1 + (x + 1 - dx1));
+                    if (bits[(UWORD)sx >> 3] & (uint8_t)(0x80 >> (sx & 7))) {
+                        an = set_a; on = set_o;
+                    } else {
+                        an = clr_a; on = clr_o;
+                    }
+                }
+                ab |= an;
+                ob |= on;
+                pa[b] = ab;
+                and_all &= ab;
+                xor_any |= ab;
+                if (mode != MD_XOR) {
+                    po[b] = ob;
+                    or_any |= ob;
+                }
             }
+            pa += nb;
+            po += nb;
         }
+        dst = VR_SCREEN0 + (uint32_t)y * SCR_STRIDE + (uint32_t)bx0;
+        if (mode == MD_XOR) {
+            if (xor_any)
+                blit_mask(VR_STRIP, (uint16_t)nb, dst, SCR_STRIDE,
+                          (uint16_t)nb, (uint16_t)rows, 0xFF, 0x00,
+                          BLT_MODE_XOR);
+        } else {
+            if (and_all != 0xFF)
+                blit_mask(VR_STRIP, (uint16_t)nb, dst, SCR_STRIDE,
+                          (uint16_t)nb, (uint16_t)rows, 0xFF, 0x00,
+                          BLT_MODE_AND);
+            if (or_any)
+                blit_mask(VR_STRIP + STRIP_HALF, (uint16_t)nb, dst, SCR_STRIDE,
+                          (uint16_t)nb, (uint16_t)rows, 0xFF, 0x00,
+                          BLT_MODE_OR);
+        }
+        if (blit_pending())
+            blit_run();
     }
 }
 
