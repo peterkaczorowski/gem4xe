@@ -187,10 +187,13 @@ void vdi_save_form(MFDB *m);
 /* Drive the input devices once.  Polls the pointer and the keyboard, moves the
  * cursor, and calls whichever vex_* vectors are installed.
  *
- * Today the application calls this in its own loop, because gem4xe runs with
- * interrupts off (src/crt_atari.s).  When native-mode vector stubs exist this
- * is what the VBI will call instead -- the AES above it will not notice the
- * difference, which is the point of it being a single entry point. */
+ * The application calls this in its own loop.  Since Phase 9 the sampling
+ * that cannot wait for the loop is done under interrupt (src/sys/irq.s: the
+ * timer IRQ decodes a quadrature device, the keyboard IRQ latches the key) and
+ * this call only consumes what the handlers counted -- so the loop may be as
+ * slow as it likes without losing anything.  Moving the whole call under the
+ * VBI is still possible; the AES above would not notice, which is the point
+ * of it being a single entry point. */
 void vdi_input_poll(void);
 
 /* Just the keyboard: move POKEY's one-key latch into the driver's queue and

@@ -36,6 +36,7 @@
 #include "aes/aes.h"
 #include "sys/farmem.h"
 #include "sys/rapidus.h"
+#include "sys/irq.h"
 #include "vbxe/vbxe.h"
 
 #define STATUS ((volatile unsigned char *) 0x0600)
@@ -44,10 +45,12 @@
  * The host writes STATUS[3]; the runner answers on STATUS[4].
  * STATUS[5..6] are VCOUNT when GO was seen and just before DONE was set,
  * STATUS[7] the number of VCOUNT values in a frame, measured at start-up:
- * with no interrupts there is no free-running clock, and VCOUNT is what
- * the target can stamp a script's start and end with.  The host reads the
- * emulator's cycle counter at the frame boundaries around a script and
- * takes the idle tail off with the stamps (tests/emu/bench_gem.py).      */
+ * VCOUNT is what the target stamps a script's start and end with, finer
+ * than the frame counter the VBI keeps.  The host reads the emulator's
+ * cycle counter at the frame boundaries around a script and takes the
+ * idle tail off with the stamps (tests/emu/bench_gem.py).
+ * STATUS[30..37] the interrupt regime (src/sys/irq.h): how, fail, fast,
+ * timer_div, rom_sum, ram_sum -- the sums as two little-endian words.   */
 #define ST_STAGE     2
 #define ST_GO        3
 #define ST_DONE      4
@@ -62,6 +65,8 @@
  * runner's map identical to the driver's everywhere else. */
 /* From src/farload.s -- reports the bank the far code is running in. */
 extern unsigned int _fl_running_bank(void);
+/* From src/crt_atari.s -- back to DOS; never returns. */
+extern void _sys_exit(void);
 
 #define SCRIPT_WORDS 1024
 __attribute__((section("teststage")))
@@ -211,6 +216,59 @@ static UWORD bench_op(WORD which)
 }
 
 
+/* System ops, 3000 and up: what a script needs from outside the VDI and
+ * the AES.  3000 selects a pointing device (kind, x, y) -- the interrupt
+ * handler starts sampling PORTA for a relative one; 3001 asks for the
+ * return to DOS once the script is done and reported; 3002 runs the
+ * target for intin[0] frames WITHOUT polling anything, which is what
+ * proves the handler counts without help; 3003 is one pass of the input
+ * machinery (vdi_input_poll), as an AES wait would make, so what the
+ * handler counted reaches ptr_seen and vq_mouse.  intout[0..5] report the
+ * handler's state after each: frames, timer, the two axes, keys, fault. */
+static uint8_t exit_req;
+
+static void sys_op(WORD op)
+{
+    switch (op) {
+    case 0:
+        ptr_init((ptr_kind)intin[0], intin[1], intin[2]);
+        break;
+    case 1:
+        exit_req = 1;
+        break;
+    case 2: {
+        WORD n = intin[0];
+        if (irq.how != IRQ_OFF) {
+            uint16_t f = irq_frames;
+            while ((uint16_t)(irq_frames - f) < (uint16_t)n)
+                ;
+        } else {
+            uint8_t last = VCOUNT;
+            while (n) {
+                uint8_t vc = VCOUNT;
+                if (vc < last)
+                    n--;
+                last = vc;
+            }
+        }
+        break;
+    }
+    case 3:
+        vdi_input_poll();
+        break;
+    default:
+        break;
+    }
+    intout[0] = (WORD)irq_frames;
+    intout[1] = (WORD)irq_timer;
+    intout[2] = (WORD)irq_qlo;
+    intout[3] = (WORD)irq_qhi;
+    intout[4] = (WORD)irq_kb_count;
+    intout[5] = (WORD)irq_fault;
+    contrl[2] = 0;
+    contrl[4] = 6;
+}
+
 static void run_script(void)
 {
     WORD i = 0;
@@ -230,7 +288,9 @@ static void run_script(void)
             ptsin[k] = vdi_script[i++];
         for (k = 0; k < nint && k < INTIN_SIZE; k++)
             intin[k] = vdi_script[i++];
-        if (op >= 2000) {
+        if (op >= 3000) {
+            sys_op((WORD)(op - 3000));
+        } else if (op >= 2000) {
             intout[0] = (WORD)bench_op((WORD)(op - 2000));
             contrl[2] = 0;
             contrl[4] = 1;
@@ -567,6 +627,19 @@ __task void main(void)
     STATUS[28] = rapidus.cmcr_after;
     STATUS[29] = rapidus.synced;
 
+    /* Then the interrupt regime: the OS ROM shadowed, the native vectors
+     * filled, the VBI and POKEY on.  Reported so the harness can tell a
+     * machine that fell back to polling from one that did not. */
+    irq_install();
+    STATUS[30] = irq.how;
+    STATUS[31] = irq.fail;
+    STATUS[32] = irq.fast;
+    STATUS[33] = irq.timer_div;
+    STATUS[34] = (unsigned char)irq.rom_sum;
+    STATUS[35] = (unsigned char)(irq.rom_sum >> 8);
+    STATUS[36] = (unsigned char)irq.ram_sum;
+    STATUS[37] = (unsigned char)(irq.ram_sum >> 8);
+
     if (!vbxe_detect()) {
         STATUS[ST_STAGE] = 0xEE;
         for (;;)
@@ -634,6 +707,16 @@ __task void main(void)
             run_script();
             STATUS[ST_VC_DONE] = VCOUNT;
             STATUS[ST_DONE] = 0xA5;
+            if (exit_req) {
+                /* The way back, in the reverse of the way in: interrupts
+                 * off and the ROM in, the overlay off, the accelerator's
+                 * windows written back and slow, then the CPU and the
+                 * stack as DOS had them. */
+                irq_remove();
+                vbxe_off();
+                rapidus_restore();
+                _sys_exit();
+            }
         }
     }
 }

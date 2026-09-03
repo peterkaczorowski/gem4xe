@@ -258,7 +258,9 @@ constants, and `$A800-$BFFB` only the test runner's host-poked buffers
   EXTSEL never fires and MEMAC is invisible (the plan's Correction 2, now
   confirmed: Altirra's MEMAC layer sits at priority 5, the fast SRAM window
   at 58; on hardware the bus is not driven at all);
-- `$C000-$FFFF` is left as found, since the OS ROM and hardware live there;
+- `$C000-$FFFF` is left as found, since the OS ROM and hardware live there
+  (Phase 9 changed this: `src/sys/irq.c` fills that SRAM window with a copy
+  of the OS and switches it fast, see `docs/phase9.md`);
 - the other windows go fast. If write-through was off the SRAM copy may be
   stale, so it is turned on and each window is re-synced by copying itself
   onto itself (read from the motherboard, written to both);
@@ -275,6 +277,7 @@ the direct page is still writing through — checked by building without the
 call and watching it fail. Not done, and noted in `rapidus.h`: a return to
 DOS must write `$0000-$3FFF` back first (clear CMCR bit 6, copy the window
 onto itself), because with write-through off the motherboard copy is stale.
+*(Done in Phase 9: `rapidus_restore()`, on the way out to DOS.)*
 
 ### The odd-parity glyph strip
 

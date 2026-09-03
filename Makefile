@@ -7,6 +7,8 @@
 #   make test-m7    evnt_* and form_do under host-driven input
 #   make test-m8    the window manager: rectangle lists, moves, WM_REDRAW
 #   make test-m9    menus: the bar, drop-downs, MN_SELECTED under host input
+#   make test-m10   native-mode interrupts: the ROM shadow, VBI, timer, keys,
+#                   a trak-ball counted in the handler, and the way back to DOS
 #   make check-cc   the compiler bugs we work around, in the vendor's simulator
 #   make bench      GEMBench's tests on this machine, in milliseconds (docs/bench.md)
 #   make test       all of them
@@ -34,7 +36,7 @@ SRC_DOS  ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures
 
 HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
 M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/font8x8.o build/fillpat.o build/vbxe.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/font8x8.o build/fillpat.o build/vbxe.o
 
 all: build/hello-boot.atr build/m2-boot.atr build/m3-boot.atr
 
@@ -51,13 +53,13 @@ build/vbxe.o: src/vbxe/vbxe.c src/vbxe/vbxe.h
 	$(CC) $(CFLAGS) -I src/vbxe -o $@ $<
 
 build/m2_vbxe.o: src/m2_vbxe.c src/vbxe/vbxe.h
-build/m3_vdi.o:  src/m3_vdi.c  src/vbxe/vbxe.h src/vdi/vdi.h
+build/m3_vdi.o:  src/m3_vdi.c  src/vbxe/vbxe.h src/vdi/vdi.h src/sys/irq.h
 
-build/vdi.o: src/vdi/vdi.c src/vdi/vdi.h src/vdi/pointer.h src/vbxe/vbxe.h
+build/vdi.o: src/vdi/vdi.c src/vdi/vdi.h src/vdi/pointer.h src/vbxe/vbxe.h src/sys/irq.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
-build/pointer.o: src/vdi/pointer.c src/vdi/pointer.h src/vdi/vdi.h
+build/pointer.o: src/vdi/pointer.c src/vdi/pointer.h src/vdi/vdi.h src/sys/irq.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -104,6 +106,16 @@ build/farmem.o: src/sys/farmem.c src/sys/farmem.h
 build/rapidus.o: src/sys/rapidus.c src/sys/rapidus.h src/vbxe/vbxe.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
+
+# The interrupt regime: the C side installs and removes it, the assembly
+# side is the handlers and the bank-$00 stubs the vectors point at.
+build/irq.o: src/sys/irq.c src/sys/irq.h src/sys/rapidus.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/irqs.o: src/sys/irq.s
+	@mkdir -p build
+	$(AS) -o $@ $<
 
 # The GEM 8x8 system font, extracted from EmuTOS (GPL v2+) by fontconv.py.
 # Checked in so the host reference reads the same bytes the target links.
@@ -177,7 +189,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10
 
 # The cc65816 code generation bugs gem4xe works around, run in the vendor's
 # own simulator: fails only if a workaround shape has stopped compiling
@@ -227,6 +239,13 @@ test-m8: build/m3-boot.atr
 test-m9: build/m3-boot.atr
 	python3 tests/emu/m9_menu.py
 
+# Native-mode interrupts: the OS ROM shadowed under itself and the vectors
+# filled, then each source counted against the emulator -- frames, the
+# POKEY timer's rate, keys into the ring, a trak-ball's counts taken in
+# the handler with nothing polling -- and finally the return to DOS.
+test-m10: build/m3-boot.atr
+	python3 tests/emu/m10_irq.py
+
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.
 demo: build/m3-boot.atr
@@ -259,4 +278,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 demo movie bench emu-stop clean
+.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 demo movie bench emu-stop clean

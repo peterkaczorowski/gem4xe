@@ -18,18 +18,21 @@
  * absolute position and `v_locator` is a device-independent locator, so
  * nothing above here ever learns which device is fitted.
  *
- * ⚠ A relative device needs frequent polling or it loses quadrature counts --
- * the classic Atari 8-bit mouse complaint -- which means an interrupt.
- * gem4xe currently runs with NMI and IRQ switched off (see src/crt_atari.s:
- * the 65816's native-mode vectors are not the ones the Atari OS ROM fills), so
- * the MOUSE back ends are not usable until native-mode vector stubs exist.
- * The absolute back ends have no such problem: one POT read per frame from a
- * polling loop is enough, and they work today.  So does XEM1, where the
- * adapter does the counting: the host reads a position, not a phase, and a
- * frame's movement is a difference of two readings.  Its one demand is a
- * POTGO at a steady cadence (the sample driver says within ~100 cycles,
- * every frame), which is what a VBI gives and a polling loop only
- * approximates -- so it, too, is better off once the vectors exist.
+ * A relative device needs frequent sampling or it loses quadrature counts
+ * -- the classic Atari 8-bit mouse complaint -- which means an interrupt.
+ * Since Phase 9 there is one: src/sys/irq.h shadows the OS ROM into RAM,
+ * fills the 65816's native-mode vectors, and runs a POKEY timer at ~4 kHz
+ * that samples PORTA and decodes both axes through tables THIS file fills
+ * in per device (ptr_pair, lines_select).  The relative back ends take the
+ * counters' difference each poll.  If the interrupt regime could not be
+ * installed (irq.how == IRQ_OFF) they fall back to decoding the one
+ * sample a poll gives, through the same tables, and lose counts as before.
+ * The absolute back ends never needed it: one POT read per frame is
+ * enough.  Nor does XEM1, where the adapter does the counting: the host
+ * reads a position, not a phase, and a frame's movement is a difference
+ * of two readings.  Its one demand is a POTGO at a steady cadence (the
+ * sample driver says within ~100 cycles, every frame), which the polling
+ * loop only approximates; moving it into the VBI is still to do.
  *
  * XEM1 is decoded from the mouSTer firmware's own sample driver
  * (Mad-Pascal samples/a8/mouSTer/vbl.asm), not from its prose, which calls
@@ -76,8 +79,12 @@ void ptr_sample(void);          /* ptr_seen = ptr_state, torn reads retried */
 void ptr_warp(WORD x, WORD y);  /* force a position (vq_mouse / tests)  */
 
 /* Exposed for the device-layer tests, which drive synthetic quadrature rather
- * than relying on the emulator's input system. */
+ * than relying on the emulator's input system: the two transition tables
+ * (Gray-code quadrature; the CX80's direction-and-pulse) and the per-device
+ * choice of which two PORTA lines make an axis's pair (axis 0 = x). */
 WORD ptr_decode_quad(uint8_t prev, uint8_t now);
+WORD ptr_decode_tb(uint8_t prev, uint8_t now);
+WORD ptr_pair(WORD kind, uint8_t nibble, WORD axis);
 
 /* XEM1: a reading is a 7-bit counter sent as 64..191; the movement between
  * two readings is their difference modulo 128, halved (the low bit is

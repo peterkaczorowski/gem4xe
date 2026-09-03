@@ -211,9 +211,20 @@ void vbxe_xdl_hr(uint32_t screen)
     REG(FX_VIDEO_CONTROL) = VC_XDL_ENABLE | VC_NO_TRANS;
 }
 
-/* VBXE generates no VBI of its own -- all timing still comes from ANTIC --
- * and crt_atari.s has switched ANTIC's interrupts off, so RTCLOK is not
- * ticking.  Poll VCOUNT ($D40B) for the top of the frame instead. */
+/* The way out: overlay off, so ANTIC's own display shows again, and the
+ * MEMAC window closed, so $8000-$8FFF is motherboard RAM again for whoever
+ * comes next.  The blitter is left to finish whatever it was doing. */
+void vbxe_off(void)
+{
+    REG(FX_VIDEO_CONTROL)  = 0;
+    REG(FX_MEMAC_BANK_SEL) = 0;
+    REG(FX_MEMAC_CONTROL)  = 0;
+    memac_invalidate();
+}
+
+/* VBXE generates no VBI of its own -- all timing still comes from ANTIC.
+ * Poll VCOUNT ($D40B) for the top of the frame; it works whether or not
+ * the vertical blank interrupt is on (src/sys/irq.h). */
 void vbxe_wait_vbl(void)
 {
     volatile uint8_t *vcount = (volatile uint8_t *)0xD40B;

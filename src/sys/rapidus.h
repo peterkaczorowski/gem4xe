@@ -20,7 +20,9 @@
  *   - the window(s) holding the VBXE MEMAC window MUST stay slow.  MEMAC
  *     substitutes VRAM for motherboard RAM on the bus; a fast window never
  *     reaches the bus and would read the SRAM copy instead of VRAM.
- *   - $C000-$FFFF is left as found: OS ROM and hardware, not ours.
+ *   - $C000-$FFFF is left as found by THIS file: OS ROM and hardware.
+ *     src/sys/irq.c switches it fast once its SRAM holds the RAM copy of
+ *     the OS with the native-mode vectors patched, and back on exit.
  *   - $0000-$3FFF drops write-through only if the linker really did put the
  *     direct page, the stack and the data there -- checked, not assumed.
  *   - everything else goes fast-read, coherent by write-through.
@@ -31,11 +33,12 @@
  * re-synced by copying it onto itself with write-through on and the window
  * still slow: reads come from the motherboard, writes land in both.
  *
- * NOT DONE: once $0000-$3FFF stops writing through, the motherboard copy of
- * the OS variables, DOS and the direct page is stale.  A return to DOS in
- * 6502 mode would have to write it back first (clear CMCR bit 6 and copy the
- * window onto itself again).  Nothing returns to DOS yet; the native-mode
- * vectors gate that anyway.
+ * THE WAY BACK: once $0000-$3FFF stops writing through, the motherboard
+ * copy of the OS variables, DOS and the direct page is stale.  A return to
+ * DOS in 6502 mode has to write it back first -- rapidus_restore() clears
+ * CMCR bit 6 and copies the window onto itself again, then puts the MCR's
+ * speed bits back as they were found.  sys_exit() (src/crt_atari.s) is the
+ * only caller, after irq_remove() has given the OS ROM back.
  */
 #ifndef GEM4XE_RAPIDUS_H
 #define GEM4XE_RAPIDUS_H
@@ -74,5 +77,13 @@ extern RAPIDUS rapidus;
  * the MEMAC window -- a re-sync copies the window onto itself, which must be
  * plain RAM at the time -- and before anything timing-sensitive. */
 void rapidus_speedup(void);
+
+/* Undo it: write $0000-$3FFF back and restore the MCR's speed bits.  For the
+ * return to DOS only; nothing is fast afterwards. */
+void rapidus_restore(void);
+
+/* The register file, for src/sys/irq.c's window 3 switch. */
+uint8_t rapidus_reg_read(uint32_t a);
+void    rapidus_reg_write(uint32_t a, uint8_t v);
 
 #endif /* GEM4XE_RAPIDUS_H */

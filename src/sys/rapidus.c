@@ -20,6 +20,9 @@ static void reg_write(uint32_t a, uint8_t v)
     *p = v;
 }
 
+uint8_t rapidus_reg_read(uint32_t a)     { return reg_read(a); }
+void    rapidus_reg_write(uint32_t a, uint8_t v) { reg_write(a, v); }
+
 /* Bring a window's SRAM copy up to date from the motherboard.  Only valid
  * while the window is still slow and write-through is on: a read then comes
  * from the motherboard and a write lands in both.  Copying the window that
@@ -87,4 +90,28 @@ void rapidus_speedup(void)
         reg_write(RAP_CMCR, cmcr);
     }
     rapidus.cmcr_after = cmcr;
+}
+
+/* The way back, for a return to DOS.  Window 0 first gets its write-through
+ * back and is copied onto itself -- reads still come from the SRAM, so the
+ * copy carries everything written since the speed-up down to the
+ * motherboard, the OS variables and the direct page and stack included --
+ * and then the MCR is put back as it was found.  Window 3 is irq_remove()'s
+ * to restore; it is the one that changed it.  Runs on the stack it is
+ * writing back, which is fine: every byte goes back with the value it has. */
+void rapidus_restore(void)
+{
+    uint8_t mcr;
+
+    if (!rapidus.present)
+        return;
+    if (rapidus.cmcr_after & CMCR_FAST0) {
+        rapidus.cmcr_after &= (uint8_t)~CMCR_FAST0;
+        reg_write(RAP_CMCR, rapidus.cmcr_after);
+        sync_window(0);
+    }
+    mcr = reg_read(RAP_MCR);
+    mcr = (uint8_t)((mcr & ~MCR_SLOWALL) | (rapidus.mcr_before & MCR_SLOWALL));
+    reg_write(RAP_MCR, mcr);
+    rapidus.mcr_after = mcr;
 }

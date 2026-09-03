@@ -24,7 +24,7 @@ full-screen repaints.
 
 | Gate | | |
 |---|---|---|
-| `make test-host` | 29/29 | pointer device layer, .xex far-code staging |
+| `make test-host` | 38/38 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — and .xex far-code staging |
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
@@ -35,6 +35,7 @@ full-screen repaints.
 | `make test-m7` | 10/10 | `evnt_*`, `form_do`, `form_dial`, `graf_watchbox` under host-driven input |
 | `make test-m8` | 12/12 | the window manager and the control manager: rectangle lists, moves, gadgets, `WM_*` |
 | `make test-m9` | 4/4 | menus: the bar, drop-downs, `MN_SELECTED`, screenshotted inside the wait |
+| `make test-m10` | 27/27 | native-mode interrupts: the OS shadowed into SRAM byte for byte, the VBI, a ~4 kHz timer, the keyboard, a trak-ball counted under interrupt, and a clean return to DOS |
 | `make check-cc` | PASS | the seven compiler bugs worked around, in the vendor's simulator |
 | `make movie` | PASS | a session with the AES itself, filmed frame by frame and checked as a gate: `build/movie/gem4xe.mp4` |
 | `make bench` | — | GEMBench's tests on this machine, in milliseconds, not a gate (`docs/bench.md`) |
@@ -101,6 +102,26 @@ Running this on a machine without a 65C816 would corrupt memory rather than
 fail — the long store the copier needs is an unstable undocumented opcode on an
 NMOS 6502 — so the loader identifies the CPU and probes for linear RAM before
 its first store, and prints a line and returns to DOS if either is missing.
+
+**Interrupts run in native mode** (`docs/phase9.md`). The 65C816's native
+vectors sit at `$FFE4-$FFEF`, inside the OS ROM, which the Atari OS never
+fills — so from Phase 0 to Phase 8 gem4xe ran with NMI and IRQ off and
+polled everything. `src/sys/irq.c` copies the OS ROM into the Rapidus's
+SRAM under it, page by page through write-through, patches the six vectors
+to point at bank-`$00` stubs, and switches the window in; the handlers
+count frames, run a POKEY timer at ~4 kHz that samples the joystick port
+and decodes a quadrature or trak-ball device into two counters, and put
+keys into a ring. The pointer layer consumes the counters, so an ST mouse,
+an Amiga mouse and a CX80 trak-ball now work as well as the tablet did —
+in Altirra; no real hardware has been near this. On exit the ROM is
+switched back, `$0000-$3FFF` is written back to the motherboard, and DOS's
+own keyboard IRQ echoes the next key typed at its prompt, which is what
+the gate checks. Getting the gate green also found that the emulator was
+reading a phantom joystick: the host keyboard's "System Control" HID
+interface, which SDL enumerates as a joystick with one out-of-range axis,
+held PORTA's left line low through AltirraSDL's input maps. The rig now
+keeps SDL's joystick subsystem off every host input device it can find in
+sysfs.
 
 ## Verification
 

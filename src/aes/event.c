@@ -642,11 +642,20 @@ WORD ev_multi(WORD flags, const MOBLK *pmo1, const MOBLK *pmo2,
 
 /* Sleep for `ticks` ticks; none means one (adelay).  Unlike ev_multi's
  * timer, which answers at once for a count of zero, a plain evnt_timer(0)
- * always gives the machine one tick. */
+ * always gives the machine one tick.
+ *
+ * The count starts at the call, as ev_wait's does: the poll comes first,
+ * so the ticks the VDI has been keeping since the last poll -- frames the
+ * application spent drawing, or idle, before it asked -- are delivered to
+ * the delays that want real time (b_delay) and not to this wait.  Under
+ * the interrupt regime that backlog is every frame since the last poll,
+ * where the polled regime could hand over at most one. */
 static void ev_wait_ticks(uint32_t ticks)
 {
-    uint32_t t0 = gl_ticks;
+    uint32_t t0;
 
+    ev_poll();
+    t0 = gl_ticks;
     if (ticks == 0)
         ticks = 1;
     do

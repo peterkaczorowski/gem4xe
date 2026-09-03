@@ -9,6 +9,7 @@
 #include "vdi.h"
 #include "pointer.h"
 #include "../vbxe/vbxe.h"
+#include "../sys/irq.h"
 
 WORD contrl[CONTRL_SIZE];
 WORD intin[INTIN_SIZE];
@@ -1804,7 +1805,7 @@ static WORD    last_buttons;
 /* Vector exchange.  The new handler arrives in contrl[7..8] and the old one is
  * returned in contrl[9..10] -- the VDI's own convention.  Data pointers are 16
  * bits here, but FUNCTION pointers are 24 bits under the large code model (the
- * handlers live in bank $01), so both words carry address: [7] low, [8] high
+ * handlers live above bank $00), so both words carry address: [7] low, [8] high
  * -- the LONG at &contrl[7] in this machine's byte order. */
 static VDI_VEC vex(VDI_VEC *slot)
 {
@@ -1847,16 +1848,18 @@ static void vdi_vqin_mode(void)
 
 /* The keyboard is read straight from POKEY, not through the OS.
  *
- * The OS's CH ($02FC) is filled by its keyboard IRQ handler, and gem4xe runs
- * with the CPU's I flag set (src/crt_atari.s), so nothing ever fills it.
- * POKEY itself is enough: with IRQEN bit 6 set it latches a key press in
- * IRQST bit 6 (0 = a key arrived) and holds the raw code in KBCODE until the
- * next one.  The latch is what makes polling reliable -- a key that was
- * pressed and released between two polls is still there to be read -- and it
- * is cleared by writing the bit low then high in IRQEN.  The I flag keeps the
- * CPU from taking the interrupt, so nothing vectors through the unfilled
- * native-mode $FFEE.  (It also matters to the test rig: AltirraSDL's KEY verb
- * queues a key until the keyboard IRQ is enabled and acknowledged.)
+ * The OS's CH ($02FC) is filled by its keyboard IRQ handler, and the OS's
+ * handler is not running: gem4xe's own vectors are in (src/sys/irq.h), or
+ * -- if they could not be installed -- the CPU's I flag is set.  Either way
+ * the raw code comes from POKEY.  With the interrupt regime up, the IRQ
+ * handler in src/sys/irq.s has already taken KBCODE into an 8-deep ring and
+ * this drains it.  Without it, POKEY's own latch is enough: with IRQEN bit
+ * 6 set it holds a key press in IRQST bit 6 (0 = a key arrived) and the raw
+ * code in KBCODE until the next one, so a key pressed and released between
+ * two polls is still there to be read; the latch is cleared by writing the
+ * bit low then high in IRQEN.  (The latch also matters to the test rig:
+ * AltirraSDL's KEY verb queues a key until the keyboard IRQ is enabled and
+ * acknowledged.)
  *
  * Raw codes are translated through the OS's own key table, found through
  * KEYDEF ($79): 64 entries each for plain, shift (KBCODE bit 6) and control
@@ -1880,8 +1883,8 @@ static void kb_init(void)
 {
     kb_head = kb_tail = 0;
     kb_caps = 0;
-    IRQEN  = 0x40;                  /* keyboard IRQ: latch presses in IRQST */
-    POKMSK = 0x40;
+    POKMSK |= 0x40;                 /* keyboard IRQ, alongside whatever the */
+    IRQEN   = POKMSK;               /* interrupt regime already enabled     */
 }
 
 /* ATASCII from the OS table -> GEM key code (scan << 8 | ascii).  0 = nothing
@@ -1914,21 +1917,34 @@ static WORD kb_translate(uint8_t code)
     }
 }
 
+static void kb_queue(uint8_t code)
+{
+    WORD k = kb_translate(code);
+    uint8_t next = (uint8_t)((kb_tail + 1) & (KB_QLEN - 1));
+    if (k && next != kb_head) {
+        kb_q[kb_tail] = k;
+        kb_tail = next;
+    }
+}
+
 void vdi_key_poll(void)
 {
-    uint8_t code;
+    if (irq.how != IRQ_OFF) {
+        /* The handler writes the tail; only this side moves the head. */
+        while (irq_kb_head != irq_kb_tail) {
+            uint8_t code = irq_kb[irq_kb_head];
+            irq_kb_head = (uint8_t)((irq_kb_head + 1) & 7);
+            kb_queue(code);
+        }
+        return;
+    }
     if (IRQST & 0x40)               /* bit 6 high: nothing since the last ack */
         return;
-    code = KBCODE;
-    IRQEN = 0x00;                   /* acknowledge: bit low ... */
-    IRQEN = 0x40;                   /* ... then high re-arms the latch */
     {
-        WORD k = kb_translate(code);
-        uint8_t next = (uint8_t)((kb_tail + 1) & (KB_QLEN - 1));
-        if (k && next != kb_head) {
-            kb_q[kb_tail] = k;
-            kb_tail = next;
-        }
+        uint8_t code = KBCODE;
+        IRQEN = (uint8_t)(POKMSK & ~0x40); /* acknowledge: bit low ...     */
+        IRQEN = POKMSK;                    /* ... then high re-arms the latch */
+        kb_queue(code);
     }
 }
 
@@ -2035,15 +2051,29 @@ void vdi_save_form(MFDB *m)
     m->fd_r1 = m->fd_r2 = m->fd_r3 = 0;
 }
 
-/* One pass of the input machinery: everything a VBI would do, done from the
- * caller's loop instead.  The timer vector fires once per FRAME, detected as
- * ANTIC's line counter wrapping (VCOUNT counts 0..155 on PAL), so it means
- * 20 ms whether the loop runs once a frame or a hundred times.  A pass that
- * takes longer than a frame loses a tick; a VBI will fix that, not this. */
+/* One pass of the input machinery, from the caller's loop.  The timer
+ * vector fires once per FRAME: with the interrupt regime up, once for every
+ * vertical blank irq_frames has counted since the last pass -- so a pass
+ * that took three frames delivers three ticks, late but not lost -- and
+ * without it, when ANTIC's line counter is seen to wrap (VCOUNT counts
+ * 0..155 on PAL), which loses a tick whenever a pass outlasts a frame.
+ * Either way a tick means 20 ms whether the loop runs once a frame or a
+ * hundred times. */
 void vdi_input_poll(void)
 {
-    static uint8_t last_vcount;
-    uint8_t vc = VCOUNT;
+    static uint8_t  last_vcount;
+    static uint16_t last_frames;
+    uint8_t  vc = VCOUNT;
+    uint16_t ticks;
+
+    if (irq.how != IRQ_OFF) {
+        uint16_t f = irq_frames;
+        ticks = (uint16_t)(f - last_frames);
+        last_frames = f;
+    } else {
+        ticks = (vc < last_vcount) ? 1 : 0;
+    }
+    last_vcount = vc;
 
     ptr_poll();
     ptr_sample();                   /* one instant for the whole pass */
@@ -2059,9 +2089,9 @@ void vdi_input_poll(void)
         if (vec_butv)
             vec_butv();
     }
-    if (vc < last_vcount && vec_timv)
-        vec_timv();
-    last_vcount = vc;
+    if (vec_timv)
+        while (ticks--)
+            vec_timv();
 }
 
 /* ---------------------------------------------------------------------- */

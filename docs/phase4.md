@@ -93,6 +93,7 @@ unblocks the blitter IRQ, returning to DOS, and quadrature mice.
 
 It is **not** needed for the AES itself — a polled event loop is fine — so it
 stays deferred, but it is now a known procedure rather than an open risk.
+*(Built in Phase 9, essentially as described here; `docs/phase9.md`.)*
 
 ## Next
 

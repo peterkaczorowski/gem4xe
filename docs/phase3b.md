@@ -24,6 +24,10 @@ The OS's `CH` (`$02FC`) is filled by the keyboard **IRQ**, and gem4xe runs with
 IRQs off. So `v_string` and `vq_key_s` read `SKSTAT` (`$D20F`) bit 2 and
 `KBCODE` (`$D209`) directly, which polls fine with no interrupt at all.
 
+*(As of Phase 9 gem4xe has its own keyboard IRQ, and `vdi_key_poll()` drains
+the ring it fills rather than reading POKEY; the SKSTAT path remains for a
+build that runs polled. `docs/phase9.md`.)*
+
 That is the same shape as the pointer: **polling works today, interrupts would
 be better.** Both input paths now sit behind one entry point, `vdi_input_poll()`,
 so when native-mode vector stubs exist the VBI can call it and nothing above

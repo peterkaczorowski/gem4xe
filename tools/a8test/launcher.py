@@ -13,7 +13,17 @@ Differences from the vbxetxtadv launcher this is derived from:
     See docs/phase0-u1mb.md.  Nothing in the VDI work needs it.
 
 Never opens a window.  Never uses `pkill -f`: the emulator is stopped by pid.
+
+The host's joysticks are kept out of the machine.  AltirraSDL opens every
+joystick-class device SDL can see and routes it to port 1 through its input
+maps, and a keyboard or mouse with a stray HID "joystick" interface (a
+Keychron Q6 Max reports a one-axis controller whose axis sits below its own
+minimum, which SDL reads as full left) then holds a PORTA direction line low
+for the whole run -- found when the CX80 gate counted every pulse backwards.
+The ports are driven through the bridge, so launch() enumerates the host's
+joystick devices from sysfs and hands SDL their ids as a blacklist.
 """
+import glob
 import os
 import subprocess
 import sys
@@ -63,6 +73,27 @@ class Emu:
             os.remove(pidfile)
 
 
+def host_joystick_ids():
+    """VID/PID pairs of every input device on this host, in the form
+    SDL_JOYSTICK_BLACKLIST_DEVICES wants ("0xVVVV/0xPPPP,...").  Every event
+    device, not just the kernel's js* ones: SDL classifies evdev devices by its
+    own heuristics (the Keychron interface above is a joystick to SDL and not
+    to joydev), and the list only ever governs what SDL opens AS a joystick, so
+    a keyboard's id on it costs nothing.  Read from sysfs, not configured:
+    whatever is plugged in today is what SDL would open."""
+    ids = set()
+    for js in glob.glob("/sys/class/input/event*/device/id"):
+        try:
+            with open(os.path.join(js, "vendor")) as f:
+                vid = int(f.read(), 16)
+            with open(os.path.join(js, "product")) as f:
+                pid = int(f.read(), 16)
+        except (OSError, ValueError):
+            continue
+        ids.add(f"0x{vid:04x}/0x{pid:04x}")
+    return ",".join(sorted(ids))
+
+
 def verify_kernel(b):
     """The real XL OS must be loaded (AltirraOS differs at $E000)."""
     if not os.path.exists(XLROM):
@@ -79,6 +110,9 @@ def launch(tag="run", extra_args=(), vbxe=True, rapidus=True, memsize="1088K",
     if os.path.exists(sock):
         os.remove(sock)
     env = dict(os.environ, SDL_VIDEODRIVER="offscreen", SDL_AUDIODRIVER="dummy", TMPDIR=run_dir)
+    blacklist = host_joystick_ids()
+    if blacklist:
+        env["SDL_JOYSTICK_BLACKLIST_DEVICES"] = blacklist
     args = [ALTIRRA, f"--bridge=unix:{sock}", *BASE_ARGS, "--memsize", memsize, "--cleardevices"]
     if vbxe:
         args += ["--adddevice", VBXE_DEVICE]

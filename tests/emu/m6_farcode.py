@@ -228,19 +228,25 @@ def check_image(name, why):
         #    where the program is, the staging buffer says where MEMAC is.
         present, mcr_before, mcr_said, cmcr_said = (b.peek(STATUS + 25 + i)
                                                     for i in range(4))
+        irq_fast = b.peek(STATUS + 32)
         mcr = b.cmd("EVAL db($FF0080)").get("value")
         cmcr = b.cmd("EVAL db($FF0081)").get("value")
         win = lambda a: a >> 14
         program = {win(syms["_DirectPageStart"]), win(syms["rapidus"])}
         memac = win(hdr)
+        vectors = win(0xFFE4)       # the OS window: irq_install() takes it
+                                    # fast after rapidus_speedup() reported
         print(f"speed map  : Rapidus {'present' if present else 'ABSENT'}, "
               f"MCR ${mcr_before:02X} -> ${mcr:02X}, CMCR ${cmcr:02X}; "
-              f"program in window(s) {sorted(program)}, MEMAC in {memac}")
+              f"program in window(s) {sorted(program)}, MEMAC in {memac}, "
+              f"vectors in {vectors} ({'fast' if irq_fast else 'as found'})")
         if not present:
             fails.append(f"{name}: rapidus_speedup() did not find the board signature")
-        if (mcr, cmcr) != (mcr_said, cmcr_said):
+        mcr_want = mcr_said & ~(1 << vectors) if irq_fast else mcr_said
+        if (mcr, cmcr) != (mcr_want, cmcr_said):
             fails.append(f"{name}: runner reports MCR ${mcr_said:02X} CMCR "
-                         f"${cmcr_said:02X} but the registers read ${mcr:02X} ${cmcr:02X}")
+                         f"${cmcr_said:02X} (irq.fast={irq_fast}) but the "
+                         f"registers read ${mcr:02X} ${cmcr:02X}")
         for w in sorted(program):
             if mcr & (1 << w):
                 fails.append(f"{name}: window {w} (${w << 14:04X}) holds the "

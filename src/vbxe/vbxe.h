@@ -167,6 +167,7 @@ uint8_t  vram_read8(uint32_t addr);
 
 void     vbxe_palette(uint8_t pal, uint8_t first, const uint8_t *rgb, uint16_t count);
 void     vbxe_xdl_hr(uint32_t screen);                /* 640x240 HR, palette 1 */
+void     vbxe_off(void);                              /* overlay and MEMAC off */
 void     vbxe_wait_vbl(void);
 
 /* Blitter.  The blit list must be CONTIGUOUS in VRAM -- there is no jump

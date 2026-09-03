@@ -1,6 +1,7 @@
 /* pointer.c -- pointing-device back ends behind the seam in pointer.h. */
 #include "pointer.h"
 #include "../vbxe/vbxe.h"
+#include "../sys/irq.h"
 
 PTR_STATE ptr_state;
 PTR_STATE ptr_seen;
@@ -17,7 +18,8 @@ PTR_STATE ptr_seen;
 
 #define POT_MAX 228     /* POKEY's pot counter tops out here on a real Atari */
 
-static uint8_t last_x, last_y;      /* previous quadrature phase per axis */
+static uint8_t last_x, last_y;      /* previous line pair per axis (polled) */
+static uint16_t last_qlo, last_qhi; /* the IRQ's counters as last consumed  */
 static WORD    pot_pending;
 
 static uint8_t xem_port;            /* XEM1: joystick port it answered on */
@@ -36,9 +38,85 @@ static const signed char qdec[16] = {
      0, -1, +1,  0
 };
 
+/* Direction-and-pulse, same index, for the CX80 trak-ball: the pair is
+ * (direction << 1) | pulse, a count is a pulse edge, and the direction line
+ * AS SAMPLED WITH THE EDGE says which way -- high is +, as PORTA reads it.
+ * No entry is impossible: a missed pulse is a missed count, not a wrong
+ * one. */
+static const signed char tbdec[16] = {
+     0, -1,  0, +1,
+    -1,  0, +1,  0,
+     0, -1,  0, +1,
+    -1,  0, +1,  0
+};
+
 WORD ptr_decode_quad(uint8_t prev, uint8_t now)
 {
     return qdec[((prev & 3) << 2) | (now & 3)];
+}
+
+WORD ptr_decode_tb(uint8_t prev, uint8_t now)
+{
+    return tbdec[((prev & 3) << 2) | (now & 3)];
+}
+
+/* Which two of PORTA's four lines make each axis's pair, per device, and
+ * which table a pair transition goes through.  Written as tables the
+ * interrupt handler can index by the raw nibble (src/sys/irq.s), and used
+ * by the polled path the same way, so both regimes decode identically.
+ *
+ * The pair is ordered so that the sequence Altirra's device models emit
+ * for +x / +y walks 0, 1, 3, 2 -- i.e. +1 through qdec -- with the port's
+ * active-low inversion taken into account (it does not change a
+ * quadrature direction; it does flip a direction line):
+ *
+ *   ST     x: lines 1 (XA) and 0 (XB), pair = b0 << 1 | b1
+ *          y: lines 3 (YA) and 2 (YB), pair = b2 << 1 | b3
+ *   Amiga  x: lines 3 and 1,           pair = b3 << 1 | b1
+ *          y: lines 2 and 0,           pair = b2 << 1 | b0
+ *   CX80   x: line 0 direction, line 1 pulse,   pair = b0 << 1 | b1
+ *          y: line 2 direction, line 3 pulse,   pair = b2 << 1 | b3
+ *
+ * That is Altirra's inputcontroller.cpp (kSTTabX/Y, kAMTabX/Y, and the
+ * trak-ball's dirBits), not a datasheet; the earlier version of this file
+ * had the Amiga axes on the wrong pins and the ST sign inverted against
+ * the same model, and called the CX80 quadrature.  The signs have not met
+ * hardware; if a real mouse runs backwards, this is the table to flip. */
+#define BIT(v, n) (((v) >> (n)) & 1)
+
+WORD ptr_pair(WORD kind, uint8_t nibble, WORD axis)
+{
+    uint8_t p = (uint8_t)(nibble & 0x0F);
+    if (kind == PTR_AMIGA_MOUSE)
+        return axis ? (WORD)((BIT(p, 2) << 1) | BIT(p, 0))
+                    : (WORD)((BIT(p, 3) << 1) | BIT(p, 1));
+    return axis ? (WORD)((BIT(p, 2) << 1) | BIT(p, 3))
+                : (WORD)((BIT(p, 0) << 1) | BIT(p, 1));
+}
+
+static void lines_select(ptr_kind kind)
+{
+    uint8_t n;
+    const signed char *tab = (kind == PTR_TRAKBALL) ? tbdec : qdec;
+
+    irq_ptr_on = 0;                 /* the handler must not see a half-built table */
+    for (n = 0; n < 16; n++) {
+        irq_plo[n] = (uint8_t)ptr_pair((WORD)kind, n, 0);
+        irq_phi[n] = (uint8_t)ptr_pair((WORD)kind, n, 1);
+    }
+    for (n = 0; n < 16; n++)
+        irq_qtab[n] = tab[n];
+    /* Start from the lines as they are now, so the first sample is not
+     * counted as a transition from zero. */
+    n = (uint8_t)(PORTA & 0x0F);
+    last_x = irq_plo[n];
+    last_y = irq_phi[n];
+    irq_prev_lo = (uint8_t)(last_x << 2);
+    irq_prev_hi = (uint8_t)(last_y << 2);
+    last_qlo = irq_qlo;
+    last_qhi = irq_qhi;
+    if (kind == PTR_ST_MOUSE || kind == PTR_AMIGA_MOUSE || kind == PTR_TRAKBALL)
+        irq_ptr_on = 1;
 }
 
 static void clamp(void)
@@ -80,7 +158,7 @@ void ptr_init(ptr_kind kind, WORD x, WORD y)
     ptr_state.buttons = 0;
     ptr_state.wheel = 0;
     ptr_warp(x, y);
-    last_x = last_y = 0;
+    lines_select(kind);
     pot_pending = 0;
     xem_found = 0;
     xem_wheel = 0;
@@ -90,31 +168,30 @@ void ptr_init(ptr_kind kind, WORD x, WORD y)
     }
 }
 
-/* Relative devices.  PORTA's low nibble carries the four quadrature lines; the
- * pin order is what differs between an ST mouse and an Amiga one.
- *
- *   ST     b0 = XB, b1 = XA, b2 = YA, b3 = YB
- *   Amiga  b0 = YB, b1 = YA, b2 = XB, b3 = XA   (H and V swapped)
- *
- * A CX80 trak-ball in trak-ball mode presents direction-and-pulse rather than
- * true quadrature, but the same table works: the pulse line toggles and the
- * direction line selects which way the phase walks. */
+/* Relative devices.  With the interrupt regime up (src/sys/irq.h) the
+ * timer handler has been sampling PORTA ~4000 times a second and adding
+ * to two counters; this takes the difference since the last poll.  Without
+ * it, the one sample a poll gives is decoded here through the same tables
+ * -- and loses every transition that happened between polls, which is the
+ * classic Atari mouse complaint and why the interrupt exists. */
 static void poll_relative(void)
 {
-    uint8_t p = (uint8_t)(PORTA & 0x0F);
-    uint8_t qx, qy;
-
-    if (ptr_state.kind == PTR_AMIGA_MOUSE) {
-        qy = (uint8_t)(p & 3);
-        qx = (uint8_t)((p >> 2) & 3);
+    if (irq.how != IRQ_OFF) {
+        uint16_t q;
+        q = irq_qlo;
+        ptr_state.x = (WORD)(ptr_state.x + (WORD)(q - last_qlo));
+        last_qlo = q;
+        q = irq_qhi;
+        ptr_state.y = (WORD)(ptr_state.y + (WORD)(q - last_qhi));
+        last_qhi = q;
     } else {
-        qx = (uint8_t)(p & 3);
-        qy = (uint8_t)((p >> 2) & 3);
+        uint8_t p = (uint8_t)(PORTA & 0x0F);
+        uint8_t qx = irq_plo[p], qy = irq_phi[p];
+        ptr_state.x = (WORD)(ptr_state.x + irq_qtab[(last_x << 2) | qx]);
+        ptr_state.y = (WORD)(ptr_state.y + irq_qtab[(last_y << 2) | qy]);
+        last_x = qx;
+        last_y = qy;
     }
-    ptr_state.x = (WORD)(ptr_state.x + ptr_decode_quad(last_x, qx));
-    ptr_state.y = (WORD)(ptr_state.y + ptr_decode_quad(last_y, qy));
-    last_x = qx;
-    last_y = qy;
     clamp();
     ptr_state.buttons = (WORD)(((TRIG0 & 1) ? 0 : 1) | ((TRIG1 & 1) ? 0 : 2));
 }

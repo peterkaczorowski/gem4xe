@@ -851,6 +851,20 @@ def decode_quad(prev, now):
     return table[((prev & 3) << 2) | (now & 3)]
 
 
+def decode_tb(prev, now):
+    """Reference for ptr_decode_tb() in src/vdi/pointer.c: the CX80 trak-ball
+    in trak-ball mode, which is not quadrature.  Each axis has a direction
+    line (bit 1 of the pair) and a pulse line (bit 0) that toggles once per
+    count; a count is a change on the pulse line, and its sign is the
+    direction line AS SAMPLED WITH THE EDGE -- Altirra's model changes the
+    two in the same update, so the previous sample's direction is stale.
+    High is + on the port's active-low lines.
+    """
+    if ((prev ^ now) & 1) == 0:
+        return 0
+    return +1 if now & 2 else -1
+
+
 def xem1_valid(pot):
     """A mouSTer XEM1 pot reading is 64..191: bit 6 and bit 7 differ."""
     return (((pot >> 1) ^ pot) & 0x40) != 0

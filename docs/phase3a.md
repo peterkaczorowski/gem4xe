@@ -26,6 +26,11 @@ hardware when the time comes.
 
 ## ⚠ Only the absolute devices work today
 
+*(True when written. Phase 9 built the native-mode vectors and a timer IRQ
+that samples PORTA at ~4 kHz, so the ST mouse, the Amiga mouse and the CX80
+trak-ball work as well -- in Altirra; `docs/phase9.md` says what was and was
+not verified.)*
+
 A quadrature device must be polled often or it silently loses counts — the
 classic Atari 8-bit mouse complaint — which means an interrupt.
 

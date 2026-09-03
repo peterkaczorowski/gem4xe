@@ -149,6 +149,21 @@ class Bridge:
         """
         return self.ok(f"KEY {name}" + (" ctrl" if shift else "") + (" shift" if ctrl else ""))
 
+    def joy(self, port, direction, fire=False):
+        """Set joystick `port` (0..3) to one of the nine stick states --
+        "centre", "up", "down", "left", "right", "upleft", "upright",
+        "downleft", "downright" -- with the trigger pressed or not.  The
+        state HOLDS until the next call; nothing runs a frame here.
+
+        The verb writes the PIA's input lines directly (bridge_commands_write
+        .cpp: RefreshJoystickInput), so PORTA's nibble reads the state
+        active-low: up clears bit 0, down bit 1, left bit 2, right bit 3.
+        That is a joystick's four switches and nothing else -- the nine
+        states cannot make an arbitrary nibble, which limits what a
+        quadrature device can be driven through here (tests/emu/m10_irq.py).
+        """
+        return self.ok(f"JOY {port} {direction}" + (" fire" if fire else ""))
+
     def screenshot(self, path):
         path = os.path.abspath(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
