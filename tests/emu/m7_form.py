@@ -258,6 +258,7 @@ def apply_step(b, ptr, step, done=None):
 
 
 NOT_STARTED = 0xFFFF     # what the harness leaves in vdi_result_count
+FINISH = 16              # frames an op may take to return after its last stimulus
 
 
 def drive(b, count_addr, ptr, plan):
@@ -287,10 +288,20 @@ def drive(b, count_addr, ptr, plan):
             if n != k:
                 return f"op {k} completed before step {j} {step} (count {n})"
             apply_step(b, ptr, step, lambda: b.peek16(count_addr) != k)
-        # Ops after k that need no plan -- a call satisfied at entry, a
-        # graf_mkstate -- complete in the same frame, so the count may run
-        # past k+1; running past the next planned op is caught above.
-        n = b.peek16(count_addr)
+        # The last step satisfies the wait; what the op does on its way out
+        # -- the file selector's fm_dial(FMD_FINISH) redraws the screen it
+        # covered before it returns -- can run a frame or two past it.  The
+        # reference takes no time there, so those frames are the harness's
+        # and not the plan's: a bound on the target's finishing, not a
+        # measurement of it.  Ops after k that need no plan -- a call
+        # satisfied at entry, a graf_mkstate -- complete in the same frame,
+        # so the count may run past k+1; running past the next planned op
+        # is caught above.
+        for _ in range(FINISH):
+            n = b.peek16(count_addr)
+            if n > k:
+                break
+            b.frames(1)
         if n <= k:
             return f"op {k} did not complete on its plan (count {n})"
     return None

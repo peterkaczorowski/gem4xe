@@ -6,6 +6,13 @@ test harness (it writes a runtime .xex onto a DOS floppy to prove the loader pat
 ATRImage is adapted from /home/jfergus/dev/a8-u4r/tools/atrlib.py.  Dos2 implements the standard
 DOS 2 VTOC (sector 360), 8-entry directory (sectors 361-368) and the 3-byte per-sector file
 links used by SD/ED disks.  It does NOT handle MyDOS "big" disks or double density.
+
+Enhanced density is DOS 2.5's: 1040 sectors, the bitmap for sectors 720-1023 kept in a second
+VTOC at sector 1024, and a file that uses any of them flagged $03 in the directory so that a
+DOS 2.0 -- which cannot reach those sectors -- skips the entry instead of reading garbage.
+The layout is taken from Altirra's disk explorer (src/ATIO/source/diskfsdos2.cpp: InitNew,
+Flush, IsVisible, WriteFile), which reads and writes real DOS 2.5 disks, not from memory.
+enhance() turns a single-density DOS 2 disk into one.
 """
 import argparse
 import struct
@@ -106,7 +113,14 @@ class DirEntry:
 
     @property
     def in_use(self):
-        return bool(self.flag & 0x40) and not (self.flag & 0x80)
+        if self.flag & 0x80:
+            return False
+        # $03 is DOS 2.5's mark for a file reaching sectors 720-1023: bit 6
+        # clear so DOS 2.0 ignores it, bit 0 (open for write) so nothing
+        # else does either.  Altirra's IsVisible() accepts exactly this.
+        if (self.flag & 0x43) == 0x03:
+            return True
+        return bool(self.flag & 0x40) and not (self.flag & 0x01)
 
     @property
     def filename(self):
@@ -121,14 +135,21 @@ class DirEntry:
 
 class Dos2:
     VTOC = 360
+    VTOC2 = 1024           # DOS 2.5: the bitmap for sectors 48-1023
     DIR0 = 361
     DIR_SECTORS = 8
+    SD_SECTORS = 720
+    ED_SECTORS = 1040
+    HIGH = 720             # DOS 2.5: sectors from here up are the enhanced half
 
     def __init__(self, img):
         if img.sector_size != 128:
             raise ATRError("Dos2 handles 128-byte-sector disks only")
         self.img = img
         self.data_bytes = 125  # per sector (last 3 bytes are the link)
+        # DOS 2.5 semantics, decided the way Altirra decides them: by the
+        # geometry alone.
+        self.dos25 = img.sector_count == self.ED_SECTORS
 
     # -- directory ---------------------------------------------------------
     def entries(self):
@@ -172,27 +193,65 @@ class Dos2:
         return bytes(out)
 
     # -- VTOC / allocation -------------------------------------------------
-    def _vtoc(self):
-        return bytearray(self.img.read_sector(self.VTOC))
+    # The bitmap is kept as one bit per sector from 0 up, MSB first, as in
+    # the VTOC.  A DOS 2 VTOC holds 90 bytes of it (sectors 0-719); DOS 2.5
+    # keeps the rest in VTOC2, whose 122 bytes are the bits for 48-1023 --
+    # a copy of VTOC1's 48-719 followed by 720-1023 -- and whose bytes 122-123
+    # count the free sectors of the upper half.  VTOC1's own count (bytes 3-4)
+    # covers the lower half only.  Sector 720 is unusable on both.
+    def _bitmap(self):
+        vtoc = bytearray(self.img.read_sector(self.VTOC))
+        bits = bytearray(vtoc[10:100])
+        if self.dos25:
+            bits += self.img.read_sector(self.VTOC2)[84:122]
+        return vtoc, bits
 
-    def _free_sectors(self, vtoc):
-        # bitmap starts at byte 10, bit for sector s = byte 10 + s//8, MSB = lowest sector
+    @staticmethod
+    def _bit(bits, s):
+        return (bits[s // 8] >> (7 - s % 8)) & 1
+
+    @staticmethod
+    def _clear(bits, s):
+        bits[s // 8] &= ~(1 << (7 - s % 8)) & 0xFF
+
+    def _count_free(self, bits, lo, hi):
+        return sum(self._bit(bits, s) for s in range(lo, hi))
+
+    def _write_bitmap(self, vtoc, bits):
+        vtoc[10:100] = bits[:90]
+        n = self._count_free(bits, 0, self.HIGH)
+        vtoc[3], vtoc[4] = n & 0xFF, n >> 8
+        self.img.write_sector(self.VTOC, vtoc)
+        if self.dos25:
+            v2 = bytearray(self.img.read_sector(self.VTOC2))
+            v2[0:122] = bits[6:128]
+            n = self._count_free(bits, self.HIGH, 1024)
+            v2[122], v2[123] = n & 0xFF, n >> 8
+            self.img.write_sector(self.VTOC2, v2)
+
+    def _free_sectors(self, bits):
         free = []
-        for s in range(1, self.img.sector_count + 1):
-            if s in (self.VTOC,) or (self.DIR0 <= s < self.DIR0 + self.DIR_SECTORS):
+        for s in range(1, len(bits) * 8):
+            if s == self.VTOC or self.DIR0 <= s < self.DIR0 + self.DIR_SECTORS:
                 continue
-            byte = 10 + s // 8
-            if byte < len(vtoc) and (vtoc[byte] >> (7 - (s % 8))) & 1:
+            if self._bit(bits, s):
                 free.append(s)
         return free
 
-    def _alloc(self, vtoc, s):
-        vtoc[10 + s // 8] &= ~(1 << (7 - (s % 8))) & 0xFF
+    def free_count(self):
+        """What the DOS should report: both halves on an enhanced disk."""
+        _, bits = self._bitmap()
+        return len(self._free_sectors(bits))
 
-    def add_file(self, filename, data):
+    def add_file(self, filename, data, above=0):
+        """Write `data` as `filename`.  `above` prefers sectors numbered higher
+        than it, wrapping to the low ones when they run out: the harness uses
+        it to put a file in the half of an enhanced-density disk that a DOS 2.0
+        cannot reach, so a run proves the DOS reads that half."""
         name, _, ext = filename.upper().partition(".")
-        vtoc = self._vtoc()
-        free = self._free_sectors(vtoc)
+        vtoc, bits = self._bitmap()
+        free = self._free_sectors(bits)
+        free = [s for s in free if s > above] + [s for s in free if s <= above]
         nsec = max(1, (len(data) + self.data_bytes - 1) // self.data_bytes)
         if nsec > len(free):
             raise ATRError(f"not enough free sectors ({nsec} > {len(free)})")
@@ -217,17 +276,37 @@ class Dos2:
             raw[126] = nxt & 0xFF
             raw[127] = len(chunk)
             self.img.write_sector(s, raw)
-            self._alloc(vtoc, s)
-        free_count = (vtoc[3] | (vtoc[4] << 8)) - nsec
-        vtoc[3], vtoc[4] = free_count & 0xFF, free_count >> 8
-        self.img.write_sector(self.VTOC, vtoc)
-        ent.flag = 0x42                # in use, DOS 2
-        ent.count = nsec - 1           # DOS 2 stores sectors-1... actually count = number of sectors
+            self._clear(bits, s)
+        self._write_bitmap(vtoc, bits)
+        # in use, DOS 2 -- or DOS 2.5's mark for a file in the upper half
+        ent.flag = 0x03 if self.dos25 and max(secs) >= self.HIGH else 0x42
         ent.count = nsec
         ent.start = secs[0]
         ent.name, ent.ext = name[:8], ext[:3]
         self._write_entry(ent)
         return ent
+
+
+def enhance(img):
+    """A DOS 2.5 enhanced-density copy of a single-density DOS 2 disk: the
+    same boot sectors, DOS.SYS, directory and files, sectors 721-1023 free,
+    720 unusable, and VTOC2 written the way DOS 2.5's own formatter leaves
+    it.  Whether the DOS on the disk can USE the upper half is for the
+    emulator to say -- that is what mkdisk's --high is for."""
+    if img.sector_size != 128 or img.sector_count != Dos2.SD_SECTORS:
+        raise ATRError(f"enhance: expected a 720 x 128 disk, got {img!r}")
+    out = ATRImage(128, Dos2.ED_SECTORS)
+    out.data[:len(img.data)] = img.data
+    fs = Dos2(out)
+    vtoc = bytearray(out.read_sector(Dos2.VTOC))
+    if vtoc[0] != 2:
+        raise ATRError(f"enhance: VTOC signature {vtoc[0]} is not DOS 2's")
+    bits = bytearray(vtoc[10:100]) + bytearray(b"\xff" * 38)
+    Dos2._clear(bits, Dos2.HIGH)
+    vtoc[100:128] = bytes(28)
+    out.write_sector(Dos2.VTOC2, bytes(128))
+    fs._write_bitmap(vtoc, bits)
+    return out
 
 
 def main(argv=None):

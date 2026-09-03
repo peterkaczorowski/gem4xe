@@ -122,6 +122,22 @@ static uint8_t write_vectors(void)
     return 1;
 }
 
+/* The POKEY registers the sampler and the keyboard depend on.  Written at
+ * install, and again after every CIO call (src/sys/cio.c): the OS's SIO
+ * takes AUDCTL and the audio-control registers for its serial clock and
+ * SKCTL for its serial modes, and what it leaves them as on its way out
+ * is its business, not something to rely on.  STIMER is not written here
+ * -- that would restart the count, and the divisor has not changed. */
+void irq_pokey_resync(void)
+{
+    AUDCTL = 0;                     /* 64 kHz base, no linking */
+    AUDF1  = TIMER_DIV;
+    AUDC1  = 0;                     /* silent */
+    SKCTL  = 3;                     /* keyboard scan and debounce, as the OS
+                                       leaves it: the keyboard IRQ needs the
+                                       scan running */
+}
+
 static void sources_on(void)
 {
     irq_frames = irq_timer = 0;
@@ -130,13 +146,8 @@ static void sources_on(void)
     irq_fault = 0;
     irq_prev_lo = irq_prev_hi = 0;
 
-    AUDCTL = 0;                     /* 64 kHz base, no linking */
-    AUDF1  = TIMER_DIV;
-    AUDC1  = 0;                     /* silent */
+    irq_pokey_resync();
     STIMER = 0;                     /* load the divisor */
-    SKCTL  = 3;                     /* keyboard scan and debounce, as the OS
-                                       leaves it: the keyboard IRQ needs the
-                                       scan running */
     POKMSK = IRQ_TIMER1 | IRQ_KEY;
     IRQEN  = 0;                     /* drop anything latched while off ... */
     IRQEN  = POKMSK;                /* ... then arm */

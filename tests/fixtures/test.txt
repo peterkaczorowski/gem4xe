@@ -1,0 +1,1 @@
+gem4xe file layer fixture›line two: CIO through the OS, in emulation mode›line three has digits 0123456789››last line, no trailing EOL after this one

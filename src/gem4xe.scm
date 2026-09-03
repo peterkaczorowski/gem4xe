@@ -6,13 +6,14 @@
 ;;;   $0200-$06FF  OS vars / page 6      -- not ours ($02E0/$02E2 are the .xex vectors)
 ;;;   $0700-$1FFF  DOS resident          -- not ours
 ;;;   $2000-$20FF  direct page           <- ours
-;;;   $2100-$37FF  stack / data / zdata  <- ours
-;;;   $3800-$3FFF  near code and rodata  <- ours
+;;;   $2100-$35FF  stack / data / zdata  <- ours
+;;;   $3600-$3FFF  near code and rodata  <- ours
 ;;;   $4000-$7FFF  RESERVED: U1MB PORTB banking window -- nothing may go here
 ;;;   $8000-$9FFF  RESERVED: VBXE MEMAC A window       -- nothing may RUN here,
 ;;;                but it is plain RAM until vbxe_init() opens the window, so
 ;;;                farload's staging buffer borrows it at LOAD time (farstage)
-;;;   $A000-$BFFF  near code and rodata (BASIC off => RAM)   <- ours
+;;;   $A000-$A7FF  the application pool (BASIC off => RAM)    <- ours
+;;;   $A800-$BFFB  the test runner's host-poked buffers        <- ours
 ;;;   $C000-$CFFF  OS ROM
 ;;;   $D000-$D7FF  hardware (VBXE regs at $D640/$D740)
 ;;;   $D800-$FFFF  OS ROM
@@ -76,23 +77,38 @@
 (define bank0
   '((memory DirectPage (address (#x2000 . #x20ff))
             (section (registers ztiny)))
-    (memory LoRAM      (address (#x2100 . #x37ff))
+    ;; The stack and the data.  The linker will not mix sections that carry
+    ;; bits with BSS in one memory, so bank $00 is two memories with a
+    ;; boundary that has to be moved by hand when one side outgrows it --
+    ;; a link that does fails, loudly.  Both are tight: 7.9 KB is all of
+    ;; bank $00 that is gem4xe's, and see the note on $4000-$7FFF above.
+    (memory LoRAM      (address (#x2100 . #x35ff))
             (section stack data zdata heap))
 
-    ;; Near code: the entry stub, farload, the C startup and every library
-    ;; routine that is not compiled far -- plus all constant data.  Near2
-    ;; takes the overflow, and it is SLOW: it shares the accelerator's 16 KB
-    ;; window with the MEMAC window, which has to stay on the bus (see
-    ;; src/sys/rapidus.h), so nothing that runs often should land there.
-    (memory Near       (address (#x3800 . #x3fff))
+    ;; Near code: the entry stub, farload, the C startup, the CIO
+    ;; trampoline (src/sys/cio.s: emulation mode returns to bank $00, so
+    ;; it cannot be far) and every library routine that is not compiled
+    ;; far -- plus all constant data.  There is no overflow memory: the
+    ;; 2 KB at $A000 that used to be one (never needed) is the application
+    ;; pool now, and a link that outgrows this memory fails rather than
+    ;; spilling into the slow window.
+    (memory Near       (address (#x3600 . #x3fff))
             (section code libcode cdata idata data_init_table))
-    (memory Near2      (address (#xa000 . #xa7ff))
-            (section code libcode cdata idata data_init_table))
+
+    ;; The application pool: where a loaded application's near part -- its
+    ;; direct page, stack and data -- goes (src/sys/app.c).  Nothing is
+    ;; linked into it; the block only reserves the extent, and
+    ;; src/sys/apppool.s reports the bounds the linker gave it, so the
+    ;; loader learns them from the map rather than restating them.  It is
+    ;; SLOW: it shares the accelerator's 16 KB window with the MEMAC window,
+    ;; which has to stay on the bus (see src/sys/rapidus.h).  The size is
+    ;; the one an application is linked to fit (src/app/gemapp.scm).
+    (memory AppPool    (address (#xa000 . #xa7ff))
+            (section apppool))
 
     ;; The conformance runner's host-poked buffers.  A bss section cannot share
     ;; a memory with sections that carry bits, so it gets its own -- which also
-    ;; means nothing else can land in it by accident.  Near2 has never been
-    ;; needed, so the runner takes 6 KB of the region and leaves it 2 KB.
+    ;; means nothing else can land in it by accident.
     (memory TestStage  (address (#xa800 . #xbffb))
             (section teststage))
 
@@ -109,8 +125,9 @@
     (memory Vector     (address (#xbffc . #xbffd))
             (section (reset #xbffc)))
 
-    (block stack (size #x0400))
-    (block heap  (size #x0000))     ;; nothing here calls malloc
+    (block stack   (size #x0400))
+    (block heap    (size #x0000))   ;; nothing here calls malloc
+    (block apppool (size #x0800))   ;; one application's near part
     (base-address _DirectPageStart DirectPage 0)
     ))
 

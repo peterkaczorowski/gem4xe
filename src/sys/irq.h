@@ -44,8 +44,10 @@
  *          into an 8-deep ring.  Anything else pending is acknowledged and
  *          ignored.  All POKEY sources are acknowledged through IRQEN with
  *          POKMSK kept consistent, as the OS does.
- *   COP, BRK, ABORT   record which, and park.  ABORT is what a Rapidus
- *          raises for a hardware-protect violation; a BRK is a bug.
+ *   COP    the application ABI: COP #$73 is a VDI call, COP #$C8 an AES
+ *          call, the parameter block in X:C (src/sys/abi.s, src/app/gem.h).
+ *   BRK, ABORT   record which, and park.  ABORT is what a Rapidus raises
+ *          for a hardware-protect violation; a BRK is a bug.
  *
  * The handlers save what they use, force DB to $00 (an interrupt can land
  * in the middle of an MVN with DB pointing elsewhere), address everything
@@ -102,7 +104,8 @@ extern volatile uint16_t irq_timer;        /* timer-1 interrupts taken    */
 extern volatile uint16_t irq_qlo, irq_qhi; /* the two axes' counters      */
 extern volatile uint8_t  irq_kb[8];        /* raw KBCODEs, a ring          */
 extern volatile uint8_t  irq_kb_head, irq_kb_tail, irq_kb_count;
-extern volatile uint8_t  irq_fault;        /* 1 COP, 2 BRK, 3 ABORT       */
+extern volatile uint8_t  irq_fault;        /* 2 BRK, 3 ABORT (1 was COP,   */
+                                           /* now the ABI: src/sys/abi.s)  */
 
 /* --- what the pointer layer gives the handler (pointer.c fills these) --- */
 extern uint8_t irq_ptr_on;                 /* sample PORTA at all          */
@@ -123,5 +126,9 @@ uint8_t irq_install(void);
 /* Everything off and the ROM back, so the OS's own vectors are what the
  * emulation-mode return to DOS will find. */
 void    irq_remove(void);
+
+/* AUDCTL, AUDF1, AUDC1 and SKCTL as the sampler and the keyboard want
+ * them: after a CIO call, which lends POKEY to the OS (src/sys/cio.c). */
+void    irq_pokey_resync(void);
 
 #endif /* GEM4XE_IRQ_H */

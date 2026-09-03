@@ -1,0 +1,4 @@
+This file exists so that writing it does not change the directory.
+The CIO cases in tests/emu/m12_file.py open D:OUT.TXT for output and
+overwrite these bytes; the file selector lists the same disk later in
+the same run, and its listing is predicted from this image.

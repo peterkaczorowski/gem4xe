@@ -37,6 +37,9 @@
 #include "sys/farmem.h"
 #include "sys/rapidus.h"
 #include "sys/irq.h"
+#include "sys/abi.h"
+#include "sys/app.h"
+#include "sys/cio.h"
 #include "vbxe/vbxe.h"
 
 #define STATUS ((volatile unsigned char *) 0x0600)
@@ -223,12 +226,27 @@ static UWORD bench_op(WORD which)
  * target for intin[0] frames WITHOUT polling anything, which is what
  * proves the handler counts without help; 3003 is one pass of the input
  * machinery (vdi_input_poll), as an AES wait would make, so what the
- * handler counted reaches ptr_seen and vq_mouse.  intout[0..5] report the
- * handler's state after each: frames, timer, the two axes, keys, fault. */
+ * handler counted reaches ptr_seen and vq_mouse; 3004 loads and runs the
+ * gate application (below); 3005-3009 are CIO (src/sys/cio.h): open
+ * (name address, aux1, aux2), close (iocb), read / write / getrec (iocb,
+ * buffer address, length), the name and the buffer staged by the host in
+ * vdi_scratch.  Those add [6] the status -- or, for open, the IOCB number
+ * -- [7] the bytes moved and [8] the round trips made so far.
+ * intout[0..5] report the handler's state after each: frames, timer,
+ * the two axes, keys, fault. */
 static uint8_t exit_req;
+
+/* The Phase 10 gate application, packed into the image by tools/mkg4a.py
+ * (build/app_blob.c).  Sys op 4 loads it, runs it and frees it, and adds
+ * to the record: [6] the loader's status, [7] the near base it chose,
+ * [8] the far bank, [9] what the application's main() returned, [10] the
+ * COP calls the ABI took and [11] the ones it refused. */
+extern const uint8_t __far app_blob[];
+extern const uint32_t app_blob_len;
 
 static void sys_op(WORD op)
 {
+    WORD c4 = 6;
     switch (op) {
     case 0:
         ptr_init((ptr_kind)intin[0], intin[1], intin[2]);
@@ -256,6 +274,55 @@ static void sys_op(WORD op)
     case 3:
         vdi_input_poll();
         break;
+    case 4: {
+        APP app;
+        int16_t st, ret = 0;
+        gem_calls = gem_bad = 0;
+        st = app_load(app_blob, app_blob_len, &app);
+        if (st == APP_OK) {
+            ret = app_exec(&app);
+            app_free(&app);
+        }
+        intout[6]  = st;
+        intout[7]  = (WORD)app.near_base;
+        intout[8]  = (WORD)(app.far_addr >> 16);
+        intout[9]  = ret;
+        intout[10] = (WORD)gem_calls;
+        intout[11] = (WORD)gem_bad;
+        c4 = 12;
+        break;
+    }
+    case 5: case 6: case 7: case 8: case 9: {
+        uint16_t got = 0;
+        int16_t st;
+        void *buf = (void *)(uint16_t)intin[1];
+        switch (op) {
+        case 5:  st = cio_open((const char *)(uint16_t)intin[0],
+                               (uint8_t)intin[1], (uint8_t)intin[2]); break;
+        case 6:  st = cio_close(intin[0]); break;
+        case 7:  st = cio_read(intin[0], buf, intin[2], &got); break;
+        case 8:  st = cio_write(intin[0], buf, intin[2]); break;
+        default: st = cio_getrec(intin[0], buf, intin[2], &got); break;
+        }
+        intout[6] = st;
+        intout[7] = (WORD)got;
+        intout[8] = (WORD)cio_calls;
+        c4 = 9;
+        break;
+    }
+    case 10:                                    /* GEM name -> CIO name: in, out */
+        sh_cioname((const char *)(uint16_t)intin[0], (char *)(uint16_t)intin[1]);
+        c4 = 6;
+        break;
+    /* The pool and the far allocator, so the gate can see what a load
+     * took and a free gave back. */
+    case 11:
+        intout[6] = (WORD)pool_mark();
+        intout[7] = (WORD)pool_room();
+        intout[8] = (WORD)farmem.brk;
+        intout[9] = (WORD)(farmem.brk >> 16);
+        c4 = 10;
+        break;
     default:
         break;
     }
@@ -266,7 +333,7 @@ static void sys_op(WORD op)
     intout[4] = (WORD)irq_kb_count;
     intout[5] = (WORD)irq_fault;
     contrl[2] = 0;
-    contrl[4] = 6;
+    contrl[4] = c4;
 }
 
 static void run_script(void)
@@ -316,6 +383,8 @@ static void run_script(void)
                 ev_init();
                 wm_init();
                 mn_init();
+                sh_init();                  /* far buffers: before any app_load */
+                fs_start();                 /* the selector's name slots, too */
                 break;
             case 12:                        /* appl_write: id, len, msg[8] */
                 mq_put(&intin[2]);
@@ -577,6 +646,92 @@ static void run_script(void)
                     intout[1 + k] = out[k];
                 c4 = 5;
                 break;
+            /* The resource library: the name staged by the host in
+             * contrl[7]; where the file landed and what the pool has left
+             * come back so the gate can read the fixed-up image out of
+             * bank $00 and compare it with the host's, whole. */
+            case 110:                       /* rsrc_load: name */
+                intout[0] = rs_load((const char *)(uint16_t)contrl[7]);
+                intout[1] = (WORD)(uint16_t)rs_hdr;
+                intout[2] = rs_hdr ? (WORD)rs_hdr->rsh_rssize : 0;
+                intout[3] = (WORD)pool_room();
+                intout[4] = rs_hdr ? (WORD)((uint16_t)rs_hdr + rs_hdr->rsh_trindex) : 0;
+                c4 = 5;
+                break;
+            case 111:                       /* rsrc_free */
+                intout[0] = rs_free();
+                intout[1] = (WORD)pool_room();
+                c4 = 2;
+                break;
+            case 112: {                     /* rsrc_gaddr: type, index */
+                uint32_t a = 0;
+                intout[0] = rs_gaddr((UWORD)intin[0], (UWORD)intin[1], &a);
+                intout[1] = (WORD)a;
+                intout[2] = (WORD)(a >> 16);
+                c4 = 3;
+                break;
+            }
+            case 113:                       /* rsrc_saddr: type, index, lo, hi */
+                intout[0] = rs_saddr((UWORD)intin[0], (UWORD)intin[1],
+                                     (uint32_t)(UWORD)intin[2] | ((uint32_t)(UWORD)intin[3] << 16));
+                c4 = 1;
+                break;
+            case 114:                       /* rsrc_obfix: tree, object */
+                rs_obfix(tree, intin[0]);
+                intout[0] = 1;
+                c4 = 1;
+                break;
+
+            /* The shell library: the first buffer staged in contrl[7], a
+             * second one's address in intin (the script format carries one
+             * address a record). */
+            case 120:                       /* shel_read: cmd; tail */
+                sh_read((char *)(uint16_t)contrl[7], (char *)(uint16_t)intin[0]);
+                intout[0] = 1;
+                c4 = 1;
+                break;
+            case 121:                       /* shel_write: doex, isgr, iscr, tail; cmd */
+                intout[0] = sh_write(intin[0], intin[1], intin[2],
+                                     (const char *)(uint16_t)contrl[7],
+                                     (const char *)(uint16_t)intin[3]);
+                intout[1] = sh_doexec;
+                intout[2] = sh_isgem;
+                c4 = 3;
+                break;
+            case 122:                       /* shel_get: buf, len */
+                sh_get((void *)(uint16_t)contrl[7], intin[0]);
+                intout[0] = 1;
+                c4 = 1;
+                break;
+            case 123:                       /* shel_put: buf, len */
+                sh_put((const void *)(uint16_t)contrl[7], intin[0]);
+                intout[0] = 1;
+                c4 = 1;
+                break;
+            case 124:                       /* shel_find: path */
+                intout[0] = sh_find((char *)(uint16_t)contrl[7]);
+                intout[1] = (WORD)cio_last;
+                c4 = 2;
+                break;
+            case 90:                        /* fsel_input: path; sel address */
+            case 91: {                      /* fsel_exinput: ... ; label address */
+                char *path = (char *)(uint16_t)contrl[7];
+                char *sel = (char *)(uint16_t)intin[0];
+                const char *label = (op - 1000 == 91) ? (const char *)(uint16_t)intin[1] : 0;
+                WORD button = -1;
+                intout[0] = fs_input(path, sel, &button, label);
+                intout[1] = button;
+                c4 = 2;
+                break;
+            }
+            case 125: {                     /* shel_envrn: name -> value address */
+                const char *v = 0;
+                sh_envrn(&v, (const char *)(uint16_t)contrl[7]);
+                intout[0] = 1;
+                intout[1] = (WORD)(uint16_t)v;
+                c4 = 2;
+                break;
+            }
             default:
                 break;
             }

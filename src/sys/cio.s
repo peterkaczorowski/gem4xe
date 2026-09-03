@@ -1,0 +1,152 @@
+;;; ---------------------------------------------------------------------------
+;;; cio.s -- calling the Atari OS's CIO from native mode (65C816)
+;;;
+;;; gem4xe runs native, with its own vectors, direct page, data bank and a
+;;; 16-bit stack in bank $00 -- none of which the OS ROM knows.  CIOV is
+;;; 6502 code: it wants emulation mode, D = 0, a stack in page 1, and the
+;;; OS's own interrupt handlers behind $FFFA/$FFFE, because DOS's disk I/O
+;;; is SIO, and SIO is driven by POKEY's serial IRQs and timed by the VBI.
+;;; src/sys/irq.c left the emulation-mode vectors exactly as the OS had
+;;; them for this reason: in emulation mode the CPU takes its vectors from
+;;; $FFFA-$FFFF again, so the OS's handlers come back the moment E is set.
+;;;
+;;; So one CIO call is a round trip: save gem4xe's machine, become the
+;;; machine DOS was running on, JSR CIOV, come back.  In detail --
+;;;
+;;;   D = $0000, DB = $00     the OS's zero page and page 2/3 tables
+;;;   POKMSK = IRQEN          what DOS ran with (ae_pokmsk): keyboard and
+;;;                           break, not gem4xe's timer 1 -- the OS has no
+;;;                           handler for it worth running
+;;;   CRITIC = 1              as the OS's own critical I/O flag: the VBI's
+;;;                           stage 2 stays out of the parts that are not
+;;;                           SIO (SIO sets and clears CRITIC itself)
+;;;   S = $01xx, xx = ae_sp   DOS's stack, at the depth DOS left it: what is
+;;;                           above is DOS's frames, what is below is free.
+;;;                           Set BEFORE xce, so an NMI arriving between the
+;;;                           two lands on it and not on the gem4xe stack
+;;;                           pointer's low byte forced into page 1
+;;;   sec, xce, cli           emulation mode; the OS's vectors; interrupts
+;;;   jsr CIOV                the OS's, from the copy in the accelerator's
+;;;                           SRAM under $E456 -- the same bytes
+;;;   sei, clc, xce           back
+;;;
+;;; and then the state the OS's handlers have kept for us while gem4xe's
+;;; were off: irq_frames is caught up from RTCLOK -- the OS counted the
+;;; blanks -- and a key the OS put in CH goes into gem4xe's ring the way its
+;;; own handler would have put it (src/sys/irq.s, irq_kput).  The pointer
+;;; sampler was silent throughout: quadrature counts during a disk read are
+;;; lost, which is the same thing that happens on a real Atari when SIO
+;;; runs with the keyboard IRQ off.
+;;;
+;;; The whole routine is bank-$00 `code`, not farcode: an interrupt taken in
+;;; emulation mode returns to a 16-bit PC in bank $00, so the instruction
+;;; after `xce` must be there.  It is a __simple_call from C (src/sys/cio.c
+;;; fills the IOCB and reads the result): uint16_t cio_call(uint16_t iocb),
+;;; the IOCB number in C, ICSTA's copy of Y in C on return.
+;;; ---------------------------------------------------------------------------
+
+              .rtmodel version, "1"
+              .rtmodel core, "*"
+
+              .extern ae_sp, ae_pokmsk      ; src/crt_atari.s
+              .extern irq_frames, irq_kput  ; src/sys/irq.c, irq.s
+              .public cio_call
+
+#define POKMSK 0x0010                 /* OS shadow of IRQEN */
+#define RTCLOK 0x0012                 /* three bytes, high first */
+#define CRITIC 0x0042
+#define ATRACT 0x004D
+#define CH     0x02FC                 /* the OS keyboard buffer: one key */
+#define IRQEN  0xD20E
+#define CIOV   0xE456
+
+              .section zdata, bss
+cio_sp:       .space  2               ; gem4xe's S across the call
+cio_clk:      .space  2               ; RTCLOK+1..2 at entry, low byte first
+cio_iocb:     .space  1               ; iocb * 16, for X
+cio_pokmsk:   .space  1               ; gem4xe's POKMSK across the call
+cio_stat:     .space  2               ; the OS's Y, zero-extended
+
+              .section code, root
+cio_call:     php
+              sei
+              phb
+              phd
+              asl     a
+              asl     a
+              asl     a
+              asl     a
+              sep     #0x20
+              sta     abs:cio_iocb
+              lda     #0
+              pha
+              plb                     ; DB = $00
+              rep     #0x20
+              tsc
+              sta     abs:cio_sp      ; gem4xe's stack, to come back to
+              lda     ##0
+              tcd                     ; D = $0000
+              sep     #0x20
+              lda     POKMSK
+              sta     abs:cio_pokmsk
+              lda     abs:ae_pokmsk
+              sta     POKMSK
+              sta     IRQEN           ; DOS's sources: keyboard, break
+              lda     #1
+              sta     CRITIC
+              stz     ATRACT
+              lda     RTCLOK+2
+              sta     abs:cio_clk
+              lda     RTCLOK+1
+              sta     abs:cio_clk+1
+              lda     #1
+              xba                     ; B = $01 ...
+              lda     abs:ae_sp       ; ... A = DOS's S
+              rep     #0x20
+              tcs                     ; S = $01xx while still native
+              sec
+              xce                     ; emulation mode: 8-bit everything
+              cli
+              ldx     abs:cio_iocb
+              jsr     CIOV
+              sei
+              sty     abs:cio_stat
+              clc
+              xce                     ; native; M and X are 8 bits, and X
+                                      ; stays so until the end
+              rep     #0x20
+              lda     abs:cio_sp
+              tcs                     ; gem4xe's stack, straight away
+              sep     #0x20
+              stz     CRITIC
+;;; The blanks the OS counted: RTCLOK is big-endian, so its low two bytes
+;;; are picked up one at a time into a little-endian word.
+              lda     RTCLOK+2
+              sta     abs:cio_stat+1  ; scratch for a moment
+              lda     RTCLOK+1
+              xba
+              lda     abs:cio_stat+1
+              rep     #0x20           ; C = RTCLOK now
+              sec
+              sbc     abs:cio_clk
+              clc
+              adc     abs:irq_frames
+              sta     abs:irq_frames
+              sep     #0x20
+              stz     abs:cio_stat+1
+;;; A key the OS collected.  CH is $FF for none.
+              lda     CH
+              cmp     #0xff
+              beq     cio_nokey
+              jsl     irq_kput        ; A = the code, 8-bit A and X, DB = $00
+              lda     #0xff
+              sta     CH
+cio_nokey:    lda     abs:cio_pokmsk
+              sta     POKMSK
+              sta     IRQEN           ; gem4xe's sources again
+              rep     #0x30
+              pld
+              plb
+              lda     abs:cio_stat
+              plp
+              rtl

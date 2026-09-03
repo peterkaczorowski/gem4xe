@@ -303,6 +303,50 @@ typedef struct {
     WORD bi_color;
 } BITBLK;
 
+/* ICONBLK, for G_ICON: a mask, an image and a text, 34 bytes as in a
+ * .RSC.  Carried through rsrc_load's fixups; not drawn yet. */
+typedef struct {
+    uint32_t ib_pmask;
+    uint32_t ib_pdata;
+    uint32_t ib_ptext;
+    WORD ib_char;
+    WORD ib_xchar, ib_ychar;
+    WORD ib_xicon, ib_yicon, ib_wicon, ib_hicon;
+    WORD ib_xtext, ib_ytext, ib_wtext, ib_htext;
+} ICONBLK;
+
+/* The .RSC header (EmuTOS include/rsdefs.h): 36 bytes, offsets from the
+ * start of the file.  On disk every word is big-endian; rsrc_load swaps
+ * the header and the tables, never the strings or the image data. */
+typedef struct {
+    UWORD rsh_vrsn;
+    UWORD rsh_object, rsh_tedinfo, rsh_iconblk, rsh_bitblk;
+    UWORD rsh_frstr, rsh_string, rsh_imdata, rsh_frimg, rsh_trindex;
+    WORD  rsh_nobs, rsh_ntree, rsh_nted, rsh_nib, rsh_nbb;
+    WORD  rsh_nstring, rsh_nimages;
+    UWORD rsh_rssize;
+} RSHDR;
+#define NEW_FORMAT_RSC 0x0004       /* colour icons: not carried */
+
+/* rsrc_gaddr / rsrc_saddr types */
+#define R_TREE      0
+#define R_OBJECT    1
+#define R_TEDINFO   2
+#define R_ICONBLK   3
+#define R_BITBLK    4
+#define R_STRING    5
+#define R_IMAGEDATA 6
+#define R_OBSPEC    7
+#define R_TEPTEXT   8
+#define R_TEPTMPLT  9
+#define R_TEPVALID  10
+#define R_IBPMASK   11
+#define R_IBPDATA   12
+#define R_IBPTEXT   13
+#define R_BIPDATA   14
+#define R_FRSTR     15
+#define R_FRIMG     16
+
 /* A mouse rectangle event: five words, laid out as evnt_multi's int_in
  * carries them, so the dispatcher can point straight at the parameter
  * block.  m_out: report when the pointer LEAVES m_gr rather than enters. */
@@ -340,6 +384,8 @@ typedef struct {
 extern WORD gl_wchar, gl_hchar;     /* system font cell */
 extern WORD gl_wbox, gl_hbox;       /* a "box" cell: menu bar height etc. */
 extern WORD gl_width, gl_height;    /* the screen */
+extern WORD gl_nplanes;             /* ... and its depth */
+extern WORD gl_handle;              /* the VDI handle the AES draws with */
 extern GRECT gl_clip;               /* the AES's own copy of the VDI clip */
 extern GRECT gl_rscreen, gl_rfull, gl_rcenter, gl_rmenu;
 
@@ -528,5 +574,35 @@ WORD wm_find(WORD x, WORD y);
 void wm_update(WORD beg_update);
 void wm_calc(WORD wtype, UWORD kind, WORD x, WORD y, WORD w, WORD h,
              WORD *px, WORD *py, WORD *pw, WORD *ph);
+
+/* ---- the resource library: rsrc.c (gemrslib.c) ------------------------
+ * One resource loaded at a time, into the bank-$00 pool (src/sys/app.h). */
+extern RSHDR *rs_hdr;               /* the loaded resource, or 0 */
+WORD rs_load(const char *name);
+WORD rs_free(void);
+WORD rs_gaddr(UWORD rtype, UWORD rindex, uint32_t *paddr);
+WORD rs_saddr(UWORD rtype, UWORD rindex, uint32_t addr);
+void rs_obfix(OBJECT *tree, WORD obj);
+void rs_fixit(RSHDR *h);            /* the loader's fix-up, on any image */
+
+/* fsel.c -- the file selector (docs/phase11.md) */
+extern WORD gl_drvbits;             /* which drive buttons are live, A = bit 0 */
+void fs_start(void);                /* at AES start-up: the far name slots */
+WORD fs_input(char *pipath, char *pisel, WORD *pbutton, const char *pilabel);
+
+/* ---- the shell library: shel.c (gemshlib.c) ----------------------------
+ * Buffers in far memory, taken once by sh_init() before any application
+ * is loaded; the environment a constant in bank $00. */
+extern WORD sh_doexec;              /* shel_write's request: SHW_*, -1 none */
+extern WORD sh_isgem;
+void sh_init(void);
+void sh_read(char *pcmd, char *ptail);
+WORD sh_write(WORD doex, WORD isgem, WORD isover, const char *pcmd,
+              const char *ptail);
+void sh_get(void *pbuffer, WORD len);
+void sh_put(const void *pdata, WORD len);
+void sh_envrn(const char **ppath, const char *psrch);
+WORD sh_find(char *pspec);
+void sh_cioname(const char *gem, char *cio);
 
 #endif /* GEM4XE_AES_H */

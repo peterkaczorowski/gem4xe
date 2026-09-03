@@ -9,9 +9,9 @@
  *
  * The shapes are lifted from where each bug was met: everyobj() in
  * src/aes/objc.c (B1), gsx_tcalc() in src/aes/graf.c (B2, B3), ob_sst()
- * in src/aes/objc.c (B4), vdi_vrt_cpyfm() in src/vdi/vdi.c (B5) and the
- * BCB overlay in src/vbxe/vbxe.c (B7).  Keep them recognisable rather than
- * minimal.
+ * in src/aes/objc.c (B4), vdi_vrt_cpyfm() in src/vdi/vdi.c (B5), the BCB
+ * overlay in src/vbxe/vbxe.c (B7) and sh_cioname() in src/aes/shel.c (B8).
+ * Keep them recognisable rather than minimal.
  */
 #include <stdint.h>
 
@@ -160,6 +160,55 @@ WORD b5_fix(void)
     return b5_walk(bits, sy1, stride);
 }
 
+/* The same slot-sharing with `- 1` in place of the shift: `n = p->len - 1`
+ * where p is a local pointer (a call's return, so it lives on the stack)
+ * that is dead after the line compiles to `tsc; adc #slot; tax; dec 0,x`
+ * -- the POINTER decremented in place, the field never read, and n is a
+ * bank-0 address less one.  inf_sset() in src/aes/fsel.c: a positive
+ * length became a negative n, so no field of the file selector ever
+ * received its text. */
+typedef struct {
+    uint32_t te_ptext, te_ptmplt, te_pvalid;
+    WORD te_font, te_fontid, te_just, te_color, te_fontsize, te_thickness;
+    WORD te_txtlen, te_tmplen;
+} B5_TED;
+B5_TED b5_ted;
+char b5_text1[16], b5_text2[16];
+
+B5_TED *b5_ted_of(WORD obj) { return obj ? &b5_ted : 0; }
+
+WORD b5_dec_bug(WORD obj, const char *pstr)
+{
+    B5_TED *ted = b5_ted_of(obj);
+    char *text = (char *)(uint16_t)ted->te_ptext;
+    WORD n = ted->te_txtlen - 1;                /* ted dead here */
+    WORD k = 0;
+    while (n > 0 && *pstr) {
+        *text++ = *pstr++;
+        n--;
+        k++;
+    }
+    *text = 0;
+    return k;
+}
+
+/* The field into a scalar, the arithmetic on the scalar. */
+WORD b5_dec_fix(WORD obj, const char *pstr)
+{
+    B5_TED *ted = b5_ted_of(obj);
+    char *text = (char *)(uint16_t)ted->te_ptext;
+    WORD len = ted->te_txtlen;
+    WORD n = (WORD)(len - 1);
+    WORD k = 0;
+    while (n > 0 && *pstr) {
+        *text++ = *pstr++;
+        n--;
+        k++;
+    }
+    *text = 0;
+    return k;
+}
+
 /* ---- B7: sizeof a struct is padded where a constant expression is needed - */
 
 /* The code generator lays a struct out with no padding -- a 16-bit member
@@ -185,6 +234,44 @@ static WORD b7_fix(void)
     return (WORD)((const B7_S *)p)->c;
 }
 
+/* ---- B8: a byte local narrowed on one path is stored from 8-bit mode ---- */
+
+/* `if (c >= 'a' && c <= 'z') c = (char)(c - 0x20); out[k] = c;` -- the
+ * folding in sh_cioname (src/aes/shel.c).  The taken path does the
+ * subtraction in 16 bits, switches to 8-bit accumulator to store the byte
+ * local, and falls into the join with the mode still 8-bit; the other
+ * path arrives 16-bit.  The join then loads the destination POINTER for
+ * the store with an 8-bit `lda`, so the first lowercase character of a
+ * name is written to page zero and its slot is left untouched.  -O2 only
+ * (the -O1 code stores the byte differently).  An `unsigned char` local
+ * is the same shape and the same bug; the sources hold the character in
+ * a WORD and narrow it once, at the store. */
+void b8_bug(const char *name, char *out)      /* not static: inlined, the shape is gone */
+{
+    WORD k = 0;
+    for (; *name; name++, k++) {
+        char c = *name;
+        if (c >= 'a' && c <= 'z')
+            c = (char)(c - 0x20);
+        out[k] = c;
+    }
+    out[k] = 0;
+}
+
+void b8_fix(const char *name, char *out)
+{
+    WORD k = 0;
+    for (; *name; name++, k++) {
+        WORD c = (uint8_t)*name;
+        if (c >= 'a' && c <= 'z')
+            c -= 0x20;
+        out[k] = (char)c;
+    }
+    out[k] = 0;
+}
+
+char b8_out1[8], b8_out2[8];
+
 /* ---- results ------------------------------------------------------------ */
 
 volatile WORD r_b1_bug, r_b1_fix;                       /* want 476 */
@@ -192,7 +279,9 @@ volatile WORD r_b2_eq, r_b2_lt, r_b2_mod;               /* want 7, 0, 0 */
 volatile WORD r_b3_bug, r_b3_fix;                       /* want 7 */
 volatile WORD r_b4_bug, r_b4_fix;                       /* want -2 */
 volatile WORD r_b5_bug, r_b5_fix;                       /* want 120 */
+volatile WORD r_b5_dec_bug, r_b5_dec_fix;               /* want 4 */
 volatile WORD r_b7_bug, r_b7_fix;                       /* want 801 */
+volatile WORD r_b8_bug, r_b8_fix;                       /* want 'T' = 84 */
 
 __task int main(void)
 {
@@ -219,10 +308,21 @@ __task int main(void)
     b5_ptsin[1] = 1; b5_ptsin[3] = 4;
     r_b5_bug = b5_bug();                        /* rows 1..4: 12+24+36+48 */
     r_b5_fix = b5_fix();
+    b5_ted.te_ptext = (uint16_t)b5_text1;
+    b5_ted.te_txtlen = 5;                       /* four characters and the NUL */
+    r_b5_dec_bug = b5_dec_bug(1, "SAMPLE");    /* 4 copied */
+    b5_ted.te_ptext = (uint16_t)b5_text2;
+    r_b5_dec_fix = b5_dec_fix(1, "SAMPLE");
 
     b7_arr[1].a = 0x1111; b7_arr[1].b = 0x22; b7_arr[1].c = 801;
     b7_arr[2].a = 0x4444; b7_arr[2].b = 0x55; b7_arr[2].c = 0x6666;
     r_b7_bug = b7_bug();                        /* element 1's c, by stride */
     r_b7_fix = b7_fix();
+
+    for (h = 0; h < 8; h++) b8_out1[h] = b8_out2[h] = (char)0xEE;
+    b8_bug("test", b8_out1);                    /* out[0] must be 'T' */
+    b8_fix("test", b8_out2);
+    r_b8_bug = (uint8_t)b8_out1[0];
+    r_b8_fix = (uint8_t)b8_out2[0];
     return 0;
 }

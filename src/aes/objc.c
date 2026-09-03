@@ -756,11 +756,12 @@ static WORD instr(char chr, const char *str)
     return 0;
 }
 
-static char to_upper(char c)
+static char to_upper(char ch)
 {
+    WORD c = (uint8_t)ch;           /* a WORD, not a char: B8, tools/ccbug */
     if (c >= 'a' && c <= 'z')
-        c = (char)(c - 32);
-    return c;
+        c -= 32;
+    return (char)c;
 }
 
 /* Does the validation character valchar admit *in_char?  Most classes

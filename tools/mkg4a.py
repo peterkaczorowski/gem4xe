@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""ELF x3 -> gem4xe loadable application (.g4a).
+
+A gem4xe application is linked at placeholder addresses (src/app/gemapp.scm)
+and put wherever there is room at load time: its near region -- direct
+page, stack, data -- somewhere page-aligned in gem4xe's bank-$00 pool, its
+far region -- the code -- in some bank of the far heap.  Neither the
+compiler nor the linker emits relocations for that, so this tool DERIVES
+them: the same objects are linked three times, once at the placeholders,
+once with the near region moved up a page and once with the far region
+moved up a bank, and the bytes that changed are the fixups.
+
+    near up a page:  every byte that changed is the HIGH byte of a near
+                     address (a page moves it by exactly 1);
+    far up a bank:   every byte that changed is the BANK byte of a far
+                     address (a bank moves it by exactly 1).
+
+Any byte that changed by other than +1, or changed under both shifts, is
+address arithmetic the loader could not relocate -- a shifted or divided
+address, a bank in a low byte -- and the tool refuses rather than emit a
+program that would work at the placeholders and nowhere else.  Nothing
+else about the layout is assumed: the shifts, the region bases and the
+entry point are read from the ELFs.
+
+    G4A file, little-endian:
+      0  'G4A' 1                    magic, format version
+      4  u16 near_base              where the near region was linked
+      6  u16 near_size              its whole extent, a page multiple
+      8  u16 far_off                the far region's offset in its bank
+     10  u32 far_size
+     14  u8  far_bank               the bank it was linked in
+     15  u8  far_banks              banks it spans (1: the loader takes no more)
+     16  u16 entry_lo, u8 entry_bank, u8 0
+     20  u16 x4: fixup counts -- near part: high-byte, bank; far part: high-byte, bank
+     28  u32 0
+     32  near bytes, far bytes, then the four fixup lists as u16 offsets
+
+Usage: mkg4a.py base.elf near-shifted.elf far-shifted.elf out.g4a
+                [--syms out.sym] [--c-array out.c NAME]
+"""
+import struct
+import sys
+
+from mkxex import read_elf
+
+MAGIC = b"G4A\x01"
+
+
+def read_elf_all(path):
+    """Every PT_LOAD, bytes or not: (vaddr, filebytes, memsz), plus symbols."""
+    with open(path, "rb") as f:
+        d = f.read()
+    e_phoff, = struct.unpack_from("<I", d, 0x1C)
+    e_phentsize, e_phnum = struct.unpack_from("<HH", d, 0x2A)
+    segs = []
+    for i in range(e_phnum):
+        o = e_phoff + i * e_phentsize
+        p_type, p_offset, p_vaddr, _pa, p_filesz, p_memsz = struct.unpack_from("<6I", d, o)
+        if p_type == 1 and p_memsz > 0:
+            segs.append((p_vaddr, d[p_offset:p_offset + p_filesz], p_memsz))
+    _, syms = read_elf(path)
+    return segs, syms
+
+
+def extents(segs, syms):
+    """(near_base, near_end, far_base, far_end) of a link: the near region
+    starts at the direct page, which the linker script puts first, and runs
+    to the end of its last memory -- a memory's whole size is what the ELF
+    records, and the bss within it must be zeroed; the far region is code
+    and ends with its last byte."""
+    near = [s for s in segs if s[0] < 0x10000]
+    far = [s for s in segs if s[0] >= 0x10000]
+    if not near or not far:
+        raise SystemExit("expected both a near and a far region")
+    dp = syms["_DirectPageStart"]
+    if dp & 0xFF:
+        raise SystemExit(f"_DirectPageStart ${dp:04X} is not page aligned")
+    near_end = max(a + m for a, _, m in near)
+    far_base = min(a for a, _, _ in far)
+    far_end = max(a + len(d) for a, d, _ in far)
+    if (far_base >> 16) != ((far_end - 1) >> 16):
+        raise SystemExit(f"far region ${far_base:06X}-${far_end - 1:06X} "
+                         f"spans banks; one is what the loader takes")
+    if min(a for a, _, _ in near) < dp:
+        raise SystemExit("a near segment lies below the direct page")
+    return dp, near_end, far_base, far_end
+
+
+def image(segs, base, end):
+    """The bytes of [base, end): what the file carries, zero elsewhere, and
+    a mask of which bytes the file carried."""
+    buf = bytearray(end - base)
+    mask = bytearray(end - base)
+    for a, data, memsz in segs:
+        if base <= a < end:
+            o = a - base
+            buf[o:o + len(data)] = data
+            for i in range(len(data)):
+                mask[o + i] = 1
+    return bytes(buf), bytes(mask)
+
+
+def diff(base_img, base_mask, moved_img, moved_mask, what):
+    """Offsets of the bytes that moved by exactly +1; refuses anything else."""
+    if base_mask != moved_mask:
+        raise SystemExit(f"{what}: the shifted link laid its bytes out differently")
+    out = []
+    for i, (a, b) in enumerate(zip(base_img, moved_img)):
+        if a != b:
+            if ((a + 1) & 0xFF) != b:
+                raise SystemExit(f"{what}: byte {i} changed from ${a:02X} to "
+                                 f"${b:02X}, not by +1: address arithmetic "
+                                 f"the loader cannot relocate")
+            out.append(i)
+    return out
+
+
+def main(argv):
+    if len(argv) < 4:
+        raise SystemExit(__doc__)
+    base_elf, near_elf, far_elf, out = argv[:4]
+    syms_out = c_out = c_name = None
+    i = 4
+    while i < len(argv):
+        if argv[i] == "--syms":
+            syms_out = argv[i + 1]
+            i += 2
+        elif argv[i] == "--c-array":
+            c_out, c_name = argv[i + 1], argv[i + 2]
+            i += 3
+        else:
+            raise SystemExit(f"unknown option {argv[i]}")
+
+    b_segs, b_syms = read_elf_all(base_elf)
+    n_segs, n_syms = read_elf_all(near_elf)
+    f_segs, f_syms = read_elf_all(far_elf)
+    nb, ne, fb, fe = extents(b_segs, b_syms)
+    nn, nne, nf, nfe = extents(n_segs, n_syms)
+    fn, fne, ff, ffe = extents(f_segs, f_syms)
+
+    # The shifts are whatever the links say they are; each must move one
+    # region by a whole page / bank and leave the other alone.
+    near_shift, far_shift = nn - nb, ff - fb
+    if near_shift != 0x100 or nf != fb or (nne - nn) != (ne - nb) or (nfe - nf) != (fe - fb):
+        raise SystemExit(f"the near-shifted link should move the near region "
+                         f"up exactly one page: near ${nb:04X}->${nn:04X}, "
+                         f"far ${fb:06X}->${nf:06X}")
+    if far_shift != 0x10000 or fn != nb or (fne - fn) != (ne - nb) or (ffe - ff) != (fe - fb):
+        raise SystemExit(f"the far-shifted link should move the far region "
+                         f"up exactly one bank: near ${nb:04X}->${fn:04X}, "
+                         f"far ${fb:06X}->${ff:06X}")
+
+    near_size = (ne - nb + 0xFF) & ~0xFF
+    far_size = fe - fb
+    near_img, near_mask = image(b_segs, nb, nb + near_size)
+    far_img, far_mask = image(b_segs, fb, fe)
+    n_near_img, n_near_mask = image(n_segs, nn, nn + near_size)
+    n_far_img, n_far_mask = image(n_segs, nf, nf + far_size)
+    f_near_img, f_near_mask = image(f_segs, fn, fn + near_size)
+    f_far_img, f_far_mask = image(f_segs, ff, ff + far_size)
+
+    near_hi = diff(near_img, near_mask, n_near_img, n_near_mask, "near part, page shift")
+    far_hi = diff(far_img, far_mask, n_far_img, n_far_mask, "far part, page shift")
+    near_bank = diff(near_img, near_mask, f_near_img, f_near_mask, "near part, bank shift")
+    far_bank = diff(far_img, far_mask, f_far_img, f_far_mask, "far part, bank shift")
+    both = (set(near_hi) & set(near_bank)) | (set(far_hi) & set(far_bank))
+    if both:
+        raise SystemExit(f"bytes moved under both shifts: {sorted(both)[:8]}")
+
+    entry = b_syms["__program_start"]
+    if not (fb <= entry < fe):
+        raise SystemExit(f"entry ${entry:06X} is not in the far region")
+
+    hdr = MAGIC + struct.pack("<HHHIBBHBBHHHHI",
+                              nb, near_size, fb & 0xFFFF, far_size, fb >> 16, 1,
+                              entry & 0xFFFF, entry >> 16, 0,
+                              len(near_hi), len(near_bank), len(far_hi), len(far_bank), 0)
+    assert len(hdr) == 32, len(hdr)
+    body = near_img + far_img
+    for lst in (near_hi, near_bank, far_hi, far_bank):
+        body += b"".join(struct.pack("<H", o) for o in lst)
+    blob = hdr + body
+    with open(out, "wb") as f:
+        f.write(blob)
+
+    if syms_out:
+        with open(syms_out, "w") as f:
+            for name, val in sorted(b_syms.items(), key=lambda kv: kv[1]):
+                f.write(f"{name} {val:06X}\n")
+    if c_out:
+        with open(c_out, "w") as f:
+            f.write(f"/* Generated by tools/mkg4a.py from {out} -- do not edit. */\n")
+            f.write("#include <stdint.h>\n")
+            f.write(f"const uint32_t {c_name}_len = {len(blob)}UL;\n")
+            f.write(f"const uint8_t __far {c_name}[{len(blob)}] = {{\n")
+            for o in range(0, len(blob), 16):
+                f.write("    " + ",".join(f"{b}" for b in blob[o:o + 16]) + ",\n")
+            f.write("};\n")
+
+    print(f"{out}: near ${nb:04X}+{near_size} ({len(near_hi)} page, "
+          f"{len(near_bank)} bank fixups), far ${fb:06X}+{far_size} "
+          f"({len(far_hi)} page, {len(far_bank)} bank fixups), "
+          f"entry ${entry:06X}, {len(blob)} bytes")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

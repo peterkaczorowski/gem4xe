@@ -9,6 +9,8 @@
 #   make test-m9    menus: the bar, drop-downs, MN_SELECTED under host input
 #   make test-m10   native-mode interrupts: the ROM shadow, VBI, timer, keys,
 #                   a trak-ball counted in the handler, and the way back to DOS
+#   make test-m11   the application ABI: a separately linked program loaded,
+#                   relocated and run, calling GEM through COP
 #   make check-cc   the compiler bugs we work around, in the vendor's simulator
 #   make bench      GEMBench's tests on this machine, in milliseconds (docs/bench.md)
 #   make test       all of them
@@ -36,7 +38,12 @@ SRC_DOS  ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures
 
 HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
 M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/font8x8.o build/fillpat.o build/vbxe.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/vbxe.o build/fsel.o build/fsel_rsc.o
+
+# A gem4xe application: its own C startup and bindings (src/app), linked
+# against nothing of gem4xe's, on the application's own linker rules.
+APP_OBJS   = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o build/app/m11_app.o
+APP_LD     = $(LD) src/app/gemapp.scm $(APP_OBJS) $(LIB) --rtattr exit=simplified --cstartup gemapp
 
 all: build/hello-boot.atr build/m2-boot.atr build/m3-boot.atr
 
@@ -53,7 +60,7 @@ build/vbxe.o: src/vbxe/vbxe.c src/vbxe/vbxe.h
 	$(CC) $(CFLAGS) -I src/vbxe -o $@ $<
 
 build/m2_vbxe.o: src/m2_vbxe.c src/vbxe/vbxe.h
-build/m3_vdi.o:  src/m3_vdi.c  src/vbxe/vbxe.h src/vdi/vdi.h src/sys/irq.h
+build/m3_vdi.o:  src/m3_vdi.c  src/vbxe/vbxe.h src/vdi/vdi.h src/sys/irq.h src/sys/abi.h src/sys/app.h src/sys/cio.h
 
 build/vdi.o: src/vdi/vdi.c src/vdi/vdi.h src/vdi/pointer.h src/vbxe/vbxe.h src/sys/irq.h
 	@mkdir -p build
@@ -117,6 +124,86 @@ build/irqs.o: src/sys/irq.s
 	@mkdir -p build
 	$(AS) -o $@ $<
 
+# The application ABI: the COP handler and the far-call trampoline in
+# assembly, the parameter-block copy-in/out and the AES's crysbind in C,
+# then the loader and the linker-reported bounds of its bank-$00 pool.
+build/abi.o: src/sys/abi.c src/sys/abi.h src/vdi/vdi.h src/aes/aes.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/abis.o: src/sys/abi.s
+	@mkdir -p build
+	$(AS) -o $@ $<
+
+build/app.o: src/sys/app.c src/sys/app.h src/sys/abi.h src/sys/farmem.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/apppool.o: src/sys/apppool.s
+	@mkdir -p build
+	$(AS) -o $@ $<
+
+# The file layer's floor: CIO through the OS, the IOCB side in C and the
+# round trip into emulation mode in assembly.
+build/cio.o: src/sys/cio.c src/sys/cio.h src/sys/irq.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/cios.o: src/sys/cio.s
+	@mkdir -p build
+	$(AS) -o $@ $<
+
+# The file layer proper: the resource loader and the shell library.
+build/rsrc.o: src/aes/rsrc.c src/aes/aes.h src/sys/app.h src/sys/cio.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/fsel_rsc.c build/fsel_rsc.h: tools/fselrsc.py tools/rsc.py tools/aesref.py
+	@mkdir -p build
+	python3 tools/fselrsc.py build/fsel_rsc.c build/fsel_rsc.h
+build/fsel_rsc.o: build/fsel_rsc.c
+	$(CC) $(CFLAGS) -o $@ $<
+build/fsel.o: src/aes/fsel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/farmem.h build/fsel_rsc.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -I build -o $@ $<
+build/shel.o: src/aes/shel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/farmem.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+# The gate application (src/m11_app.c with src/app/*), linked three times
+# -- at its placeholder addresses, with the near region up a page, with the
+# far region up a bank -- so that tools/mkg4a.py can find every byte that
+# depends on where it is loaded.  The .g4a is what a loader would read
+# from disk; the C array is the same bytes for the runner to load from
+# the image, there being no file layer yet.
+build/app/%.o: src/app/%.s
+	@mkdir -p build/app
+	$(AS) -o $@ $<
+
+build/app/%.o: src/app/%.c src/app/gem.h
+	@mkdir -p build/app
+	$(CC) $(CFLAGS) -I src/app -o $@ $<
+
+build/app/m11_app.o: src/m11_app.c src/app/gem.h
+	@mkdir -p build/app
+	$(CC) $(CFLAGS) -I src/app -o $@ $<
+
+build/m11_app.elf: $(APP_OBJS) src/app/gemapp.scm
+	$(APP_LD) -o $@ --list-file build/m11_app.map
+
+build/m11_app-near.elf: $(APP_OBJS) src/app/gemapp.scm
+	$(APP_LD) -o $@ --memories-expression "(app-layout #x1100 #x020000)"
+
+build/m11_app-far.elf: $(APP_OBJS) src/app/gemapp.scm
+	$(APP_LD) -o $@ --memories-expression "(app-layout #x1000 #x030000)"
+
+build/m11_app.g4a build/m11_app.sym build/app_blob.c: build/m11_app.elf build/m11_app-near.elf build/m11_app-far.elf tools/mkg4a.py
+	python3 tools/mkg4a.py build/m11_app.elf build/m11_app-near.elf build/m11_app-far.elf \
+	        build/m11_app.g4a --syms build/m11_app.sym --c-array build/app_blob.c app_blob
+
+build/app_blob.o: build/app_blob.c
+	$(CC) $(CFLAGS) -o $@ $<
+
 # The GEM 8x8 system font, extracted from EmuTOS (GPL v2+) by fontconv.py.
 # Checked in so the host reference reads the same bytes the target links.
 build/font8x8.o: src/vdi/font8x8.c
@@ -157,10 +244,40 @@ build/m2.xex: build/m2.elf
 build/m3.xex: build/m3.elf
 	python3 tools/mkxex.py $< $@ --entry _atari_entry --syms build/m3.sym
 
-build/m3-boot.atr: build/m3.xex
+# The runner outgrew a single-density disk (620 free sectors; the .xex
+# alone wants more), so the fixture is converted to DOS 2.5 enhanced density
+# on the way (tools/atr.py enhance()), and the program goes into the upper
+# half FIRST -- the sectors a DOS 2.0 cannot reach -- so that every boot
+# proves the fixture DOS reads them.  The same disk build serves the small
+# programs too: one disk format, not one that works until the file grows.
+DISK_DENSITY = --enhanced --high
+
+# The disk also carries what the file layer's gate reads back through CIO
+# (tests/emu/m12_file.py): a text fixture and a resource file built on
+# the host (tools/mkrsc.py), so rsrc_load has something to load.  OUT.TXT
+# is on it because the gate WRITES that name: the emulator's disk changes
+# under the run while the image on the host does not, and the selector's
+# listing is predicted from the image.  A file that is already there is
+# overwritten, so the directory the selector reads is the one the host
+# read -- with the name on both sides rather than neither.
+DISK_FILES = --add tests/fixtures/test.txt TEST.TXT --add build/test.rsc TEST.RSC \
+             --add tests/fixtures/out.txt OUT.TXT
+
+build/test.rsc: tools/mkrsc.py tools/rsc.py tools/aesref.py
+	@mkdir -p build
+	python3 tools/mkrsc.py $@
+
+# The selector's second drive: the fixture DOS disk with fifteen small
+# files on it, D2: when test-m12 boots (tools/mkfsdisk.py).
+build/m12-d2.atr: tools/mkfsdisk.py tools/atr.py
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM
+	python3 tools/mkfsdisk.py "$(SRC_DOS)" $@
+
+build/m3-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc
+	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM $(DISK_DENSITY) $(DISK_FILES)
 
 # The same program linked with bank $01 cut down to its top 16 KB, so that
 # the far image is forced to spill into bank $02 today rather than on the day
@@ -177,19 +294,19 @@ build/m6split.xex: build/m6split.elf
 build/m6split-boot.atr: build/m6split.xex
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM
+	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM $(DISK_DENSITY)
 
 build/m2-boot.atr: build/m2.xex
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M2.COM
+	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M2.COM $(DISK_DENSITY)
 
 build/hello-boot.atr: build/hello.xex
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM
+	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12
 
 # The cc65816 code generation bugs gem4xe works around, run in the vendor's
 # own simulator: fails only if a workaround shape has stopped compiling
@@ -246,6 +363,20 @@ test-m9: build/m3-boot.atr
 test-m10: build/m3-boot.atr
 	python3 tests/emu/m10_irq.py
 
+# The application ABI: the gate application is loaded from the blob in the
+# image, relocated into the pool and a far bank, and run; every word it
+# got back through the ABI's copy-out is compared with the reference's,
+# and the screen with the reference's screen.
+test-m11: build/m3-boot.atr build/m11_app.sym
+	python3 tests/emu/m11_abi.py
+
+# The file layer: CIO called through the OS from native mode, rsrc_load
+# and rsrc_obfix against tools/rsc.py, the shell library's buffers, and
+# the file selector driven over two disks -- its listings predicted from
+# the images with tools/atr.py, its screens compared with the reference's.
+test-m12: build/m3-boot.atr build/m12-d2.atr
+	python3 tests/emu/m12_file.py
+
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.
 demo: build/m3-boot.atr
@@ -278,4 +409,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 demo movie bench emu-stop clean
+.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 demo movie bench emu-stop clean

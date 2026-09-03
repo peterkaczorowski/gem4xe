@@ -12,36 +12,67 @@ loads -- which means the program must arrive via the boot path, after the
 switch, not before it.
 
   python3 tools/mkdisk.py <source.atr> <program.xex> <out.atr> [NAME]
+                          [--enhanced] [--high] [--add FILE NAME]...
 
 The default name is HELLO.COM: the fixture DOS is DOS II+/D 6.4, which boots to
 a `D1:` command prompt rather than running AUTORUN.SYS, so the harness types the
 name to launch it.  That is an advantage here -- it means the program is started
 *after* the CPU switch, on the 65C816.
+
+--add puts further files on the disk under the names given -- what the file
+layer's gate reads back through CIO (tests/emu/m12_file.py).
+
+--enhanced makes the disk DOS 2.5 enhanced density (1040 sectors) before
+anything is written: the runner outgrew a single-density disk's 620 free
+sectors.  --high then writes the program into the upper half first, the part
+a DOS 2.0 cannot reach, so that the boot itself proves the fixture DOS reads
+it -- the alternative being a disk that works until a file grows past sector
+720 and then fails in a way nothing has tested.
 """
 import os
-import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from atr import ATRImage, Dos2  # noqa: E402
+from atr import ATRImage, Dos2, enhance  # noqa: E402
 
 
-def build(src_atr, xex, out_atr, name="HELLO.COM"):
+def build(src_atr, xex, out_atr, name="HELLO.COM", extra=(), enhanced=False, high=False):
     os.makedirs(os.path.dirname(os.path.abspath(out_atr)), exist_ok=True)
-    shutil.copyfile(src_atr, out_atr)
-    img = ATRImage.load(out_atr)
+    img = ATRImage.load(src_atr)
+    if enhanced:
+        img = enhance(img)
     dos = Dos2(img)
-    if dos.find(name):
-        raise SystemExit(f"{out_atr}: {name} already present in the source image")
-    data = open(xex, "rb").read()
-    ent = dos.add_file(name, data)
+    for path, dname in ((xex, name),) + tuple(extra):
+        if dos.find(dname):
+            raise SystemExit(f"{out_atr}: {dname} already present in the image")
+        data = open(path, "rb").read()
+        ent = dos.add_file(dname, data, above=Dos2.HIGH if high else 0)
+        print(f"{out_atr}: {dname} <- {path} ({len(data)} bytes, {ent.count} "
+              f"sectors, start sector {ent.start}, flag ${ent.flag:02X})")
+    print(f"{out_atr}: {img!r}, {dos.free_count()} sectors free")
+    # Written only once everything is in: a disk without the program on it
+    # would look up to date to make and boot to a prompt that cannot find it.
     img.save(out_atr)
-    print(f"{out_atr}: {name} <- {xex} ({len(data)} bytes, {ent.count} sectors, "
-          f"start sector {ent.start})")
     return out_atr
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 4:
+def main(argv):
+    args, extra, flags = [], [], set()
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--add":
+            extra.append((argv[i + 1], argv[i + 2]))
+            i += 3
+        elif argv[i] in ("--enhanced", "--high"):
+            flags.add(argv[i])
+            i += 1
+        else:
+            args.append(argv[i])
+            i += 1
+    if len(args) < 3:
         raise SystemExit(__doc__.strip().splitlines()[-1])
-    build(*sys.argv[1:5])
+    build(*args[:4], extra=extra, enhanced="--enhanced" in flags, high="--high" in flags)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

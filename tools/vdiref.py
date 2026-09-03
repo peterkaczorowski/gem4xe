@@ -11,6 +11,7 @@ a real difference in behaviour rather than at two unrelated rasterisers.
 """
 import os
 import re
+import zlib
 
 import vbxeref
 
@@ -141,6 +142,9 @@ class VDI:
         self.s.fill(self.base, STRIDE, STRIDE, SCR_H, 0x00)   # pen 0 = white
 
     def reset(self):
+        # one workstation, physical, and its handle is 1 (vdi.c v_opnwk);
+        # v_opnvwk opens the same one and hands the same handle back
+        self.handle = 1
         self.clip = 0
         self.xmn, self.ymn, self.xmx, self.ymx = 0, 0, SCR_W - 1, SCR_H - 1
         self.wrt_mode = 0
@@ -767,6 +771,11 @@ class VDI:
 
     def to_rgb(self):
         return self.s.to_rgb(self.base, HW_PAL)
+
+    def screen_key(self):
+        """A fingerprint of the visible screen, for telling whether a turn
+        of the AES drew anything (aesref's held-button rule)."""
+        return zlib.crc32(self.s.mem[self.base:self.base + STRIDE * SCR_H])
 
 
 _VBXE_H = os.path.join(os.path.dirname(os.path.abspath(__file__)),

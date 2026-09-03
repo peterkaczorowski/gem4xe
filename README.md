@@ -36,7 +36,9 @@ full-screen repaints.
 | `make test-m8` | 12/12 | the window manager and the control manager: rectangle lists, moves, gadgets, `WM_*` |
 | `make test-m9` | 4/4 | menus: the bar, drop-downs, `MN_SELECTED`, screenshotted inside the wait |
 | `make test-m10` | 27/27 | native-mode interrupts: the OS shadowed into SRAM byte for byte, the VBI, a ~4 kHz timer, the keyboard, a trak-ball counted under interrupt, and a clean return to DOS |
-| `make check-cc` | PASS | the seven compiler bugs worked around, in the vendor's simulator |
+| `make test-m11` | PASS | the application ABI: a separately linked program loaded, relocated and run, calling the VDI and the AES through `COP` — its records, the loader's, and the screen against the reference |
+| `make test-m12` | PASS | the file layer: CIO through the OS in emulation mode, `rsrc_load`/`rsrc_obfix`, `shel_*`, and the file selector driven over two disks — its listings, its scrolling and its returned strings against the reference, pixel for pixel |
+| `make check-cc` | PASS | the eight compiler bugs worked around, in the vendor's simulator |
 | `make movie` | PASS | a session with the AES itself, filmed frame by frame and checked as a gate: `build/movie/gem4xe.mp4` |
 | `make bench` | — | GEMBench's tests on this machine, in milliseconds, not a gate (`docs/bench.md`) |
 
@@ -123,6 +125,20 @@ held PORTA's left line low through AltirraSDL's input maps. The rig now
 keeps SDL's joystick subsystem off every host input device it can find in
 sysfs.
 
+**Applications call in through `COP`** (`docs/phase10.md`). `COP #$73` is
+a VDI call and `COP #$C8` an AES call, the parameter block's address in
+X:C — the ST's `trap #2` on a 65C816. The handler is the `saveds` entry
+point of the plan: it takes gem4xe's direct page, data bank and stack for
+the duration and gives the caller's back, and the shim behind it keeps
+DRI's copy-in/copy-out discipline, so an application's arrays can be
+anywhere in the 16 MB. A program is linked on its own rules
+(`src/app/gemapp.scm`) and packed as a `.g4a` by `tools/mkg4a.py`, which
+derives the fixups Calypsi's linker does not emit by linking the same
+objects three times and diffing; the loader puts the near part in a
+bank-`$00` pool and the code in a far bank. The gate application makes
+eighteen VDI and AES calls and the harness checks what each returned,
+from the application's own memory, against the reference.
+
 ## Verification
 
 Every gate compares the target against a **host reference model** —
@@ -131,9 +147,11 @@ the specification. Both pixels and returned values are compared, byte for byte,
 running on emulated hardware with all three boards fitted.
 
 Nothing here is asserted by eye. Two of the bugs found so far were invisible on
-screen and only a pixel diff caught them.
+screen and only a pixel diff caught them — and one went the other way: the file
+selector listed a file the reference did not, every returned value agreed, and
+only the screenshots disagreed (`docs/phase11.md`).
 
-Calypsi cc65816 5.18 has seven defects this tree has met — five in code
+Calypsi cc65816 5.18 has eight defects this tree has met — six in code
 generation, one crash and one in the front end's constant arithmetic — each
 reproduced in the vendor's own simulator (the crash, in the compiler itself)
 and worked around at the source (or, for the divide flags, with a linker

@@ -32,8 +32,12 @@ RESULTS = {
     "r_b4_fix": (-2,  "fix", "B4 through an int8_t local"),
     "r_b5_bug": (120, "bug", "B5 spilled pointer, field * 2u"),
     "r_b5_fix": (120, "fix", "B5 field through a scalar"),
+    "r_b5_dec_bug": (4, "bug", "B5 spilled pointer, field - 1"),
+    "r_b5_dec_fix": (4, "fix", "B5 length through a scalar"),
     "r_b7_bug": (801, "bug", "B7 sizeof(struct) as a constant expression"),
     "r_b7_fix": (801, "fix", "B7 the byte count written out"),
+    "r_b8_bug": (84,  "bug", "B8 byte local narrowed on one path, stored"),
+    "r_b8_fix": (84,  "fix", "B8 the character held in a WORD"),
 }
 B2 = ("r_b2_eq", "r_b2_lt", "r_b2_mod")
 

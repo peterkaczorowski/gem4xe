@@ -5,7 +5,7 @@
 ;;; must be in bank $00: five 4-byte JML stubs, in `code`.  The handlers
 ;;; themselves are `farcode` -- fast SRAM on a Rapidus, where the timer
 ;;; handler runs some four thousand times a second and must not be in the
-;;; slow 16 KB window that Near2 shares with the MEMAC window.
+;;; slow 16 KB window that the application pool shares with the MEMAC window.
 ;;;
 ;;; Every handler: save what it uses, force DB = $00 (an interrupt can land
 ;;; inside an MVN with DB pointing at a far bank), address all state absolute
@@ -23,8 +23,10 @@
               .extern irq_kb, irq_kb_head, irq_kb_tail, irq_kb_count
               .extern irq_fault, irq_ptr_on, irq_plo, irq_phi, irq_qtab
               .extern irq_prev_lo, irq_prev_hi, irq_pend, irq_tmp
+              .extern gem_cop
               .public _irq_vec_cop, _irq_vec_brk, _irq_vec_abort
               .public _irq_vec_nmi, _irq_vec_irq
+              .public irq_kput
 
 #define NMIRES 0xD40F                 /* ANTIC: any write clears NMIST */
 #define IRQST  0xD20E                 /* POKEY: read, 0 = pending */
@@ -37,7 +39,7 @@
 ;;; The stubs: what the vectors hold.  Bank $00, 4 bytes each.
 ;;; ---------------------------------------------------------------------------
               .section code, root
-_irq_vec_cop:   jmp     long:irq_cop
+_irq_vec_cop:   jmp     long:gem_cop    ; the application ABI, src/sys/abi.s
 _irq_vec_brk:   jmp     long:irq_brk
 _irq_vec_abort: jmp     long:irq_abort
 _irq_vec_nmi:   jmp     long:irq_nmi
@@ -143,21 +145,12 @@ irq_hi_dec:   rep     #0x20
               dec     abs:irq_qhi
               sep     #0x20
 
-;;; Keyboard: the raw code into the ring.  A full ring drops the newest key
-;;; rather than the oldest -- the count still says it arrived.
+;;; Keyboard: the raw code into the ring.
 irq_key:      lda     abs:irq_pend
               and     #0x40
               beq     irq_done
               lda     KBCODE
-              ldx     abs:irq_kb_tail
-              sta     abs:irq_kb,x
-              inx
-              txa
-              and     #7
-              cmp     abs:irq_kb_head
-              beq     irq_kfull
-              sta     abs:irq_kb_tail
-irq_kfull:    inc     abs:irq_kb_count
+              jsl     irq_kput
 
 irq_done:     rep     #0x30
               plb
@@ -167,13 +160,31 @@ irq_done:     rep     #0x30
               rti
 
 ;;; ---------------------------------------------------------------------------
-;;; COP, BRK, ABORT -- none of these is expected.  Say which and park, with
-;;; I set, so the STATUS block can be read: ABORT is a Rapidus hardware-
-;;; protect violation and would re-execute forever if returned from.
+;;; irq_kput -- one raw key code, in A, into the ring.  A full ring drops the
+;;; newest key rather than the oldest -- the count still says it arrived.
+;;; Called with A and X 8 bits wide and DB = $00; clobbers A and X.  A far
+;;; subroutine so that the CIO trampoline (src/sys/cio.s), which finds the
+;;; keys the OS collected in CH while it had the keyboard, can deliver them
+;;; the same way.
 ;;; ---------------------------------------------------------------------------
-irq_cop:      sep     #0x20
-              lda     #1
-              bra     irq_park
+irq_kput:     ldx     abs:irq_kb_tail
+              sta     abs:irq_kb,x
+              inx
+              txa
+              and     #7
+              cmp     abs:irq_kb_head
+              beq     irq_kfull
+              sta     abs:irq_kb_tail
+irq_kfull:    inc     abs:irq_kb_count
+              rtl
+
+;;; ---------------------------------------------------------------------------
+;;; BRK, ABORT -- neither is expected.  Say which and park, with I set, so
+;;; the STATUS block can be read: ABORT is a Rapidus hardware-protect
+;;; violation and would re-execute forever if returned from.  (COP is the
+;;; application ABI's entry and goes to src/sys/abi.s; fault code 1 is
+;;; retired with it.)
+;;; ---------------------------------------------------------------------------
 irq_brk:      sep     #0x20
               lda     #2
               bra     irq_park

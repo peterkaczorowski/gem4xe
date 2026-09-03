@@ -38,6 +38,7 @@
 
               .extern __program_start, _fl_ok
               .public _atari_entry, _sys_exit
+              .public ae_sp, ae_pokmsk  ; for the CIO trampoline, src/sys/cio.s
 
 #define NMIEN  0xD40E                 /* ANTIC: VBI / DLI enable */
 #define IRQEN  0xD20E                 /* POKEY: IRQ enable */
@@ -74,8 +75,10 @@ ae_go:
               sta     NMIEN           ; ANTIC: no VBI, no DLI
               jmp     __program_start ; into the library startup (does the xce)
 
-ae_sp:        .byte   0
-ae_pokmsk:    .byte   0
+ae_sp:        .byte   0               ; S as DOS handed it to us: the byte
+                                      ; below it is free, the ones above are
+                                      ; DOS's own frames
+ae_pokmsk:    .byte   0               ; POKMSK as DOS ran with it
 
 ;;; ---------------------------------------------------------------------------
 ;;; _sys_exit -- back to DOS.  Far-called from C; never returns to it.

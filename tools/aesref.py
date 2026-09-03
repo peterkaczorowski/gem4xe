@@ -405,6 +405,105 @@ class OrectExhausted(Exception):
     piece (see wind.c mkpiece), so a case that gets here is a bad case."""
 
 
+# -- fsel.c's string helpers (util/optimize.c, util/miscutil.c) -----------
+def fs_fmt_str(name):
+    """'SAMPLE.PRG' -> 'SAMPLE  PRG', 'TEST' -> 'TEST'."""
+    if "." in name:
+        stem, ext = name.split(".", 1)
+        return stem[:8].ljust(8) + ext[:3]
+    return name[:8]
+
+
+def fs_unfmt_str(fmt):
+    """The reverse: 'SAMPLE  PRG' -> 'SAMPLE.PRG'."""
+    stem = fmt[:8].replace(" ", "")
+    return stem + ("." + fmt[8:] if fmt[8:] else "")
+
+
+def fs_wildcmp(pattern, name):
+    """The name against the pattern, name and extension in turn."""
+    pi = ni = 0
+    for _ in range(2):
+        while ni < len(name) and name[ni] != ".":
+            p = pattern[pi] if pi < len(pattern) else ""
+            if p == "*":
+                ni += 1
+                continue
+            if p == "?" or p == name[ni]:
+                pi += 1
+                ni += 1
+                continue
+            return False
+        while pi < len(pattern) and pattern[pi] in "*?":
+            pi += 1
+        if pi < len(pattern) and pattern[pi] == ".":
+            pi += 1
+        if ni < len(name) and name[ni] == ".":
+            ni += 1
+    return (pattern[pi] if pi < len(pattern) else "") == \
+        (name[ni] if ni < len(name) else "")
+
+
+def fs_drive_number(path):
+    """0..7 for A..H at the front of the path, else -1."""
+    if len(path) >= 2 and path[1] == ":":
+        c = path[0].upper()
+        if "A" <= c < chr(ord("A") + 8):
+            return ord(c) - ord("A")
+    return -1
+
+
+def fs_back(path, pend=None):
+    """-> (path, pos): back from `pend` to the last separator, or the
+    colon of X: (a separator put in after it), or the start."""
+    p = len(path) if pend is None else pend
+    while p != 0:
+        c = path[p] if p < len(path) else ""
+        if c == "\\":
+            break
+        if c == ":" and p == 1:
+            path = path[:2] + "\\" + path[2:]
+            p = 2
+            break
+        p -= 1
+    return path, p
+
+
+def fs_pspec(path, pend=None):
+    """-> (path, pos): the file part, after the last separator."""
+    path, p = fs_back(path, pend)
+    if p < len(path) and path[p] == "\\":
+        p += 1
+    return path, p
+
+
+def fs_cioname(gem):
+    """shel.c's sh_cioname: X:\\DIR\\NAME.EXT -> Dn:NAME.EXT, uppercased."""
+    out = ""
+    name = gem
+    if len(gem) >= 3 and gem[1] == ":" and gem[2] == "\\":
+        d = gem[0].lower()
+        if "a" <= d <= "h":
+            out = "D" + str(ord(d) - ord("a") + 1) + ":"
+        name = gem[3:].split("\\")[-1]
+    return (out + name.upper())[:31]
+
+
+def fs_entry(line):
+    """A DOS 2 directory line -> NAME.EXT, or None for a line that is not
+    a file's (fsel.c's fs_entry): the deleted entry's dashes, the FREE
+    SECTORS line, noise."""
+    ok = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_@")
+    if len(line) < 17 or line[1] != " " or line[13] != " ":
+        return None
+    name, ext = line[2:10].rstrip(), line[10:13].rstrip()
+    if not name or not "A" <= name[0] <= "Z":
+        return None
+    if any(c not in ok for c in name) or any(c not in ok for c in ext):
+        return None
+    return name + ("." + ext if ext else "")
+
+
 class AES:
     """The object library over a vdiref.VDI.
 
@@ -428,8 +527,11 @@ class AES:
         # The screen at each ("shot",) step of a plan, in order: what the
         # harness screenshots inside an op, where a drop-down is showing.
         self.shots = []
-        # What the last level-triggered button quick-out reported (ev_wait).
+        # What the last level-triggered button quick-out found (ev_wait):
+        # the button's level and the screen, and how many turns in a row
+        # the caller has taken on one held press.
         self.last_level = None
+        self.held_turns = 0
         self.nbchange = 0
         # wind.c: the desktop tree form_dial(FMD_FINISH) redraws through,
         # until wm_init() builds the window manager's state
@@ -440,6 +542,18 @@ class AES:
         # event.c: the message queue (mq_put), oldest first
         self.gl_queue = []
         self.ct_init()
+        # fsel.c: the drives the selector can list ("D1:" -> [NAME.EXT]
+        # as CIO's directory read yields them through fs_entry, or None
+        # for a drive that does not answer), the drive buttons that are
+        # live, and where the target's pool starts, which is where the
+        # selector's tree is laid out (run(..., dirs=, pool=)).
+        self.dirs = {}
+        self.gl_drvbits = 0x00FF
+        self.pool_mark = None
+        # the strings the harness staged for the selector's buffers, by
+        # address (run(..., buffers=)); fs_input leaves its results here
+        self.fs_strings = {}
+        self.fs_path_addr = 0
 
     # -- gemgsxif.c ---------------------------------------------------------
     def gsx_start(self):
@@ -447,6 +561,7 @@ class AES:
         self.gl_mode = self.gl_tcolor = self.gl_lcolor = -1
         self.gl_fis = self.gl_patt = -1
         self.gl_moff = 0
+        self.gl_handle = v.handle   # the workstation vdi_init opened
         v.call(VQ_EXTND, (), (0,))
         self.gl_width = v.intout[0] + 1
         self.gl_height = v.intout[1] + 1
@@ -1493,26 +1608,45 @@ class AES:
             return what, by_level
 
         what, by_level = quick()
-        if what == MU_BUTTON and by_level and self.last_level == level():
+        if what == MU_BUTTON and by_level and self.last_level is not None \
+                and self.last_level[0] == level():
             # The caller has come straight back with the button still held
-            # and nothing else changed -- form_do over a disabled object,
-            # or outside the dialog, where GEM rings its bell -- and the
-            # target returns again at once, thousands of times a frame,
-            # until the input changes.  Every one of those returns is this
-            # one over again, so walk the plan to the change instead.
-            found = [(0, False)]
+            # and nothing else changed, and the target returns again at
+            # once, thousands of times a frame, until the input changes.
+            # What the caller did with the last return is on the screen:
+            # if it drew something -- the file selector scrolling a line
+            # for every return while an arrow is held -- the next return
+            # is a new turn, and the target takes them until the caller
+            # runs out of changes (the list's end) long before the frame
+            # does.  Once a turn changes nothing -- form_do over a disabled
+            # object, outside the dialog where GEM rings its bell, a
+            # scroll at its stop -- every return after it is that one over
+            # again, so walk the plan to the change instead.
+            if self.v.screen_key() != self.last_level[1]:
+                self.held_turns += 1
+                if self.held_turns > 4096:
+                    raise ValueError("a held button whose turns never settle: "
+                                     "how many the target takes is unknowable")
+            else:
+                found = [(0, False)]
 
-            def changed():
-                found[0] = quick()
-                return found[0][0] != MU_BUTTON or level() != self.last_level
+                def changed():
+                    found[0] = quick()
+                    return (found[0][0] != MU_BUTTON
+                            or level() != self.last_level[0])
 
-            while not self._step(changed):
-                pass
-            what, by_level = found[0]
+                while not self._step(changed):
+                    pass
+                what, by_level = found[0]
         if what:
-            self.last_level = level() if (what & MU_BUTTON) and by_level else None
+            if (what & MU_BUTTON) and by_level:
+                self.last_level = (level(), self.v.screen_key())
+            else:
+                self.last_level = None
+                self.held_turns = 0
             return what
         self.last_level = None
+        self.held_turns = 0
 
         if flags & MU_BUTTON:
             self.bw_register(buparm)
@@ -2872,6 +3006,311 @@ class AES:
         self.gsx_sclip(self.gl_rfull)
         return self.fm_button(obj, clks)
 
+    # -- fsel.c: the file selector (gemfslib.c) ---------------------------
+    # The tree is the one tools/fselrsc.py describes, fixed up at the pool
+    # mark the way rs_fixit leaves it (tools/rsc.py expect()), so every
+    # address in it is the target's; the work area follows it as fsel.c
+    # lays it out.  The names are plain strings here where the target has
+    # far slots, and the directory read is a lookup in self.dirs where the
+    # target has CIO -- and the frames the target spends reading are frames
+    # the plan's settles cover, since this side reads in no time.
+    def fs_input(self, path, sel, label=None):
+        """-> (ret, button, path, sel), the buffers as the target leaves
+        them.  `path` and `sel` are str; `label` None for fsel_input."""
+        import fselrsc
+        from fselrsc import (FSTITLE, FSDIRECT, FSSELECT, FS1STDRV, FCLSBOX,
+                             FTITLE, SCRLBAR, FUPAROW, FDNAROW, FSVSLID,
+                             FSVELEV, FILEBOX, F1NAME, F9NAME, FSOK, FSCANCEL,
+                             NM_DRIVES, NM_NAMES)
+        assert self.pool_mark is not None, "run(..., pool=) names the pool"
+        R = fselrsc.build()
+        base = self.pool_mark
+        image, trees, mem = R.expect(base, self.gl_wchar, self.gl_hchar,
+                                     self.gl_width)
+        tree = trees[0]
+        self.mem.update(mem)
+        work = base + len(image)                 # g_fslist, then the paths
+        LEN_FSPATH = fselrsc.LEN_DIRECT + 9
+        locstr = Text("", LEN_FSPATH)
+        locold = Text("", LEN_FSPATH)
+        mask = Text("", LEN_FSPATH)
+        self.mem[work + 128] = locstr
+        self.mem[work + 128 + LEN_FSPATH] = locold
+        self.mem[work + 128 + 2 * LEN_FSPATH] = mask
+        if label is not None:
+            self.mem[base - 2] = Text(label)     # the caller's, somewhere
+        ted = lambda obj: self.mem[tree[obj].ob_spec]           # noqa: E731
+        text = lambda obj: self.mem[ted(obj).ptext]              # noqa: E731
+
+        def inf_sset(obj, s):
+            text(obj).s = s[:ted(obj).txtlen - 1]
+
+        def inf_what(ok):
+            for field in range(2):
+                if tree[ok + field].ob_state & SELECTED:
+                    tree[ok + field].ob_state = NORMAL
+                    return 1 if field == 0 else 0
+            return -1
+
+        def path_changed(p):
+            n = ted(FSDIRECT).txtlen - 1
+            return p[:n] != text(FSDIRECT).s[:n]
+
+        def get_drive(p):
+            d = fs_drive_number(p)
+            return d if d >= 0 else 0
+
+        def drive_path(drive):
+            locstr.s = chr(ord("A") + drive) + ":\\" + mask.s
+
+        def set_mask():
+            p, pend = fs_pspec(locstr.s)
+            if pend == len(p):
+                p += "*.*"
+            locstr.s = p[:LEN_FSPATH - 1]
+            mask.s = locstr.s[pend:][:LEN_FSPATH - 1]
+
+        def select_drive(drive, redraw):
+            if not 0 <= drive < NM_DRIVES:
+                return
+            old = -1
+            for i in range(NM_DRIVES):
+                o = tree[FS1STDRV + i]
+                if o.ob_state & SELECTED:
+                    o.ob_state &= ~SELECTED
+                    old = i
+            tree[FS1STDRV + drive].ob_state |= SELECTED
+            if redraw and drive != old:
+                if old >= 0:
+                    self.ob_draw(FS1STDRV + old, MAX_DEPTH)
+                self.ob_draw(FS1STDRV + drive, MAX_DEPTH)
+
+        names = []
+
+        def fs_active(ppath, pspec):
+            allpath, pend = fs_pspec(ppath)
+            allpath = allpath[:pend] + "*.*"
+            dev = fs_cioname(allpath)[:3]
+            listing = self.dirs.get(dev)
+            if listing is None:
+                return False, []
+            found = [n for n in listing if fs_wildcmp(pspec, n)][:64]
+            return True, sorted(found)
+
+        def fs_1scroll(curr, count, touchob):
+            newcurr = curr - 1 if touchob == FUPAROW else curr + 1
+            if newcurr < 0:
+                newcurr += 1
+            if count - newcurr < NM_NAMES:
+                newcurr -= 1
+            return newcurr if count > NM_NAMES else curr
+
+        def fs_format(currtop, count):
+            cnt = min(count - currtop, NM_NAMES)
+            for i in range(NM_NAMES):
+                name = " " + fs_fmt_str(names[currtop + i]) if i < cnt else " "
+                inf_sset(F1NAME + i, name)
+                tree[F1NAME + i].ob_type = G_FBOXTEXT
+                tree[F1NAME + i].ob_state = NORMAL
+            y = 0
+            th = h = tree[FSVSLID].ob_height
+            if count > NM_NAMES:
+                h = max(mul_div_round(NM_NAMES, h, count), self.gl_hbox)
+                y = mul_div_round(currtop, th - h, count - NM_NAMES)
+            tree[FSVELEV].ob_y, tree[FSVELEV].ob_height = y, h
+
+        def fs_sel(sel, state):
+            if sel:
+                self.ob_change(F1NAME + sel - 1, state, True)
+
+        def fs_nscroll(sel, curr, count, touchob, n):
+            newcurr = curr
+            for _ in range(n):
+                newcurr = fs_1scroll(newcurr, count, touchob)
+            diffcurr = newcurr - curr
+            if diffcurr:
+                curr = newcurr
+                fs_sel(sel, NORMAL)
+                sel = 0
+                fs_format(curr, count)
+                r1 = self.gsx_gclip()
+                r0 = self.ob_actxywh(F1NAME)
+                neg = diffcurr < 0
+                diffcurr = abs(diffcurr)
+                if diffcurr < NM_NAMES:
+                    sy = r0.y + r0.h * diffcurr
+                    dy = r0.y
+                    if neg:
+                        sy, dy = r0.y, sy
+                    self.bb_screen(r0.x, sy, r0.x, dy, r0.w,
+                                   r0.h * (NM_NAMES - diffcurr))
+                    if not neg:
+                        r0.y += r0.h * (NM_NAMES - diffcurr)
+                else:
+                    diffcurr = NM_NAMES
+                r0.h *= diffcurr
+                for i, r in enumerate((r0, r1)):
+                    self.gsx_sclip(r)
+                    self.ob_draw(FSVSLID if i else FILEBOX, MAX_DEPTH)
+            return sel, curr
+
+        def fs_newdir():
+            self.ob_draw(FSDIRECT, MAX_DEPTH)
+            ok, found = fs_active(locstr.s, mask.s)
+            if not ok:
+                return False, 0
+            names[:] = found
+            fs_format(0, len(names))
+            ted(FTITLE).ptext = work + 128 + 2 * LEN_FSPATH
+            for obj in (FTITLE, FILEBOX, SCRLBAR):
+                self.ob_draw(obj, MAX_DEPTH)
+            return True, len(names)
+
+        with self.on_tree(tree):
+            if not path:
+                path = "A:\\*.*"
+            # fs_start's widths, on this copy
+            rfs = Rect(*self.ob_center())
+            diff = tree[SCRLBAR].ob_width - self.gl_wbox
+            tree[FTITLE].ob_width -= diff
+            for obj in (SCRLBAR, FUPAROW, FDNAROW, FSVSLID, FSVELEV):
+                tree[obj].ob_width = self.gl_wbox
+            locstr.s = path[:LEN_FSPATH - 1]
+            locold.s = locstr.s
+            set_mask()
+            ted(FTITLE).ptext = work + 128 + 2 * LEN_FSPATH
+            inf_sset(FSDIRECT, locstr.s)
+            selname = fs_fmt_str(sel)
+            inf_sset(FSSELECT, selname)
+            selname = " " + selname
+            if label is not None:
+                tree[FSTITLE].ob_spec = base - 2
+            tree[FSTITLE].ob_x = ((tree[ROOT].ob_width
+                                   - len(self.mem[tree[FSTITLE].ob_spec].s)
+                                   * self.gl_wchar) // 2)
+            for drive in range(NM_DRIVES):
+                if self.gl_drvbits & (1 << drive):
+                    tree[FS1STDRV + drive].ob_state &= ~DISABLED
+                else:
+                    tree[FS1STDRV + drive].ob_state |= DISABLED
+            select_drive(get_drive(locstr.s), False)
+            self.gsx_sclip(rfs)
+            self.fm_dial(FMD_START, self.gl_rcenter, rfs)
+            self.ob_draw(ROOT, 2)
+
+            curr = count = sel = 0
+            newsel = newdrive = False
+            cont = newlist = True
+            error = 0
+            while cont:
+                touchob = 0 if newlist else self.fm_do(FSSELECT)
+                _, mx, my = self.gsx_mouse()
+                if newlist:
+                    fs_sel(sel, NORMAL)
+                    inf_sset(FSDIRECT, locstr.s)
+                    p, pend = fs_pspec(locstr.s)
+                    locstr.s = p[:pend] + mask.s
+                    curr = sel = 0
+                    newlist = False
+                    ok, count = fs_newdir()
+                    error = 0 if ok else error + 1
+                    if error == 1:
+                        newlist = True
+                        if locstr.s != locold.s:
+                            locstr.s = locold.s
+                        else:
+                            drive_path(0)
+                        select_drive(get_drive(locstr.s), True)
+                    locold.s = locstr.s
+                value = 0
+                dclkret = (touchob & 0x8000) != 0
+                touchob &= 0x7FFF
+                if touchob == FSOK and path_changed(locstr.s):
+                    self.ob_change(FSOK, NORMAL, True)
+                elif touchob in (FSOK, FSCANCEL):
+                    cont = False
+                elif touchob in (FUPAROW, FDNAROW):
+                    value = 1
+                elif touchob in (FSVSLID, FSVELEV):
+                    pt = self.ob_actxywh(FSVELEV)
+                    if touchob == FSVSLID and not inside(mx, my, pt):
+                        touchob = FUPAROW if my <= pt.y else FDNAROW
+                        value = NM_NAMES
+                    else:
+                        self.fm_own(True)
+                        value = self.gr_slidebox(FSVSLID, FSVELEV, True)
+                        self.fm_own(False)
+                        value = curr - mul_div_round(value, count - NM_NAMES, 1000)
+                        if value >= 0:
+                            touchob = FUPAROW
+                        else:
+                            touchob = FDNAROW
+                            value = -value
+                elif F1NAME <= touchob <= F9NAME:
+                    fnum = touchob - F1NAME + 1
+                    if fnum <= count:
+                        if sel and sel != fnum:
+                            fs_sel(sel, NORMAL)
+                        if sel != fnum:
+                            sel = fnum
+                            fs_sel(sel, SELECTED)
+                        selname = text(touchob).s
+                        if selname[0] == " ":
+                            newsel = True
+                            if dclkret:
+                                cont = False
+                        else:
+                            p, pend = fs_pspec(locstr.s)
+                            locstr.s = (p[:pend] + fs_unfmt_str(selname[1:])
+                                        + "\\" + mask.s)
+                            newlist = True
+                elif touchob == FCLSBOX:
+                    p, pos = fs_back(locstr.s)
+                    if pos != 0 and p[pos - 1] != ":":
+                        _, pend = fs_pspec(p, pos - 1)
+                        locstr.s = p[:pend] + mask.s
+                        newlist = True
+                else:
+                    drive = touchob - FS1STDRV
+                    if (0 <= drive < NM_DRIVES and drive != get_drive(locstr.s)
+                            and not path_changed(locstr.s)
+                            and not tree[touchob].ob_state & DISABLED):
+                        drive_path(drive)
+                        newdrive = True
+
+                if touchob == FSCANCEL:
+                    break
+                if not newlist and not newdrive and path_changed(locstr.s):
+                    if get_drive(text(FSDIRECT).s) != get_drive(locstr.s):
+                        newdrive = True
+                    else:
+                        newlist = True
+                    locstr.s = text(FSDIRECT).s
+                if newdrive:
+                    select_drive(touchob - FS1STDRV, True)
+                    newdrive = False
+                    newlist = True
+                if newlist:
+                    inf_sset(FSDIRECT, locstr.s)
+                    set_mask()
+                    if not error:
+                        selname = selname[:1]
+                        newsel = True
+                if newsel:
+                    text(FSSELECT).s = selname[1:]
+                    self.ob_draw(FSSELECT, MAX_DEPTH)
+                    if not cont:
+                        self.ob_change(FSOK, SELECTED, True)
+                    newsel = False
+                if value:
+                    sel, curr = fs_nscroll(sel, curr, count, touchob, value)
+
+            path = locstr.s
+            sel = fs_unfmt_str(text(FSSELECT).s)
+            self.fm_dial(FMD_FINISH, self.gl_rcenter, rfs)
+            button = inf_what(FSOK)
+        return 1, button, path, sel
+
     # -- menu.c: the menu library (gemmnlib.c) ----------------------------
     # The bar's objects sit at fixed indices; a title's drop-down is the
     # sibling as many along the drop-down box's chain as the title is
@@ -3095,10 +3534,17 @@ class AES:
             self.ev_init()
             self.wm_init()
             self.mn_init()
+        elif n == 10:
+            # appl_init: the ap_id, which is 0 -- one process (abi.c)
+            io[0] = 0
+            c4 = 1
         elif n == 12:
             # appl_write: id, len, then the eight-word message
             self.mq_put(ints[2:10])
             io[0] = 1
+            c4 = 1
+        elif n == 19:
+            io[0] = 1                   # appl_exit
             c4 = 1
         elif n == 20:
             io[0] = self.ev_keybd()
@@ -3202,10 +3648,27 @@ class AES:
             io[1:3] = self.gr_dragbox(ints[0], ints[1], ints[2], ints[3],
                                       Rect(*ints[4:8]))
             c4 = 3
+        elif n == 77:
+            # graf_handle: the AES's workstation handle and its character
+            # and box cell sizes
+            io[0] = self.gl_handle
+            io[1:5] = (self.gl_wchar, self.gl_hchar, self.gl_wbox, self.gl_hbox)
+            c4 = 5
         elif n == 79:
             io[0] = 1
             io[1:5] = self.gr_mkstate()
             c4 = 5
+        elif n in (90, 91):
+            # fsel_input / fsel_exinput: the path is the record's fourth
+            # slot, the selection and label are looked up in self.mem as
+            # the strings the harness staged (run(..., strings=))
+            path = self.fs_strings[self.fs_path_addr]
+            sel = self.fs_strings[ints[0]]
+            label = self.fs_strings[ints[1]] if n == 91 else None
+            io[0], io[1], path, sel = self.fs_input(path, sel, label)
+            self.fs_strings[self.fs_path_addr] = path
+            self.fs_strings[ints[0]] = sel
+            c4 = 2
         elif n == 100:
             io[0] = self.wm_create(ints[0], Rect(*ints[1:5]))
             c4 = 1
@@ -3249,14 +3712,17 @@ FORM_DO, FORM_DIAL, FORM_KEYBD, FORM_BUTTON = 1050, 1051, 1055, 1056
 GRAF_RUBBOX, GRAF_DRAGBOX = 1070, 1071
 GRAF_GROWBOX, GRAF_SHRINKBOX, GRAF_WATCHBOX = 1073, 1074, 1075
 GRAF_MKSTATE = 1079
-APPL_WRITE, EVNT_MESAG = 1012, 1023
+APPL_INIT, APPL_WRITE, APPL_EXIT, EVNT_MESAG = 1010, 1012, 1019, 1023
+GRAF_HANDLE = 1077
+FSEL_INPUT, FSEL_EXINPUT = 1090, 1091
 (MENU_BAR, MENU_ICHECK, MENU_IENABLE, MENU_TNORMAL, MENU_TEXT,
  MENU_REGISTER) = range(1030, 1036)
 (WIND_CREATE, WIND_OPEN, WIND_CLOSE, WIND_DELETE, WIND_GET, WIND_SET,
  WIND_FIND, WIND_UPDATE, WIND_CALC) = range(1100, 1109)
 
 
-def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None):
+def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None,
+        dirs=None, pool=None, buffers=None):
     """Run a mixed VDI/AES script against fresh models; returns
     (vdi, aes, results) with one result record per script record, the
     way vdiref.VDI.run() does for a pure VDI script.
@@ -3276,13 +3742,20 @@ def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None):
     states the harness cannot tell apart, so both are errors in the plan.
     `pointer` is where the target's pointer starts, read back by the
     harness.  A record may name a tree by address in its fourth slot,
-    resolved through `trees`; so is the tree a WF_NEWDESK names.
+    resolved through `trees`; so is the tree a WF_NEWDESK names.  A
+    FSEL_INPUT record names the path buffer there instead, and `buffers`
+    maps that address and the ones in its intin to the strings staged in
+    them; `dirs` is what the drives list and `pool` where the target's
+    application pool starts (AES.fs_input).
     """
     v = vdiref.VDI()
     v.ptr_x, v.ptr_y = pointer
     a = AES(v, tree, mem)
     a.trees = trees or {}
     a.home = tree               # the tree a record that names none means
+    a.dirs = dirs or {}
+    a.pool_mark = pool
+    a.fs_strings = dict(buffers or {})
     return v, a, resume(v, a, script, plan)
 
 
@@ -3301,7 +3774,11 @@ def resume(v, a, script, plan=None, base=0):
         ints = rec[2] if len(rec) > 2 else ()
         steps = list(plan.pop(i, ()))
         if op >= AES_OP:
-            a.tree = trees[rec[3]] if len(rec) > 3 else tree
+            if op in (FSEL_INPUT, FSEL_EXINPUT):
+                a.fs_path_addr = rec[3]
+                a.tree = tree
+            else:
+                a.tree = trees[rec[3]] if len(rec) > 3 else tree
             if steps and (steps[0][0] != "frames" or steps[0][1] < 1):
                 raise ValueError(f"record {i} (op {op}): a plan starts with "
                                  f"a (\"frames\", n) settle, not {steps[0]}")

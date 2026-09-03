@@ -1,6 +1,6 @@
 # tools/ccbug — the cc65816 bugs gem4xe works around
 
-Seven defects in Calypsi cc65816 **5.18** — five in code generation, one
+Eight defects in Calypsi cc65816 **5.18** — six in code generation, one
 crash and one in the front end's arithmetic — each reproduced from a shape
 lifted out of gem4xe, each with the shape the sources use instead. `make check-cc` builds `bugs.c` with the
 vendor's minimal linker script and C library, runs it under `db65816`, and
@@ -12,7 +12,7 @@ compiled on its own and the outcome read from the compiler:
       B1 through a scalar                        want   476 got   476   ok
       ...
       B6 indexed direct-page array                       compiles   still present
-    check-cc: PASSED -- every workaround shape is right; 9 of 9 bug shapes still present
+    check-cc: PASSED -- every workaround shape is right; 11 of 11 bug shapes still present
 
 The run **fails only if a workaround shape stops compiling right**, because
 that is what would break gem4xe. A bug that has gone away is reported as
@@ -37,9 +37,10 @@ What the sources do, in one line each. The reasons follow.
 3. **Never `*out = c ? a : b` in a `static` function.** Return the value.
 4. **Never `(int8_t)` an expression derived from a 32-bit value.** Go through
    a `WORD` (or `int8_t`) local.
-5. **Never shift or double a 16-bit load through a local pointer in the same
-   expression.** `wd = p->field; stride = wd * 2;`, not
-   `stride = p->field * 2;`.
+5. **Never shift, double, increment or decrement a 16-bit load through a
+   local pointer in the same expression.** `wd = p->field; stride = wd * 2;`,
+   not `stride = p->field * 2;`; `len = p->len; n = len - 1;`, not
+   `n = p->len - 1;`.
 6. **Never index an array that lives in the direct page.** Direct-page
    scalars and direct-page *pointers* are fine (`__attribute__((tiny))`,
    not the `__tiny` keyword, on a pointer declarator); tables stay
@@ -47,6 +48,9 @@ What the sources do, in one line each. The reasons follow.
 7. **Never `sizeof` a struct where an integer constant expression is
    required** — an enum, an array bound, `_Static_assert`. It is padded
    there and not in the code. Write the byte count out (`BCB_SIZE`).
+8. **Never narrow arithmetic into a `char` local on one path of a
+   conditional and store the local after the join.** Hold the character
+   in a `WORD` and narrow it once, at the store.
 
 ## B1 — stack-array element plus operand compiles to a load
 
@@ -134,6 +138,14 @@ unrelated memory. Switching to an incrementing pointer happened to change the
 slot allocation so `stride` no longer landed on `src`. It is root-caused now
 — `docs/phase2b.md` is updated — and `check-cc` pins it.
 
+`- 1` does it too, as `dec 0,x` on the slot: `n = ted->te_txtlen - 1` in
+`inf_sset()` (src/aes/fsel.c), with `ted` a call's return dead after the
+line, made `n` the TEDINFO's address less one — negative in bank 0 above
+`$8000` — so the loop copied nothing and every field of the file selector
+came up empty.  `-O2`.  Found by `make test-m12`: the target's selector
+showed templates with no text where the model showed the path and the
+names; `check-cc` pins this shape as well (`B5 spilled pointer, field - 1`).
+
 ## B6 — an indexed direct-page array is an internal compiler error
 
     static __attribute__((tiny)) uint8_t tbl[4];
@@ -181,6 +193,28 @@ given exactly that assertion as a guard. All `-O` levels.
 The sources write the byte count out where a constant is needed
 (`BCB_SIZE`) and `check-cc` reads element 1 of a three-element array
 through both strides.
+
+## B8 — a byte local narrowed on one path is stored from 8-bit mode
+
+    char c = *name;
+    if (c >= 'a' && c <= 'z')
+        c = (char)(c - 0x20);       /* sh_cioname(), src/aes/shel.c */
+    out[k] = c;
+
+The taken path does the subtraction in 16 bits, drops to an 8-bit
+accumulator to store the byte local, and falls through into the join with
+the mode still 8-bit; the untaken path arrives in 16-bit mode. The join
+loads the destination *pointer* for `out[k] = c` with `lda`, `tay` — an
+8-bit load now, so Y gets half an address and the byte goes to page zero
+while `out[k]` keeps whatever it held. `-O2` only; an `unsigned char`
+local is the same shape and the same bug, and so is a `static char
+to_upper(char)` once it is inlined into the store. Found by
+`tests/emu/m12_file.py`: `sh_cioname("test.rsc")` gave `\xEEEST.RSC` —
+the first lowercase letter of a name vanished, uppercase names were fine —
+and the simulator reproduced it from the function alone.
+
+The sources hold the character in a `WORD` and narrow it once, at the
+store; `check-cc` folds `"test"` both ways and reads the first byte.
 
 ## The simulator recipe
 

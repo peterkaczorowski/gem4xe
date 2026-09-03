@@ -22,7 +22,8 @@ GRECT gl_rscreen, gl_rfull, gl_rcenter, gl_rmenu;
 /* The font's "top" -- the distance from the top of a cell to the baseline.
  * v_gtext positions text by its baseline; the AES thinks in cells. */
 static WORD gl_hptschar, gl_wptschar;
-static WORD gl_nplanes;
+WORD gl_nplanes;                /* what vq_extnd reports, for appl_init's global */
+WORD gl_handle;                 /* the workstation the AES draws on */
 
 /* What the VDI currently holds, so the AES does not re-send attributes it
  * has already set.  -1 = unknown, forcing the first call through. */
@@ -37,7 +38,7 @@ static void gsx_call(WORD op, WORD npts, WORD nint)
     contrl[0] = op;
     contrl[1] = npts;
     contrl[3] = nint;
-    contrl[6] = 1;
+    contrl[6] = gl_handle;
     vdi();
 }
 
@@ -151,6 +152,7 @@ void gsx_start(void)
     gl_mode = gl_tcolor = gl_lcolor = -1;
     gl_fis = gl_patt = -1;
     gl_moff = 0;
+    gl_handle = vwk.handle;     /* the physical workstation vdi_init opened */
 
     /* vq_extnd(0) answers as v_opnwk did: extent and pixel size. */
     gsx_1code(VQ_EXTND, 0);

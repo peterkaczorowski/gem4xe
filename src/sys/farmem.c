@@ -67,6 +67,27 @@ void far_get(uint8_t *dst, uint32_t src, uint16_t len)
         *dst++ = *p++;
 }
 
+/* Bounded strcpy across the bank boundary, both ways: a string an
+ * application hands the AES lives in far memory and the AES's own
+ * buffers are sized, so neither copy may run past `max` with its NUL. */
+void far_strget(char *dst, uint32_t src, uint16_t max)
+{
+    const char __far *p = (const char __far *)src;
+    uint16_t k;
+    for (k = 0; k + 1 < max && p[k]; k++)
+        dst[k] = p[k];
+    dst[k] = 0;
+}
+
+void far_strput(uint32_t dst, const char *src, uint16_t max)
+{
+    char __far *p = (char __far *)dst;
+    uint16_t k;
+    for (k = 0; k + 1 < max && src[k]; k++)
+        p[k] = src[k];
+    p[k] = 0;
+}
+
 /* Write every bank's own number into it, then read them all back.
  *
  * This is the classic RAM-sizing trick and it is alias-proof by construction:
@@ -140,4 +161,22 @@ uint32_t far_alloc(uint32_t bytes)
         return 0;
     farmem.brk = base + bytes;
     return base;
+}
+
+/* Whole banks, for what must not straddle one: an application's code,
+ * which the 65816 executes bank by bank (src/gem4xe.scm on why).  The
+ * cursor moves up to the next bank boundary first, so the banks come
+ * back aligned; what that skips is lost to the bump allocator, as
+ * everything it hands out is.  Returns the first bank's number. */
+uint16_t far_alloc_banks(uint16_t n)
+{
+    uint32_t base = (farmem.brk + 0xFFFFUL) & ~0xFFFFUL;
+    uint32_t end = (uint32_t)(farmem.last_bank + 1) << 16;
+    uint32_t bytes = (uint32_t)n << 16;
+    if (!farmem.banks || n == 0)
+        return 0;
+    if (base + bytes > end || base + bytes < base)
+        return 0;
+    farmem.brk = base + bytes;
+    return (uint16_t)(base >> 16);
 }
