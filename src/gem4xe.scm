@@ -17,8 +17,23 @@
 ;;;   $D000-$D7FF  hardware (VBXE regs at $D640/$D740)
 ;;;   $D800-$FFFF  OS ROM
 ;;;
-;;; Bank $01: the far code.  A probe (src/sys/farmem.c) finds one unbroken run
-;;; of RAM from bank $01 to $EF on a Rapidus; bank $01 is the first of it.
+;;; Banks $01-$0F: the far code, one memory per bank.  A probe
+;;; (src/sys/farmem.c) finds one unbroken run of RAM from bank $01 to $EF on a
+;;; Rapidus, but only the first megabyte of it is the accelerator's SRAM; the
+;;; far image is kept inside that, and the far heap starts in the bank after
+;;; the last one the image reached.
+;;;
+;;; ONE MEMORY PER BANK, NOT ONE MEMORY SPANNING THEM.  The 65816 program
+;;; counter wraps within its bank, so a function that straddles $01FFFF /
+;;; $020000 is executed as two unrelated halves.  The linker does not know
+;;; that: given a single memory $010000-$0FFFFF it will happily place a
+;;; function across the seam (tried, and it did).  Given fifteen memories it
+;;; fills them in the order they are defined and never splits a fragment, so
+;;; every function lands whole inside one bank and the image spills into the
+;;; next bank only when the current one cannot hold the next whole function.
+;;; The cost is that `.sectionEnd farcode` no longer means anything -- the
+;;; section is in several memories -- so the loader RECORDS how far it wrote
+;;; (src/farload.s, _fl_top) rather than the linker predicting it.
 ;;;
 ;;; WHAT GOES FAR AND WHAT MUST NOT
 ;;;
@@ -36,7 +51,29 @@
 ;;; No `reset` section is used at run time: a .xex is entered through the DOS
 ;;; run vector at $02E0, which tools/mkxex.py points at _atari_entry.
 
-(define memories
+;;; One far memory per bank.  `first` is where bank $01's memory starts: its
+;;; bottom for the real build, and higher for a test link -- `make test-m6`
+;;; links a second image with `--memories-expression "(layout #x01c000)"`,
+;;; which leaves bank $01 too small for the code and forces the spill, so the
+;;; mechanism is exercised long before the code grows into it on its own.
+(define (far-bank b first)
+  (list 'memory (string->symbol (string-append "FarCode" (number->string b 16)))
+        (list 'address (cons first (+ (* b #x10000) #xffff)))
+        '(section cfar farcode switch)))
+
+(define (far-banks first)
+  (cons (far-bank 1 first)
+        (map (lambda (b) (far-bank b (* b #x10000)))
+             '(2 3 4 5 6 7 8 9 10 11 12 13 14 15))))
+
+(define (layout far-start)
+  (append (far-banks far-start) bank0))
+
+;;; Bank $00.  The far memories go ahead of these in the final list.  The
+;;; linker fills same-section memories in definition order, and nothing here
+;;; shares a section with them, so only the far memories' order among
+;;; themselves matters.
+(define bank0
   '((memory DirectPage (address (#x2000 . #x20ff))
             (section (registers ztiny)))
     (memory LoRAM      (address (#x2100 . #x37ff))
@@ -66,11 +103,6 @@
     (memory Stage      (address (#x8000 . #x9fff))
             (section farstage))
 
-    ;; Bank $01: the far code.  A .xex cannot load here; src/farload.s copies
-    ;; it up as DOS reads the file.
-    (memory FarCode    (address (#x010000 . #x01ffff))
-            (section cfar farcode switch))
-
     ;; The library cstartup always emits a `reset` section -- a word pointing
     ;; at __program_start.  A .xex has no reset vector, so this is inert filler
     ;; that simply has to land somewhere the loader will not mind.
@@ -81,3 +113,8 @@
     (block heap  (size #x0000))     ;; nothing here calls malloc
     (base-address _DirectPageStart DirectPage 0)
     ))
+
+;;; The far code -- banks $01-$0F, filled from the bottom of bank $01.  A .xex
+;;; cannot load above $FFFF; src/farload.s copies the image up as DOS reads
+;;; the file.
+(define memories (layout #x010000))

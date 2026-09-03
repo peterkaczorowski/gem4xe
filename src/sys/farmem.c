@@ -8,18 +8,32 @@
 
 FARMEM farmem;
 
-/* The first bank the program does not occupy, exported by src/farload.s from
- * the end of the FarCode memory in src/gem4xe.scm.  Probing and allocating
- * both start here.
+/* One past the highest far address the loader wrote, recorded by
+ * src/farload.s as it copied the image up.  Probing and allocating both
+ * start in the bank above it -- which is the first bank the program does not
+ * occupy, taken from what actually arrived rather than restated as a
+ * constant or predicted by the linker (the far code is spread over one
+ * memory per bank from $01 up, and the linker has no operator for the end of
+ * a section that lives in several memories).
  *
- * This is not caution, it is a repair.  The far code lives in bank $01, and
- * the first version of this file probed and allocated from bank $01 -- so
+ * This is not caution, it is a repair.  The first version of this file
+ * probed and allocated from bank $01, where the far code lives -- so
  * farmem_probe() wrote a bank number into $010100 and far_alloc() returned
  * $010000, and the program corrupted three bytes of its own text.  The
  * symptom was three unrelated VDI conformance failures that MOVED with the
  * optimisation level, because a different function was sitting on those
  * addresses each time. */
-extern const uint8_t _fl_heap_bank;
+extern const uint8_t _fl_top[3];
+
+static uint16_t far_first_free_bank(void)
+{
+    uint32_t top = (uint32_t)_fl_top[0] | ((uint32_t)_fl_top[1] << 8) |
+                   ((uint32_t)_fl_top[2] << 16);
+    uint16_t first = (uint16_t)((top + 0xFFFFUL) >> 16);
+    /* Bank $00 is the Atari's own; nothing far may ever start there, even
+     * in a build whose image somehow recorded no far bytes at all. */
+    return first ? first : 1;
+}
 
 /* The offset within each bank used for probing.  $0100 rather than $0000
  * because if a bank turns out to MIRROR bank $00, a write at offset 0 would
@@ -67,7 +81,7 @@ void far_get(uint8_t *dst, uint32_t src, uint16_t len)
 void farmem_probe(void)
 {
     uint16_t b;
-    uint16_t first = _fl_heap_bank;
+    uint16_t first = far_first_free_bank();
     uint8_t run_first = 0, run_len = 0, best_first = 0, best_len = 0;
 
     farmem.kind = FARMEM_NONE;

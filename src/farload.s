@@ -8,12 +8,18 @@
 ;;; offers gem4xe about 12 KB of code space once the OS, DOS, the U1MB banking
 ;;; window and the MEMAC window are subtracted, and the VDI alone is 15 KB.
 ;;;
-;;; So the linker places `farcode` in bank $01 -- where a probe found one
-;;; unbroken run of RAM from bank $01 to $EF -- and the far image travels in
-;;; the .xex as a series of chunks aimed at a staging buffer in bank $00.  DOS
-;;; calls through INITAD ($02E2) after loading a segment, and this is what it
-;;; calls: it copies one chunk from the buffer to its real home and returns.
-;;; By the time DOS reaches the run vector the far image is assembled.
+;;; So the linker places `farcode` in the banks above -- one memory per bank
+;;; from $01 upwards, inside the accelerator's first megabyte (src/gem4xe.scm)
+;;; -- and the far image travels in the .xex as a series of chunks aimed at a
+;;; staging buffer in bank $00.  DOS calls through INITAD ($02E2) after
+;;; loading a segment, and this is what it calls: it copies one chunk from
+;;; the buffer to its real home and returns.  By the time DOS reaches the run
+;;; vector the far image is assembled.
+;;;
+;;; The copier does not know or care which banks the linker chose: every
+;;; chunk carries its own 24-bit destination.  What it does keep is _fl_top,
+;;; the highest address it has written past, so that the far heap can start
+;;; above whatever actually arrived (src/sys/farmem.c).
 ;;;
 ;;; tools/mkxex.py builds those chunks and is the other half of this file; the
 ;;; two share the layout through the linker symbols _fl_hdr / _fl_buf / _fl_scr
@@ -26,20 +32,22 @@
 ;;;
 ;;; WHAT IT REFUSES TO DO
 ;;;
-;;; Writing bank $01 needs a 65816: on an NMOS 6502 the long store `sta $9F`
-;;; is an unstable undocumented opcode, so running this on the wrong machine
-;;; would corrupt memory rather than fail.  The CPU is therefore identified
-;;; before the first store, and linear RAM is probed rather than assumed --
-;;; a 65816 with nothing in bank $01 is just as fatal and much less obvious.
-;;; Either failure prints a line and returns to DOS with nothing written.
+;;; Writing above bank $00 needs a 65816: on an NMOS 6502 the long store
+;;; `sta $9F` is an unstable undocumented opcode, so running this on the wrong
+;;; machine would corrupt memory rather than fail.  The CPU is therefore
+;;; identified before the first store, and linear RAM is probed rather than
+;;; assumed -- a 65816 with nothing where a chunk is going is just as fatal
+;;; and much less obvious, so EVERY chunk's destination is probed before it is
+;;; written, not only the first.  Either failure prints a line, marks the
+;;; machine unusable and returns to DOS.
 ;;; ---------------------------------------------------------------------------
 
               .rtmodel version, "1"
               .rtmodel core, "*"
 
-              .public _fl_copy, _fl_ok
+              .public _fl_copy, _fl_ok, _fl_top
               .public _fl_hdr, _fl_buf, _fl_scr
-              .public _fl_heap_bank, _fl_running_bank
+              .public _fl_running_bank
 
 FL_CHUNK:     .equ    0x1f00          ; staging payload: 31 whole pages
 
@@ -82,6 +90,16 @@ DP_CNT:       .equ    8               ; pages remaining
 _fl_ok:       .byte   1
 fl_checked:   .byte   0
 
+;;; _fl_top -- one past the highest far address written so far, 24-bit
+;;; little-endian; the far heap starts in the bank above it.  Where the far
+;;; image ends is decided by the linker, but it is spread over several
+;;; memories and the linker has no operator for "the end of a section that is
+;;; in several memories" -- so the loader records where it actually put
+;;; things, which is the more honest number anyway.  Like _fl_ok it lives in
+;;; `code`, so DOS loads the zeros fresh with every run and cstartup, which
+;;; only touches `data` and `zdata`, never sees it.
+_fl_top:      .byte   0, 0, 0
+
 ;;; ---------------------------------------------------------------------------
 ;;; _fl_copy -- DOS calls this through INITAD after each chunk segment.
 ;;; ---------------------------------------------------------------------------
@@ -91,9 +109,11 @@ _fl_copy:
               jsr     fl_check        ; first call: identify the machine
 fl_ready:
               lda     _fl_ok
-              beq     fl_done         ; wrong machine -- never write bank $01
+              beq     fl_out          ; wrong machine -- never write far RAM
               lda     _fl_pages
-              beq     fl_done         ; nothing staged (the priming call)
+              bne     fl_go           ; something is staged
+fl_out:       rts                     ; nothing staged (the priming call)
+fl_go:
 
               php
               phd
@@ -117,6 +137,21 @@ fl_ready:
               lda     long:_fl_pages
               sta     dp:DP_CNT
 
+;;; Is there RAM where this chunk is going?  Probe the destination itself --
+;;; the copy is about to overwrite it, so the test costs nothing and asks
+;;; exactly the right question, rather than trusting a documented memory
+;;; map.  Every chunk is probed because the image may spill into a further
+;;; bank, and the first bank having RAM says nothing about the next.
+              ldy     #0
+              lda     #0xa5
+              sta     [dp:DP_DST],y
+              cmp     [dp:DP_DST],y
+              bne     fl_noram
+              lda     #0x5a
+              sta     [dp:DP_DST],y
+              cmp     [dp:DP_DST],y
+              bne     fl_noram
+
 ;;; Both pointers are dereferenced long, so neither the source nor the
 ;;; destination depends on what DOS left in the data bank register.
 fl_page:      ldy     #0
@@ -131,6 +166,26 @@ fl_byte:      lda     [dp:DP_SRC],y
 fl_nowrap:    dec     dp:DP_CNT
               bne     fl_page
 
+;;; DP_DST is now one past the chunk; raise _fl_top to it if it is higher.
+;;; Chunks arrive in address order today, but the tail of a segment is slid
+;;; BACKWARDS to a page boundary (tools/mkxex.py), so "the last chunk" and
+;;; "the highest chunk" are not the same thing, and a maximum is what is
+;;; wanted.
+              sec
+              lda     dp:DP_DST
+              sbc     long:_fl_top
+              lda     dp:DP_DST+1
+              sbc     long:_fl_top+1
+              lda     dp:DP_DST+2
+              sbc     long:_fl_top+2
+              bcc     fl_nottop       ; DP_DST < _fl_top
+              lda     dp:DP_DST
+              sta     long:_fl_top
+              lda     dp:DP_DST+1
+              sta     long:_fl_top+1
+              lda     dp:DP_DST+2
+              sta     long:_fl_top+2
+fl_nottop:
               pld
               plp
 ;;; Consume the chunk.  DOS may call INITAD again after a segment that carries
@@ -181,41 +236,39 @@ fl_check:
               sta     NMIEN
               bcc     fl_no816
 
-;;; 3. A 65816, and now the other half of the requirement: is there any RAM
-;;;    where the far image is going?  Probe the destination itself -- the copy
-;;;    is about to overwrite it, so the test costs nothing and asks exactly the
-;;;    right question, rather than trusting a documented memory map.
-              php
-              phd
-              lda     #.byte1 _fl_scr
-              xba
-              lda     #.byte0 _fl_scr
-              tcd
-              lda     long:_fl_hdr
-              sta     dp:DP_DST
-              lda     long:_fl_hdr+1
-              sta     dp:DP_DST+1
-              lda     long:_fl_hdr+2
-              sta     dp:DP_DST+2
-              ldy     #0
-              lda     #0xa5
-              sta     [dp:DP_DST],y
-              cmp     [dp:DP_DST],y
-              bne     fl_noram
-              lda     #0x5a
-              sta     [dp:DP_DST],y
-              cmp     [dp:DP_DST],y
-              bne     fl_noram
-              pld
-              plp
+;;; 3. A 65816.  The other half of the requirement -- RAM where the image is
+;;;    going -- is checked chunk by chunk in _fl_copy, since the image may
+;;;    reach banks this first call knows nothing about.
               rts
 
-fl_noram:     pld
+;;; fl_noram -- a chunk's destination is not RAM.  Reached from _fl_copy with
+;;; its direct page still selected and DP_DST naming the bank, which is put
+;;; into the message so the user learns WHERE the machine stops, not just
+;;; that it does.
+fl_noram:     lda     dp:DP_DST+2
+              pha
+              lsr     a
+              lsr     a
+              lsr     a
+              lsr     a
+              jsr     fl_hex
+              sta     msg_noram_bank
+              pla
+              and     #0x0f
+              jsr     fl_hex
+              sta     msg_noram_bank+1
+              pld
               plp
               ldx     #.byte0 msg_noram
               ldy     #.byte1 msg_noram
               lda     #msg_noram_end-msg_noram
               bra     fl_fail
+
+fl_hex:       cmp     #10
+              bcc     fl_hex_d
+              adc     #6               ; carry is set: +7, so 10 -> 'A'
+fl_hex_d:     adc     #'0'
+              rts
 
 fl_no816:     ldx     #.byte0 msg_no816
               ldy     #.byte1 msg_no816
@@ -249,24 +302,12 @@ _fl_running_bank:
               and     ##0x00ff        ; B holds leftovers; the C ABI wants 16 bits
               rtl
 
-;;; The first bank above the far image, exported to src/sys/farmem.c so that
-;;; the far HEAP starts where the far CODE stops.  Taken from where the code
-;;; was actually placed rather than restated as a constant -- the alternative
-;;; was found the hard way: farmem_probe() wrote its bank-numbering pattern
-;;; into $010100 and far_alloc() handed out $010000, so the program quietly
-;;; shot three bytes out of its own text, and which three moved with every
-;;; rebuild.  Three VDI conformance cases failed, and a DIFFERENT three at
-;;; each optimisation level, which is a very good impression of a compiler
-;;; bug.
-;;;
-;;; `switch` shares the range and is interleaved inside it, so .sectionEnd
-;;; farcode already covers it (assembler manual, section operators); `cfar`
-;;; is placed ahead of the code (src/gem4xe.scm), so it is covered too.
-              .section farcode
+;;; The messages are `cdata`, which is bank $00 RAM: the bank number in the
+;;; second one is filled in by fl_noram before it is printed.
               .section cdata, rodata
-_fl_heap_bank: .byte  .byte2 (.sectionEnd farcode + 0x10000)
-
 msg_no816:    .byte   "gem4xe: this needs a 65C816 (Rapidus/Antonia)", EOL
 msg_no816_end:
-msg_noram:    .byte   "gem4xe: no linear RAM in bank $01", EOL
+msg_noram:    .byte   "gem4xe: no linear RAM in bank $"
+msg_noram_bank:
+              .byte   "xx", EOL
 msg_noram_end:

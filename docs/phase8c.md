@@ -232,8 +232,11 @@ with no function symbol in it at all. So an address is attributed to
 the function whose section holds it, and an address in a fragment to
 the fragment's *module* — `vdi.o ?L` — which is what the map records
 of it; the raster's store fragment is 2,112 of the icon's instructions
-and shows up there. The profile's addresses come back without a bank,
-and one inside a bank-$01 section of the map is taken as bank $01.
+and shows up there. The profile's addresses come back without a bank
+(the bridge masks the profiler's 24-bit record to 16), and one inside a
+far section of the map is taken as that section's bank — every
+candidate, joined with `|`, if the code has spilled into a second bank
+and the low 16 bits fall inside sections in both.
 
 The harness has one artefact worth knowing: the m3 runner's scratch,
 where the bench's icon form lives, is at `$AF82`, inside the 16 KB

@@ -59,16 +59,28 @@ CASES = {
 
 
 def far_ranges(mapfile):
-    """The bank-$01 section placements in the linker map, as (lo, hi)
-    pairs of their low 16 bits."""
+    """Every far section placement in the linker map -- bank $01 upwards,
+    one memory per bank -- as (bank, lo, hi) with lo and hi the low 16
+    bits.  The bridge reports a profile address without its bank (it masks
+    the profiler's 24-bit record to 16), so this is what puts it back."""
     out = []
     with open(mapfile) as f:
         for line in f:
-            mm = re.match(r"\s*\S+\s+01([0-9a-f]{4})-01([0-9a-f]{4})\s+[0-9a-f]{6}"
-                          r"\s+\S+\s+\d+\s*$", line)
-            if mm:
-                out.append((int(mm.group(1), 16), int(mm.group(2), 16)))
+            mm = re.match(r"\s*\S+\s+([0-9a-f]{2})([0-9a-f]{4})-([0-9a-f]{2})([0-9a-f]{4})"
+                          r"\s+[0-9a-f]{6}\s+\S+\s+\d+\s*$", line)
+            if mm and mm.group(1) == mm.group(3) and mm.group(1) != "00":
+                out.append((int(mm.group(1), 16), int(mm.group(2), 16),
+                            int(mm.group(4), 16)))
     return out
+
+
+def banks_of(ranges, addr):
+    """The banks a bankless address could be in: every far bank with a
+    section covering it, or bank $00.  More than one is possible once the
+    code has spilled into a second bank, and then the attribution is
+    honestly ambiguous -- the caller shows every candidate."""
+    banks = sorted({b for b, lo, hi in ranges if lo <= addr <= hi})
+    return banks or [0]
 
 
 def placements(mapfile):
@@ -90,7 +102,11 @@ def where(place, syms, ranges, addr):
     whose section holds it -- a static one's section is named by a `?L`
     label in the map, but the function's own symbol starts it -- or, for a
     section holding no function, a fragment, its module: `vdi.o ?L`."""
-    bank = 1 if any(lo <= addr <= hi for lo, hi in ranges) else 0
+    return "|".join(where_in(place, syms, bank, addr)
+                    for bank in banks_of(ranges, addr))
+
+
+def where_in(place, syms, bank, addr):
     a = (bank << 16) | addr
     i = bisect.bisect_right(place, (a, 0xFFFFFF, "", "")) - 1
     if i >= 0 and place[i][0] <= a <= place[i][1]:
@@ -103,13 +119,16 @@ def where(place, syms, ranges, addr):
                     (best is None or sa > best[0]):
                 best = (sa, sym)
         return best[1] if best else f"{mod} ?L"
-    return nearest(syms, ranges, addr).split("+")[0]
+    return nearest_in(syms, bank, addr).split("+")[0]
 
 
 def nearest(syms, ranges, addr):
-    """The symbol at or below addr: a bank-$01 one when addr lies in a
-    bank-$01 section, otherwise a bank-$00 one."""
-    bank = 1 if any(lo <= addr <= hi for lo, hi in ranges) else 0
+    """The symbol at or below addr in the bank(s) the map says it could be
+    in -- every candidate when a second far bank makes that ambiguous."""
+    return "|".join(nearest_in(syms, bank, addr) for bank in banks_of(ranges, addr))
+
+
+def nearest_in(syms, bank, addr):
     best = None
     for name, a in syms.items():
         if (a >> 16) != bank:

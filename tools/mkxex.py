@@ -17,8 +17,9 @@ Calypsi's cstartup zeroes what needs zeroing through its data_init_table.
 FAR SEGMENTS
 
 A .xex segment header is two 16-bit addresses, so an Atari DOS loader cannot
-place anything above $FFFF -- but gem4xe links its code into bank $01.  Those
-segments therefore travel as CHUNKS: each is aimed at the staging buffer that
+place anything above $FFFF -- but gem4xe links its code into the banks above
+it, one linker memory per bank from $01 up (src/gem4xe.scm), so a far
+segment per bank the image reached.  Those segments therefore travel as CHUNKS: each is aimed at the staging buffer that
 src/farload.s reserves in bank $00, followed by a two-byte segment that writes
 INITAD, which makes DOS call the copier.  The copier moves the chunk to its
 real home and returns, and by the time DOS reaches the run vector the far image

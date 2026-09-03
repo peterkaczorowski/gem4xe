@@ -19,10 +19,12 @@ AS        = $(CALYPSI)/bin/as65816
 LD        = $(CALYPSI)/bin/ln65816
 LIB       = clib-lc-sd.a
 
-# Large code puts every C function in `farcode`, which src/gem4xe.scm places in
-# bank $01 and src/farload.s copies up as DOS loads the file.  Data stays small
-# -- globals and constants are addressed through the data bank register, so
-# they have to remain in bank $00 (see the linker script).
+# Large code puts every C function in `farcode`, which src/gem4xe.scm places
+# in banks $01 upwards -- one linker memory per bank, filled in order, so no
+# function straddles a bank -- and src/farload.s copies up as DOS loads the
+# file.  Data stays small -- globals and constants are addressed through the
+# data bank register, so they have to remain in bank $00 (see the linker
+# script).
 CFLAGS    = --code-model=large --data-model=small -O2
 # --override lets src/sys/div16.o replace the library's _Div16/_Mod16, which
 # leave the wrong flags for the compiler's own `beq` (see that file).
@@ -148,6 +150,23 @@ build/m3-boot.atr: build/m3.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM
 
+# The same program linked with bank $01 cut down to its top 16 KB, so that
+# the far image is forced to spill into bank $02 today rather than on the day
+# the code grows past 64 KB.  test-m6 boots this one as well as the real
+# build and requires both to copy up, run from the bank the linker chose, and
+# start the far heap above it.  The layout function is in src/gem4xe.scm.
+build/m6split.elf: $(M3_OBJS) src/gem4xe.scm
+	$(LD) src/gem4xe.scm $(M3_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/m6split.map \
+	      --memories-expression "(layout #x01c000)"
+
+build/m6split.xex: build/m6split.elf
+	python3 tools/mkxex.py $< $@ --entry _atari_entry --syms build/m6split.sym
+
+build/m6split-boot.atr: build/m6split.xex
+	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM
+
 build/m2-boot.atr: build/m2.xex
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
@@ -187,7 +206,7 @@ test-m4: build/m3-boot.atr
 test-m5: build/m3-boot.atr
 	python3 tests/emu/m5_farmem.py
 
-test-m6: build/m3-boot.atr
+test-m6: build/m3-boot.atr build/m6split-boot.atr
 	python3 tests/emu/m6_farcode.py
 
 # The event and form layer driven from the host: keys through POKEY, the

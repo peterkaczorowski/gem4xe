@@ -31,7 +31,7 @@ full-screen repaints.
 | `make test-m3` | 68/68 | VDI conformance — pixels *and* return values |
 | `make test-m4` | 12/12 | AES object library: draw, find, change, edit, centre |
 | `make test-m5` | PASS | linear RAM probed: banks `$02-$EF`, 14.9 MB |
-| `make test-m6` | PASS | far code copied up and running in bank `$01`; bank `$00` on the fast bus |
+| `make test-m6` | PASS | far code copied up and running from the banks the linker chose — bank `$01`, and `$01`+`$02` in a forced-spill link; bank `$00` on the fast bus |
 | `make test-m7` | 10/10 | `evnt_*`, `form_do`, `form_dial`, `graf_watchbox` under host-driven input |
 | `make test-m8` | 12/12 | the window manager and the control manager: rectangle lists, moves, gadgets, `WM_*` |
 | `make test-m9` | 4/4 | menus: the bar, drop-downs, `MN_SELECTED`, screenshotted inside the wait |
@@ -76,12 +76,26 @@ for six phases without a gate noticing (`docs/phase7.md`, Step 4).
 the MEMAC window rather than restating either, and `make test-m6` reads the
 registers back.
 
-Code lives in **bank `$01`**, not bank `$00`. A `.xex` segment header is two
-16-bit addresses, so a DOS loader cannot place anything above `$FFFF`; the far
-image therefore travels as chunks aimed at a staging buffer and DOS copies it
-up through `INITAD` as it reads the file. That took the code ceiling from ~28 KB
-to a bank at a time, and freed the `$4000-$7FFF` scaffold the test runner had
-been borrowing from U1MB.
+Code lives **above bank `$00`**, in the accelerator's first megabyte. A `.xex`
+segment header is two 16-bit addresses, so a DOS loader cannot place anything
+above `$FFFF`; the far image therefore travels as chunks aimed at a staging
+buffer and DOS copies it up through `INITAD` as it reads the file. That took
+the code ceiling from ~28 KB to a bank at a time, and freed the `$4000-$7FFF`
+scaffold the test runner had been borrowing from U1MB.
+
+Bank `$01` was 90% full by the time the benchmark landed, so the far code is
+now linked into **one linker memory per bank, `$01` through `$0F`**, filled in
+order: the image spills into the next bank only when the current one cannot
+hold the next whole function, and no function ever straddles a bank boundary
+(the 65816 program counter wraps within its bank, and a single memory spanning
+banks let the linker place a function across the seam — tried, and it did).
+The far heap starts above the highest address the loader actually wrote,
+`_fl_top`, recorded chunk by chunk, since the linker has no operator for the
+end of a section that lives in several memories. Because the real build still
+fits in bank `$01`, `make test-m6` also links the same objects with bank `$01`
+cut to 16 KB and boots that: the code runs from bank `$02`, the heap starts at
+`$03`, and the mechanism is proved today rather than on the day the code
+outgrows the bank (`docs/phase6.md`, the follow-up).
 
 Running this on a machine without a 65C816 would corrupt memory rather than
 fail — the long store the copier needs is an unstable undocumented opcode on an

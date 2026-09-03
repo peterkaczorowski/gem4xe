@@ -17,9 +17,10 @@
  * asks for memory, not for a particular accelerator.
  *
  * WHAT IT WILL NOT HAND OUT: the banks the program itself is running from.
- * gem4xe's code lives in bank $01 (src/gem4xe.scm), copied up at load time by
- * src/farload.s, so probing and allocation both begin at the first bank above
- * it -- taken from a linker symbol, not written down twice.
+ * gem4xe's code lives in the banks from $01 up (src/gem4xe.scm), copied up
+ * at load time by src/farload.s, so probing and allocation both begin at the
+ * first bank above the highest address the loader wrote -- taken from the
+ * loader's own record of it, not written down twice.
  */
 #ifndef GEM4XE_FARMEM_H
 #define GEM4XE_FARMEM_H

@@ -170,11 +170,108 @@ the message on screen.
 - **Only `farcode` is far.** `cdata` is 2.5 KB of bank `$00` and most of it is
   the 8×8 font. Moving bulk constants out needs `--data-model=medium` or `__far`
   on the arrays, and it is not urgent while `$A000-$AFFF` is empty.
-- **One far bank.** `FarCode` is bank `$01` only. Adding banks is a linker-script
-  edit; `mkxex.py` already chunks each far segment independently and
-  `_fl_heap_bank` already follows.
+- ~~**One far bank.** `FarCode` is bank `$01` only.~~ Done, see the follow-up
+  below: one memory per bank, `$01-$0F`, and `_fl_heap_bank` replaced by the
+  loader's `_fl_top`.
 - **The chunk loop is byte-at-a-time**, ~10 cycles per byte through
   `lda [dp],y` / `sta [dp],y`. At 14 KB that is invisible; `MVN` would need
   native mode and the interrupt-vector work, and this runs before the program
   starts, when a saved NMIEN is the only thing standing between us and the
   vectors the OS never filled.
+
+## Follow-up (2026-09-02): spilling into the next bank
+
+Bank `$01` was 89.6% full — 58,715 bytes of far code — once the benchmark
+runner was in, and the next AES pieces (`form_alert`, icons, the desktop)
+would not have fitted. The far code is now allowed to spread over banks
+`$01-$0F`: the first megabyte, which on a Rapidus is the SRAM, and the budget
+the project has set itself.
+
+**Why one linker memory per bank and not one memory spanning them.** The
+obvious edit — `(address (#x010000 . #x0fffff))` — links, and is wrong: the
+linker treats the range as flat and placed `style_line` at `$01FFCE`, running
+into `$020000`. The 65816's program counter wraps within its bank, so that
+function would execute as two unrelated halves. Given fifteen memories that
+each list the same sections, the linker fills them in the order they are
+defined and never splits a fragment: `gr_inside` (50 bytes) was packed into
+the gap at `$01FFCE-$01FFFF` and `style_line` moved whole to `$020000`. A
+fragment is a function, a factored `?L` piece, a `switch` table or `cfar`,
+none of which may straddle a bank — the tables are read with long addressing
+and could sit anywhere, but they travel with the code.
+
+`src/gem4xe.scm` generates the fifteen memories in Scheme, which is what the
+linker's script language is:
+
+    (define (far-bank b first)
+      (list 'memory (string->symbol (string-append "FarCode" (number->string b 16)))
+            (list 'address (cons first (+ (* b #x10000) #xffff)))
+            '(section cfar farcode switch)))
+
+with `(layout far-start)` building the whole list and
+`(define memories (layout #x010000))` the default.
+
+**What it cost: `.sectionEnd farcode`.** The far heap's first bank had been a
+linker-derived byte, `.byte2 (.sectionEnd farcode + 0x10000)`, and the linker
+refuses that operator once the section is in more than one memory:
+
+    section farcode is placed in multiple memories (FarCode1 and FarCode2),
+    cannot apply .sectionEnd operator
+
+There is no memory-end operator either. So the number now comes from the
+loader instead of the linker: `_fl_top`, three bytes in the `code` section
+next to `_fl_ok` (so DOS loads them as zeros with every run and cstartup never
+touches them), which `_fl_copy` raises to one past the end of every chunk it
+copies — a maximum, because the tail of a segment is slid *backwards* to a
+page boundary and the last chunk is not always the highest. `farmem_probe()`
+and `far_alloc()` start at `(_fl_top + $FFFF) >> 16`, the bank above whatever
+actually arrived. That is the more honest number anyway.
+
+**The RAM probe moved from once to per chunk.** The first-call check probed
+the first chunk's destination and reported "no linear RAM in bank $01"; a bank
+that exists says nothing about the next one, so `_fl_copy` now writes `$A5`
+and `$5A` to each chunk's own destination before copying it, and the message
+carries the bank it stopped at. That path was exercised once by hand: a
+hand-built `.xex` with a chunk aimed at `$FF0000`, the Rapidus register page,
+after a real chunk in bank `$01` — the first copied, the second was refused
+with `gem4xe: no linear RAM in bank $FF`, `_fl_ok` was cleared, `_fl_top` said
+`$010400`, and the runner did not start. It is not a gate, because Altirra's
+Rapidus has no configuration without RAM in the far banks, and it has not
+been seen on hardware.
+
+**Proving the spill before it happens.** The real build still fits in bank
+`$01`, so a gate on it alone would leave the second bank untested until the
+day the code grows into it. `make test-m6` therefore builds a second image,
+`build/m6split`, from the same objects with
+`--memories-expression "(layout #x01c000)"` — bank `$01` cut to its top 16 KB
+— and boots both:
+
+    == m3: the real build
+    far image  : $010000-$01E5A8  (58793 bytes, 8 chunks of 7936)
+    copy-up    : 1166/1166 probed bytes match
+    execution  : far code reports bank $01 (_fl_running_bank linked at $01E205)
+    far heap   : loader wrote up to $01E5A9 (image ends $01E5A9);
+                 heap starts at bank $02, code reaches $01
+
+    == m6split: bank $01 cut to 16 KB, forcing the spill
+    far image  : $01C000-$01FFFF  (16384 bytes, 3 chunks of 7936)
+    far image  : $020000-$02A5A8  (42409 bytes, 6 chunks of 7936)
+    copy-up    : 1264/1264 probed bytes match
+    execution  : far code reports bank $02 (_fl_running_bank linked at $02A205)
+    far heap   : loader wrote up to $02A5A9 (image ends $02A5A9);
+                 heap starts at bank $03, code reaches $02
+
+The expected running bank is where the linker put `_fl_running_bank`, read
+from the symbol table, not "the first far segment": in the split build that
+routine is in bank `$02`. Every far segment is probed at its chunk seams, and
+`_fl_top` is read back and required to match the ELF's image end (a padded
+sub-page tail may put it up to 255 bytes high).
+
+**What the profiler can no longer be sure of.** The bridge masks the
+profiler's addresses to 16 bits, so `make bench --profile`'s attribution of an
+address to a function goes through the map's far sections; with code in two
+banks an address whose low 16 bits fall inside sections in both is ambiguous,
+and `tests/emu/bench_vdi.py` now names every candidate joined with `|` rather
+than picking one. In the real build there is one bank and no ambiguity.
+
+Gates: `make test` green, `make movie` unchanged. Everything here ran in
+Altirra; nothing has been tried on a Rapidus.
