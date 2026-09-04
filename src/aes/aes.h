@@ -73,6 +73,7 @@ typedef struct {
 #define DISABLED    0x0008
 #define OUTLINED    0x0010
 #define SHADOWED    0x0020
+#define WHITEBAK    0x0040      /* an icon over a white ground: leave it */
 
 #define NIL         (-1)
 #define ROOT        0
@@ -114,6 +115,23 @@ typedef struct {
 #define WM_ONTOP    31
 #define AC_OPEN     40
 #define AC_CLOSE    41
+
+/* graf_mouse's forms (aesdefs.h).  0..7 are the AES's own, in
+ * tools/gemdata.py's order; the rest are commands, not shapes. */
+#define ARROW        0
+#define TEXT_CRSR    1
+#define HOURGLASS    2
+#define POINT_HAND   3
+#define FLAT_HAND    4
+#define THIN_CROSS   5
+#define THICK_CROSS  6
+#define OUTLN_CROSS  7
+#define USER_DEF     255
+#define M_OFF        256
+#define M_ON         257
+#define M_SAVE       258
+#define M_RESTORE    259
+#define M_PREVIOUS   260
 
 /* WM_ARROWED's arrow codes */
 #define WA_UPPAGE   0
@@ -416,6 +434,13 @@ void gsx_moff(void);
 void gsx_mon(void);
 WORD gsx_mforce(void);           /* the pointer on whatever the count */
 void gsx_munforce(WORD old);     /* ... and the count back */
+void gsx_mfset(const WORD *pmform);   /* the pointer's shape: 37 words */
+void gsx_mfform(WORD which, WORD *out);  /* one of the AES's own, from far */
+WORD gsx_mfget(WORD which, WORD *out);   /* MF_CURR/MF_PREV/MF_SAVED, far */
+void gsx_mfsave(void);                   /* graf_mouse(M_SAVE) */
+#define MF_CURR   0
+#define MF_PREV   1
+#define MF_SAVED  2
 void gsx_attr(WORD text, WORD mode, WORD color);
 void gsx_fcolor(WORD color);
 void gsx_sclip(const GRECT *pt);
@@ -448,6 +473,7 @@ WORD gr_stilldn(WORD out, WORD x, WORD y, WORD w, WORD h);
 void gr_growbox(const GRECT *po, const GRECT *pt);
 void gr_shrinkbox(const GRECT *po, const GRECT *pt);
 WORD gr_watchbox(OBJECT *tree, WORD obj, WORD instate, WORD outstate);
+void gr_mouse(WORD mode, const WORD *pmform);
 void gr_mkstate(WORD *pmx, WORD *pmy, WORD *pmstat, WORD *pkstat);
 void gr_rubwind(WORD xo, WORD yo, WORD wmin, WORD hmin, const GRECT *poff,
                 WORD *pw, WORD *ph);
@@ -520,6 +546,7 @@ WORD fm_button(OBJECT *tree, WORD new_obj, WORD clks, WORD *pnew_obj);
 
 WORD form_do(OBJECT *tree, WORD start);
 WORD form_dial(WORD type, const GRECT *pi, const GRECT *pt);
+WORD fm_alert(WORD defbut, const char *palstr);   /* form_alert */
 WORD form_keybd(OBJECT *tree, WORD obj, WORD *pchar, WORD *pnew_obj);
 WORD form_button(OBJECT *tree, WORD new_obj, WORD clks, WORD *pnew_obj);
 

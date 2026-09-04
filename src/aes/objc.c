@@ -481,7 +481,50 @@ static void just_draw(OBJECT *tree, WORD obj, WORD sx, WORD sy)
                     bi->bi_color, WHITE);
             break;
         }
-        /* G_ICON and G_USERDEF are not drawn yet. */
+        case G_ICON: {
+            /* The donor's gr_gicon (gemgraf.c): the mask under the image,
+             * both transparent, then the character and the label.  Every
+             * rectangle in the ICONBLK is relative to the object. */
+            ICONBLK ib = *(const ICONBLK *)SPEC_PTR(spec);
+            GRECT pi, pl;
+            WORD fg = (ib.ib_char >> 12) & 0x0F;
+            WORD bg = (ib.ib_char >> 8) & 0x0F;
+            WORD ch = ib.ib_char & 0xFF;
+            const char *label = (const char *)SPEC_PTR(ib.ib_ptext);
+
+            if (state & SELECTED) {     /* selected: the colours change places */
+                WORD tmp = fg;
+                fg = bg;
+                bg = tmp;
+            }
+            r_set(&pi, (WORD)(ib.ib_xicon + t.g_x), (WORD)(ib.ib_yicon + t.g_y),
+                  ib.ib_wicon, ib.ib_hicon);
+            r_set(&pl, (WORD)(ib.ib_xtext + t.g_x), (WORD)(ib.ib_ytext + t.g_y),
+                  ib.ib_wtext, ib.ib_htext);
+
+            /* WHITEBAK over a white background leaves what is there */
+            if (!((state & WHITEBAK) && bg == WHITE)) {
+                gsx_blt(ib.ib_pmask, 0, 0, pi.g_x, pi.g_y, pi.g_w, pi.g_h,
+                        MD_TRANS, bg, fg);
+                if (label && *label)
+                    gr_rect(bg, IP_SOLID, &pl);
+            }
+            gsx_blt(ib.ib_pdata, 0, 0, pi.g_x, pi.g_y, pi.g_w, pi.g_h,
+                    MD_TRANS, fg, bg);
+
+            gsx_attr(TRUE, MD_TRANS, fg);
+            if (ch) {
+                intin[0] = ch;
+                gsx_tblt(SMALL, (WORD)(pi.g_x + ib.ib_xchar),
+                         (WORD)(pi.g_y + ib.ib_ychar), 1);
+            }
+            if (label)
+                gr_gtext(TE_CNTR, SMALL, label, &pl);
+            /* the state is spent: ob_draw must not invert it again */
+            state &= ~SELECTED;
+            break;
+        }
+        /* G_USERDEF is not drawn yet. */
         default:
             break;
         }

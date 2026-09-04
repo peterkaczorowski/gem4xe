@@ -29,7 +29,7 @@ full-screen repaints.
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
 | `make test-m3` | 68/68 | VDI conformance — pixels *and* return values |
-| `make test-m4` | 12/12 | AES object library: draw, find, change, edit, centre |
+| `make test-m4` | 13/13 | AES object library: draw, find, change, edit, centre, icons |
 | `make test-m5` | PASS | linear RAM probed: banks `$02-$EF`, 14.9 MB |
 | `make test-m6` | PASS | far code copied up and running from the banks the linker chose — bank `$01`, and `$01`+`$02` in a forced-spill link; bank `$00` on the fast bus |
 | `make test-m7` | 10/10 | `evnt_*`, `form_do`, `form_dial`, `graf_watchbox` under host-driven input |
@@ -38,6 +38,7 @@ full-screen repaints.
 | `make test-m10` | 27/27 | native-mode interrupts: the OS shadowed into SRAM byte for byte, the VBI, a ~4 kHz timer, the keyboard, a trak-ball counted under interrupt, and a clean return to DOS |
 | `make test-m11` | PASS | the application ABI: a separately linked program loaded, relocated and run, calling the VDI and the AES through `COP` — its records, the loader's, and the screen against the reference |
 | `make test-m12` | PASS | the file layer: CIO through the OS in emulation mode, `rsrc_load`/`rsrc_obfix`, `shel_*`, and the file selector driven over two disks — its listings, its scrolling and its returned strings against the reference, pixel for pixel |
+| `make test-m13` | 19/19 | alerts, icons and the pointer: `form_alert` parsed, laid out and drawn against the reference; every mouse form `graf_mouse` owns, and the caller's own |
 | `make check-cc` | PASS | the eight compiler bugs worked around, in the vendor's simulator |
 | `make movie` | PASS | a session with the AES itself, filmed frame by frame and checked as a gate: `build/movie/gem4xe.mp4` |
 | `make bench` | — | GEMBench's tests on this machine, in milliseconds, not a gate (`docs/bench.md`) |

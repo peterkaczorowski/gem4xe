@@ -38,7 +38,7 @@ SRC_DOS  ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures
 
 HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
 M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/vbxe.o build/fsel.o build/fsel_rsc.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o
 
 # A gem4xe application: its own C startup and bindings (src/app), linked
 # against nothing of gem4xe's, on the application's own linker rules.
@@ -74,17 +74,21 @@ build/objc.o: src/aes/objc.c src/aes/aes.h src/vdi/vdi.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
-build/graf.o: src/aes/graf.c src/aes/aes.h src/vdi/vdi.h
+build/graf.o: src/aes/graf.c src/aes/aes.h src/vdi/vdi.h build/gemdata.h
 	@mkdir -p build
-	$(CC) $(CFLAGS) -I src -o $@ $<
+	$(CC) $(CFLAGS) -I src -I build -o $@ $<
 
 build/event.o: src/aes/event.c src/aes/aes.h src/vdi/vdi.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
-build/grlib.o: src/aes/grlib.c src/aes/aes.h src/vdi/vdi.h
+build/grlib.o: src/aes/grlib.c src/aes/aes.h src/vdi/vdi.h build/gemdata.h
 	@mkdir -p build
-	$(CC) $(CFLAGS) -I src -o $@ $<
+	$(CC) $(CFLAGS) -I src -I build -o $@ $<
+
+build/alert.o: src/aes/alert.c src/aes/aes.h src/sys/app.h build/gemdata.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -I build -o $@ $<
 
 build/form.o: src/aes/form.c src/aes/aes.h src/vdi/vdi.h
 	@mkdir -p build
@@ -156,6 +160,14 @@ build/cios.o: src/sys/cio.s
 # The file layer proper: the resource loader and the shell library.
 build/rsrc.o: src/aes/rsrc.c src/aes/aes.h src/sys/app.h src/sys/cio.h
 	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+# The AES's own artwork -- eight mouse forms, three alert icons -- from the
+# one script the reference reads them from too.
+build/gemdata.c build/gemdata.h: tools/gemdata.py
+	@mkdir -p build
+	python3 tools/gemdata.py build/gemdata.c build/gemdata.h
+build/gemdata.o: build/gemdata.c src/aes/aes.h
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
 build/fsel_rsc.c build/fsel_rsc.h: tools/fselrsc.py tools/rsc.py tools/aesref.py
@@ -306,7 +318,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13
 
 # The cc65816 code generation bugs gem4xe works around, run in the vendor's
 # own simulator: fails only if a workaround shape has stopped compiling
@@ -376,6 +388,11 @@ test-m11: build/m3-boot.atr build/m11_app.sym
 # the images with tools/atr.py, its screens compared with the reference's.
 test-m12: build/m3-boot.atr build/m12-d2.atr
 	python3 tests/emu/m12_file.py
+
+# Alerts and the pointer's shape: form_alert's parsing, layout and drawing
+# against the reference, and each of graf_mouse's forms on the screen.
+test-m13: build/m3-boot.atr
+	python3 tests/emu/m13_alert.py
 
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.

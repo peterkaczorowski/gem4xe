@@ -694,6 +694,14 @@ def main(argv):
             b.key(k)
             b.frames(6)
         b.frames(200)
+        # Ready is STATUS[2] == 1, not the signature: the runner raises
+        # 'VD' early and finishes starting up (farmem_probe among it) some
+        # frames later, and how many moves with the size of the image.
+        for _ in range(200):
+            tag = bytes(b.memdump(STATUS, 3))
+            if tag[:2] == b"VD" and tag[2] == 1:
+                break
+            b.frames(4)
 
         tag = bytes(b.memdump(STATUS, 3))
         print(f"runner: {tag[:2]!r} stage=${tag[2]:02X}  "

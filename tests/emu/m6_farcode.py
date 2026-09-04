@@ -98,6 +98,10 @@ def check_refuses_6502(disk, far):
             b.key(k)
             b.frames(6)
         b.frames(250)
+        for _ in range(200):            # ready, not merely alive
+            if bytes(b.memdump(STATUS, 3)) == b"VD\x01":
+                break
+            b.frames(4)
         mode = b.cmd("HWSTATE").get("cpu", {}).get("mode")
         after = [b.cmd(f"EVAL db(${a:06x})").get("value") for a in firsts]
         came_up = bytes(b.memdump(STATUS, 2)) == b"VD"
@@ -162,6 +166,10 @@ def check_image(name, why):
             b.key(k)
             b.frames(6)
         b.frames(250)
+        for _ in range(200):            # ready, not merely alive
+            if bytes(b.memdump(STATUS, 3)) == b"VD\x01":
+                break
+            b.frames(4)
         if bytes(b.memdump(STATUS, 2)) != b"VD":
             print("   FAIL: runner did not come up")
             return [f"{name}: runner did not come up"], far

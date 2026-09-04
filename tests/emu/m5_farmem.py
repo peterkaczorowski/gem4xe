@@ -50,6 +50,11 @@ def main():
             b.key(k)
             b.frames(6)
         b.frames(250)
+        for _ in range(200):            # ready, not merely alive
+            st = bytes(b.memdump(STATUS, 3))
+            if st[:2] == b"VD" and st[2] == 1:
+                break
+            b.frames(4)
         s = bytes(b.memdump(STATUS, 24))
         kind, first, last, banks = s[16], s[17], s[18], s[19]
         mb = (s[20] | (s[21] << 8)) / 16.0

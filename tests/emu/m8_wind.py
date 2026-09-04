@@ -494,7 +494,14 @@ def main(argv):
             b.key(k)
             b.frames(6)
         b.frames(200)
-        if bytes(b.memdump(STATUS, 3))[:2] != b"VD":
+        # "VD" says the runner is alive; STATUS[2] == 1 says it is
+        # ready for scripts, which is what staging one needs.
+        for _ in range(200):
+            st = bytes(b.memdump(STATUS, 3))
+            if st[:2] == b"VD" and st[2] == 1:
+                break
+            b.frames(4)
+        if st[:2] != b"VD" or st[2] != 1:
             print("FAIL: runner did not come up")
             return 1
 

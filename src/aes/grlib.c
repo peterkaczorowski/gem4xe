@@ -8,6 +8,7 @@
  * a box that walks from the icon to the dialog's centre and grows.
  */
 #include "aes.h"
+#include "gemdata.h"
 
 /* TRUE while the button is still down: waits for a release, a key, or the
  * pointer crossing the edge of (x,y,w,h) in the direction `out` asks. */
@@ -174,6 +175,44 @@ WORD gr_watchbox(OBJECT *tree, WORD obj, WORD instate, WORD outstate)
 
 /* The pointer and shift keys right now.  GEM's interrupts keep these
  * current; here a poll brings them up to date first. */
+/* graf_mouse: the pointer's shape, or a command about it.  The donor's
+ * gr_mouse (gemgrlib.c), with its M_SAVE/M_RESTORE/M_PREVIOUS extension:
+ * there is one application here, so the saved form is one slot rather
+ * than a field of the process.  A mode that is not a shape and not a
+ * command is the arrow, as the donor's fail-safe. */
+void gr_mouse(WORD mode, const WORD *pmform)
+{
+    WORD form[GEM_MFORM_WORDS];
+
+    switch (mode) {
+    case M_OFF:
+        gsx_moff();
+        return;
+    case M_ON:
+        gsx_mon();
+        return;
+    case M_SAVE:
+        gsx_mfsave();
+        return;
+    case M_RESTORE:
+        pmform = gsx_mfget(MF_SAVED, form) ? form : 0;
+        break;
+    case M_PREVIOUS:
+        pmform = gsx_mfget(MF_PREV, form) ? form : 0;
+        break;
+    case USER_DEF:
+        break;                          /* the caller's own 37 words */
+    default:
+        if (mode < ARROW || mode > OUTLN_CROSS)
+            mode = ARROW;
+        gsx_mfform(mode, form);
+        pmform = form;
+        break;
+    }
+    if (pmform)
+        gsx_mfset(pmform);
+}
+
 void gr_mkstate(WORD *pmx, WORD *pmy, WORD *pmstat, WORD *pkstat)
 {
     vdi_input_poll();

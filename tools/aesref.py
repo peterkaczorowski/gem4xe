@@ -18,15 +18,22 @@ through te_ptext, exactly as the target does.
 import contextlib
 import struct
 
+import gemdata
 import vdiref
 from vdiref import (V_PLINE, V_GTEXT, VSL_TYPE, VSL_WIDTH, VSL_COLOR,
                     VST_COLOR, VSF_INTERIOR, VSF_STYLE, VSF_COLOR, VSWR_MODE,
                     VQ_EXTND, VRO_CPYFM, VRT_CPYFM, VR_RECFL, VS_CLIP,
                     V_SHOW_C, V_HIDE_C, VSL_UDSTY, VST_HEIGHT,
-                    VQ_MOUSE, V_STRING, VQ_KEY_S,
+                    VQ_MOUSE, V_STRING, VQ_KEY_S, VSC_FORM,
                     VEX_TIMV, VEX_BUTV, VEX_MOTV,
                     MD_REPLACE, MD_TRANS, MD_XOR,
                     FIS_HOLLOW, FIS_SOLID, FIS_PATTERN)
+
+# graf_mouse's forms and commands (EmuTOS include/aesdefs.h)
+ARROW, TEXT_CRSR, HOURGLASS, POINT_HAND = 0, 1, 2, 3
+FLAT_HAND, THIN_CROSS, THICK_CROSS, OUTLN_CROSS = 4, 5, 6, 7
+USER_DEF = 255
+M_OFF, M_ON, M_SAVE, M_RESTORE, M_PREVIOUS = 256, 257, 258, 259, 260
 
 # ob_type
 G_BOX, G_TEXT, G_BOXTEXT, G_IMAGE = 20, 21, 22, 23
@@ -38,6 +45,7 @@ RBUTTON, LASTOB, TOUCHEXIT, HIDETREE, INDIRECT = 0x10, 0x20, 0x40, 0x80, 0x100
 # ob_state
 NORMAL, SELECTED, CROSSED, CHECKED = 0, 1, 2, 4
 DISABLED, OUTLINED, SHADOWED = 8, 0x10, 0x20
+WHITEBAK = 0x40
 
 NIL, ROOT, MAX_DEPTH, MAX_LEN = -1, 0, 8, 81
 WHITE, BLACK, LWHITE, LBLACK = 0, 1, 8, 9
@@ -192,6 +200,22 @@ class Bitblk:
                            self.x, self.y, self.color)
 
 
+class Iconblk:
+    """ICONBLK, 34 bytes as in a .RSC: a mask, an image, a label, the
+    char-and-colours word, and three rectangles relative to the object."""
+    def __init__(self, pmask, pdata, ptext, char, xchar, ychar,
+                 icon, text):
+        self.pmask, self.pdata, self.ptext, self.char = pmask, pdata, ptext, char
+        self.xchar, self.ychar = xchar, ychar
+        self.icon, self.text = icon, text
+
+    def pack(self):
+        return struct.pack("<IIIhhhhhhhhhhh", self.pmask, self.pdata, self.ptext,
+                           self.char, self.xchar, self.ychar,
+                           self.icon.x, self.icon.y, self.icon.w, self.icon.h,
+                           self.text.x, self.text.y, self.text.w, self.text.h)
+
+
 class Layout:
     """Lays a tree and its ob_spec targets out at fixed addresses.
 
@@ -244,6 +268,19 @@ class Layout:
         pdata = self._put(bytes(rows), bytes(rows))
         b = Bitblk(pdata, wb, hl, x, y, color)
         return self._put(b, b.pack())
+
+    def iconblk(self, mask, data, label, char=0, xchar=0, ychar=0,
+                icon=None, text=None, wb=4, hl=32):
+        """An ICONBLK and the three things it points at.  `mask` and
+        `data` are raw 1-plane images of hl rows of wb bytes."""
+        assert len(mask) == wb * hl and len(data) == wb * hl
+        pmask = self._put(bytes(mask), bytes(mask))
+        pdata = self._put(bytes(data), bytes(data))
+        ptext = self.text(label)
+        icon = icon or Rect(0, 0, wb * 8, hl)
+        text = text or Rect(0, hl, wb * 8, 8)
+        ib = Iconblk(pmask, pdata, ptext, char, xchar, ychar, icon, text)
+        return self._put(ib, ib.pack())
 
     def indirect(self, spec):
         return self._put(spec, struct.pack("<I", spec & 0xFFFFFFFF))
@@ -553,7 +590,7 @@ class AES:
         # the strings the harness staged for the selector's buffers, by
         # address (run(..., buffers=)); fs_input leaves its results here
         self.fs_strings = {}
-        self.fs_path_addr = 0
+        self.fs_path_addr = self.rec_addr = 0
 
     # -- gemgsxif.c ---------------------------------------------------------
     def gsx_start(self):
@@ -561,6 +598,7 @@ class AES:
         self.gl_mode = self.gl_tcolor = self.gl_lcolor = -1
         self.gl_fis = self.gl_patt = -1
         self.gl_moff = 0
+        self.gl_mform = self.gl_pmform = self.gr_saved = None
         self.gl_handle = v.handle   # the workstation vdi_init opened
         v.call(VQ_EXTND, (), (0,))
         self.gl_width = v.intout[0] + 1
@@ -939,6 +977,30 @@ class AES:
             bi = self.mem[spec]
             self.gsx_blt(self.mem[bi.pdata], bi.x, bi.y, t.x, t.y,
                          bi.wb * 8, bi.hl, MD_TRANS, bi.color, WHITE)
+        elif typ == G_ICON:
+            # the donor's gr_gicon (gemgraf.c): the mask under the image,
+            # both transparent, then the character and the label
+            ib = self.mem[spec]
+            fg, bg, ch = (ib.char >> 12) & 15, (ib.char >> 8) & 15, ib.char & 0xFF
+            if state & SELECTED:
+                fg, bg = bg, fg
+            pi = Rect(ib.icon.x + t.x, ib.icon.y + t.y, ib.icon.w, ib.icon.h)
+            pl = Rect(ib.text.x + t.x, ib.text.y + t.y, ib.text.w, ib.text.h)
+            label = self.mem[ib.ptext].s
+            if not ((state & WHITEBAK) and bg == WHITE):
+                self.gsx_blt(self.mem[ib.pmask], 0, 0, pi.x, pi.y, pi.w, pi.h,
+                             MD_TRANS, bg, fg)
+                if label:
+                    self.gr_rect(bg, IP_SOLID, pl)
+            self.gsx_blt(self.mem[ib.pdata], 0, 0, pi.x, pi.y, pi.w, pi.h,
+                         MD_TRANS, fg, bg)
+            self.gsx_attr(True, MD_TRANS, fg)
+            if ch:
+                self.intin = [ch]
+                self.gsx_tblt(SMALL, pi.x + ib.xchar, pi.y + ib.ychar, 1)
+            if label:
+                self.gr_gtext(TE_CNTR, SMALL, label, pl)
+            state &= ~SELECTED      # spent: no XOR at the end (gr_gicon)
         elif typ in (G_STRING, G_TITLE, G_BUTTON):
             n = self.expand_string(self.mem[spec].s)
             if n:
@@ -1836,6 +1898,43 @@ class AES:
                 break
         return int(out)
 
+    # -- the pointer's shape (gsx_mfset, gr_mouse) ---------------------
+    def gsx_mfset(self, form):
+        """vsc_form with 37 words: hot spot, planes, the mask's colour and
+        the data's, sixteen mask words, sixteen data.  The previous form is
+        kept for graf_mouse(M_PREVIOUS)."""
+        form = list(form)
+        assert len(form) == gemdata.MFORM_WORDS, len(form)
+        if self.gl_mform is not None:
+            self.gl_pmform = self.gl_mform
+        self.gl_mform = form
+        self.v.call(VSC_FORM, (), tuple(form))
+
+    def gr_mouse(self, mode, form=None):
+        """graf_mouse: a shape, or a command about the pointer.  The
+        donor's gr_mouse (gemgrlib.c) with its M_SAVE/M_RESTORE/M_PREVIOUS
+        extension; a mode that is neither is the arrow, as it fails safe
+        there."""
+        if mode == M_OFF:
+            self.gsx_moff()
+            return
+        if mode == M_ON:
+            self.gsx_mon()
+            return
+        if mode == M_SAVE:
+            self.gr_saved = list(self.gl_mform) if self.gl_mform else None
+            return
+        if mode == M_RESTORE:
+            form = self.gr_saved
+        elif mode == M_PREVIOUS:
+            form = self.gl_pmform
+        elif mode != USER_DEF:
+            if mode < ARROW or mode > OUTLN_CROSS:
+                mode = ARROW
+            form = gemdata.mform_words(gemdata.MFORM_NAMES[mode])
+        if form:
+            self.gsx_mfset(form)
+
     def gr_mkstate(self):
         """-> (mx, my, mstat, kstat)"""
         self.v.input_poll()
@@ -2293,16 +2392,22 @@ class AES:
     def bb_save_restore(self, pr, saveit):
         """graf.c: the rectangle widened to whole bytes -- an even x, an
         even width -- copied between the screen and the VDI's save form
-        at the same place, so the blit is one pure copy."""
+        at the same place, so the blit is one pure copy.  The clip comes
+        off for the duration: a clip that cut the rectangle back to an odd
+        one would change what is copied, and on the target it would cost
+        the blitter (docs/phase12.md)."""
         x = pr.x & ~1
         w = (pr.w + (pr.x & 1) + 1) & ~1
         save = vdiref.VramForm.save_buffer()
         forms = (None, save) if saveit else (save, None)
+        clip = self.gsx_gclip()
+        self.gsx_sclip(self.gl_rzero)
         self.gsx_moff()
         self.v.call(VRO_CPYFM, (x, pr.y, x + w - 1, pr.y + pr.h - 1,
                                 x, pr.y, x + w - 1, pr.y + pr.h - 1),
                     (S_ONLY,), forms)
         self.gsx_mon()
+        self.gsx_sclip(clip)
 
     def bb_save(self, pr):
         self.bb_save_restore(pr, True)
@@ -3014,6 +3119,169 @@ class AES:
     # far slots, and the directory read is a lookup in self.dirs where the
     # target has CIO -- and the frames the target spends reading are frames
     # the plan's settles cover, since this side reads in no time.
+    # -- form_alert (src/aes/alert.c, EmuTOS aes/gemfmalt.c) -----------
+    AL_MAX_LINENUM, AL_MAX_LINELEN = 5, 40
+    AL_MAX_BUTNUM, AL_MAX_BUTLEN = 3, 20
+    AL_NUM_OBJS, AL_MSGOFF, AL_BUTOFF = 10, 2, 7
+
+    def _al_strbrk(self, tree, start, maxnum, maxlen, alert, texts):
+        """The donor's fm_strbrk: break at | and ], a doubled one being a
+        literal.  Returns (rest, count, longest)."""
+        def endsub(c):
+            return c in ("|", "]", "")
+        i, longest = 0, 0
+        if alert[:1] == "[":
+            alert = alert[1:]
+        for i in range(maxnum):
+            out = []
+            while len(out) < maxlen:
+                c = alert[:1]
+                if endsub(c):
+                    if c and alert[1:2] == c:
+                        alert = alert[1:]       # || or ]]: a literal one
+                    else:
+                        break
+                out.append(alert[:1])
+                alert = alert[1:]
+            texts[start + i].s = "".join(out)
+            longest = max(longest, len(out))
+            while not endsub(alert[:1]):        # a substring that was too long
+                alert = alert[1:]
+            if alert[:1] in ("]", ""):
+                break
+            alert = alert[1:]
+        while alert[:1] not in ("]", ""):
+            alert = alert[1:]
+        return alert[1:], min(i + 1, maxnum), longest
+
+    def fm_alert(self, defbut, alstr):
+        """form_alert: the string parsed into a ten-object tree, built in
+        character cells, drawn, and the button pressed returned (1..3).
+        The tree and its strings are the pool's, as the target's are."""
+        assert self.pool_mark is not None, "run(..., pool=) names the pool"
+        base = self.pool_mark
+        wc, hc = self.gl_wchar, self.gl_hchar
+        tree = [Obj(NIL, NIL, NIL, G_STRING, NONE, NORMAL, 0, 0, 0, 0, 0)
+                for _ in range(self.AL_NUM_OBJS)]
+        # the string buffers, where the pool puts them: after the objects
+        addr = base + OBJ_SIZE * self.AL_NUM_OBJS
+        texts = {}
+        for i in range(self.AL_MAX_LINENUM):
+            texts[self.AL_MSGOFF + i] = Text("", self.AL_MAX_LINELEN + 1)
+        for i in range(self.AL_MAX_BUTNUM):
+            texts[self.AL_BUTOFF + i] = Text("", self.AL_MAX_BUTLEN + 1)
+        for obj, t in sorted(texts.items()):
+            self.mem[addr] = t
+            tree[obj].ob_spec = addr
+            addr += t.size + (t.size & 1)
+        tree[ROOT].ob_type = G_BOX
+        tree[ROOT].ob_flags = NONE          # LASTOB goes on the last button
+        tree[ROOT].ob_spec = 0x00011100     # the donor's DIALERT root
+        tree[ROOT].ob_state = OUTLINED
+        tree[1].ob_type = G_IMAGE
+        for i in range(self.AL_MAX_BUTNUM):
+            tree[self.AL_BUTOFF + i].ob_type = G_BUTTON
+
+        # parse: [icon][line|line][button|button]
+        icnum = ord(alstr[1]) - ord("0")
+        rest, nummsg, mlenmsg = self._al_strbrk(
+            tree, self.AL_MSGOFF, self.AL_MAX_LINENUM, self.AL_MAX_LINELEN,
+            alstr[3:], texts)
+        _, numbut, mlenbut = self._al_strbrk(
+            tree, self.AL_BUTOFF, self.AL_MAX_BUTNUM, self.AL_MAX_BUTLEN,
+            rest, texts)
+        mlenbut += 1                    # half a character each side
+
+        # build, in character cells (the donor's fm_build)
+        al = Rect(0, 0, 1, 1)
+        ms = Rect(1, 1, mlenmsg, 1)
+        bt = Rect(1, 2 + nummsg, mlenbut, 1)
+        ic = Rect(0, 0, 0, 0)
+        if icnum:
+            hicon = (gemdata.ICON_HL + hc - 1) // hc
+            ic = Rect(1, 1, 4, hicon)
+            al.w += ic.w + 1
+            ms.x = ic.x + ic.w + 1
+        allbut = numbut * mlenbut + 2 * (numbut - 1)
+        if mlenmsg + al.w > allbut + 1:
+            al.w += mlenmsg + 1
+            bt.x = (al.w - allbut) // 2
+        else:
+            al.w = allbut + 2
+            bt.x = 1
+        bt.y = max(ic.y + ic.h, nummsg + 1) + 1
+        al.h = max(bt.y + bt.h, ic.y + ic.h) + 1
+
+        def setxywh(obj, r):
+            o = tree[obj]
+            o.ob_x, o.ob_y, o.ob_width, o.ob_height = r.x, r.y, r.w, r.h
+
+        setxywh(ROOT, al)
+        for o in tree:
+            o.ob_next = o.ob_head = o.ob_tail = NIL
+        with self.on_tree(tree):
+            if icnum:
+                setxywh(1, ic)
+                self.ob_add(tree, ROOT, 1)
+            for i in range(nummsg):
+                setxywh(self.AL_MSGOFF + i, ms)
+                ms.y += 1
+                self.ob_add(tree, ROOT, self.AL_MSGOFF + i)
+            for i in range(numbut):
+                o = tree[self.AL_BUTOFF + i]
+                o.ob_flags = SELECTABLE | EXIT
+                o.ob_state = NORMAL
+                setxywh(self.AL_BUTOFF + i, bt)
+                bt.x += mlenbut + 2
+                self.ob_add(tree, ROOT, self.AL_BUTOFF + i)
+            tree[self.AL_BUTOFF + numbut - 1].ob_flags |= LASTOB
+
+            # character cells to pixels, as rs_obfix does
+            for o in tree:
+                o.ob_x *= wc
+                o.ob_y *= hc
+                o.ob_width = (self.gl_width if o.ob_width == 80
+                              else o.ob_width * wc)
+                o.ob_height *= hc
+
+            if 1 <= defbut <= numbut:
+                tree[self.AL_BUTOFF + defbut - 1].ob_flags |= DEFAULT
+
+            if icnum:
+                icnum = icnum if 1 <= icnum <= 3 else 3
+                name = gemdata.ICON_NAMES[icnum - 1]
+                bits = gemdata.icon_bytes(name)
+                self.mem[addr] = bits
+                self.mem[addr + 1] = Bitblk(addr, gemdata.ICON_WB,
+                                            gemdata.ICON_HL, 0, 0, BLACK)
+                tree[1].ob_spec = addr + 1
+                tree[1].ob_width = tree[1].ob_height = gemdata.ICON_HL
+
+            self.gr_mouse(ARROW)
+            d = Rect(*self.ob_center())
+            # where the buttons landed, on the screen, for a harness that
+            # wants to click one: the model says where the AES puts them
+            root = tree[ROOT]
+            self.alert_buttons = [
+                Rect(root.ob_x + tree[self.AL_BUTOFF + i].ob_x,
+                     root.ob_y + tree[self.AL_BUTOFF + i].ob_y,
+                     tree[self.AL_BUTOFF + i].ob_width,
+                     tree[self.AL_BUTOFF + i].ob_height)
+                for i in range(numbut)]
+            rc_intersect(self.gl_rscreen, d)
+
+            self.wm_update(BEG_UPDATE)
+            t = self.gsx_gclip()
+            self.bb_save(d)
+            self.gsx_sclip(d)
+            self.ob_draw(ROOT, MAX_DEPTH)
+            i = self.fm_do(0)
+            self.gsx_sclip(d)
+            self.bb_restore(d)
+            self.gsx_sclip(t)
+            self.wm_update(END_UPDATE)
+        return i - self.AL_BUTOFF + 1
+
     def fs_input(self, path, sel, label=None):
         """-> (ret, button, path, sel), the buffers as the target leaves
         them.  `path` and `sel` are str; `label` None for fsel_input."""
@@ -3619,6 +3887,11 @@ class AES:
         elif n == 51:
             io[0] = self.fm_dial(ints[0], Rect(*ints[1:5]), Rect(*ints[5:9]))
             c4 = 1
+        elif n == 52:
+            # form_alert: the default button, the string at the record's
+            # address slot (self.fs_strings, what the harness staged)
+            io[0] = self.fm_alert(ints[0], self.fs_strings[self.rec_addr])
+            c4 = 1
         elif n == 54:
             io[0], io[1], io[2], po[0] = self.center()
             c4, c2 = 3, 1
@@ -3654,6 +3927,14 @@ class AES:
             io[0] = self.gl_handle
             io[1:5] = (self.gl_wchar, self.gl_hchar, self.gl_wbox, self.gl_hbox)
             c4 = 5
+        elif n == 78:
+            # graf_mouse: the mode, then USER_DEF's 37 words after it.
+            # GEM passes a pointer; a script record carries the words, so
+            # neither side has a buffer to stage for this one.
+            form = ints[1:1 + gemdata.MFORM_WORDS]
+            self.gr_mouse(ints[0], form if len(form) == gemdata.MFORM_WORDS else None)
+            io[0] = 1
+            c4 = 1
         elif n == 79:
             io[0] = 1
             io[1:5] = self.gr_mkstate()
@@ -3709,6 +3990,7 @@ OBJC_EDIT, OBJC_CHANGE, FORM_CENTER = 1046, 1047, 1054
 EVNT_KEYBD, EVNT_BUTTON, EVNT_MOUSE, EVNT_TIMER = 1020, 1021, 1022, 1024
 EVNT_MULTI, EVNT_DCLICK = 1025, 1026
 FORM_DO, FORM_DIAL, FORM_KEYBD, FORM_BUTTON = 1050, 1051, 1055, 1056
+FORM_ALERT = 1052
 GRAF_RUBBOX, GRAF_DRAGBOX = 1070, 1071
 GRAF_GROWBOX, GRAF_SHRINKBOX, GRAF_WATCHBOX = 1073, 1074, 1075
 GRAF_MKSTATE = 1079
@@ -3774,8 +4056,14 @@ def resume(v, a, script, plan=None, base=0):
         ints = rec[2] if len(rec) > 2 else ()
         steps = list(plan.pop(i, ()))
         if op >= AES_OP:
+            # the record's fourth slot is an address: a tree's, or -- for
+            # the calls whose argument is a string the harness staged --
+            # the string's (run(..., buffers=))
+            a.rec_addr = rec[3] if len(rec) > 3 else 0
             if op in (FSEL_INPUT, FSEL_EXINPUT):
                 a.fs_path_addr = rec[3]
+                a.tree = tree
+            elif op == FORM_ALERT:
                 a.tree = tree
             else:
                 a.tree = trees[rec[3]] if len(rec) > 3 else tree

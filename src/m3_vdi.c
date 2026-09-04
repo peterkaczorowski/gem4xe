@@ -522,6 +522,11 @@ static void run_script(void)
                 c4 = 1;
                 break;
             }
+            case 52:                        /* form_alert: default button,
+                                             * the string in the tree slot */
+                intout[0] = fm_alert(intin[0], (const char *)tree);
+                c4 = 1;
+                break;
             case 54:                        /* form_center (ob_center) */
                 ob_center(tree, &clip);
                 intout[0] = clip.g_x; intout[1] = clip.g_y; intout[2] = clip.g_w;
@@ -581,6 +586,14 @@ static void run_script(void)
             }
             case 75:                        /* graf_watchbox: obj, in, out */
                 intout[0] = gr_watchbox(tree, intin[0], intin[1], intin[2]);
+                c4 = 1;
+                break;
+            case 78:                        /* graf_mouse: mode, form */
+                /* GEM passes a pointer to USER_DEF's 37 words; a script
+                 * record carries the words themselves, after the mode,
+                 * so the harness need stage nothing for it */
+                gr_mouse(intin[0], &intin[1]);
+                intout[0] = 1;
                 c4 = 1;
                 break;
             case 79:                        /* graf_mkstate */
@@ -765,6 +778,18 @@ static void run_script(void)
 
 __task void main(void)
 {
+    /* Touch the scratch area and the result array so the linker keeps
+     * them: nothing else on the target references either -- the host is
+     * the only writer.  BEFORE the signature, not after: the harness
+     * stages a case as soon as it sees 'VD', and everything below here
+     * (farmem_probe alone is thousands of frames' worth of bus cycles)
+     * is time in which a write of ours would land on what it staged.
+     * That race cost a morning: it moved with the size of the image,
+     * which is exactly the shape of a bug that looks like the compiler
+     * and is not (docs/phase6.md). */
+    vdi_scratch[0] = 0;
+    vdi_results[0] = 0;
+
     STATUS[0] = 'V';
     STATUS[1] = 'D';
     STATUS[ST_STAGE] = 0;
@@ -842,10 +867,6 @@ __task void main(void)
     blit_fill(VR_SCREEN0, SCR_STRIDE, SCR_STRIDE, SCR_H, 0x00);
     blit_run();
 
-    /* Touch the scratch area so the linker keeps it: nothing on the target
-     * references it -- the host is the only writer. */
-    vdi_scratch[0] = 0;
-    vdi_results[0] = 0;
     STATUS[ST_VC_PERIOD] = vcount_period();
     STATUS[ST_STAGE] = 1;                       /* ready for scripts */
 

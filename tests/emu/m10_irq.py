@@ -110,6 +110,11 @@ def main(argv):
             b.key(k)
             b.frames(6)
         b.frames(250)
+        for _ in range(200):            # ready, not merely alive
+            s = bytes(b.memdump(STATUS, 3))
+            if s[:2] == b"VD" and s[2] == 1:
+                break
+            b.frames(4)
         s = bytes(b.memdump(STATUS, 40))
         if s[:2] != b"VD" or s[2] != 1:
             print("runner did not come up:", s[:8].hex())

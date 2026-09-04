@@ -10,8 +10,11 @@
  * out a dialog on a 640x240 VBXE overlay and, later, on ANTIC mode F, and the
  * only thing that knows the difference is the driver behind v_opnwk.
  */
+#include <string.h>
 #include "aes.h"
 #include "../vdi/vdi.h"
+#include "sys/farmem.h"
+#include "gemdata.h"
 
 WORD gl_wchar, gl_hchar;
 WORD gl_wbox, gl_hbox;
@@ -215,6 +218,83 @@ void gsx_mon(void)
     gl_moff--;
     if (!gl_moff)
         gsx_1code(V_SHOW_C, 1);      /* 1: undo one hide, not "force" */
+}
+
+/* The pointer's shape (gsx_mfset).  A form is 37 words -- hot spot,
+ * planes, the mask's colour and the data's, then sixteen words of each
+ * -- and vsc_form takes them in intin, so the AES's own eight forms can
+ * live in far memory and be copied down one at a time (tools/gemdata.py,
+ * build/gemdata.c).
+ *
+ * The three forms the AES must remember -- the one set, the one before
+ * it (graf_mouse(M_PREVIOUS)) and the one an application saved
+ * (M_SAVE) -- are 222 bytes, which bank $00 has not got: they live in
+ * far memory too, taken once, and travel through a local on the way in
+ * and out.  Far memory is where everything the AES keeps and does not
+ * read every frame belongs (docs/phase12.md). */
+#define MF_CURR   0
+#define MF_PREV   1
+#define MF_SAVED  2
+
+static uint32_t gl_mfmem;               /* three forms, far */
+static WORD     gl_mform_set;           /* has one been set at all? */
+
+static uint32_t mf_slot(WORD which)
+{
+    if (!gl_mfmem)
+        gl_mfmem = far_alloc(3UL * GEM_MFORM_WORDS * 2);
+    if (!gl_mfmem)
+        return 0;
+    return gl_mfmem + (uint32_t)which * (GEM_MFORM_WORDS * 2);
+}
+
+void gsx_mfset(const WORD *pmform)
+{
+    WORD i;
+    uint32_t curr = mf_slot(MF_CURR), prev = mf_slot(MF_PREV);
+
+    if (curr && prev && gl_mform_set) {
+        WORD was[GEM_MFORM_WORDS];
+        far_get((uint8_t *)was, curr, sizeof was);
+        far_put(prev, (const uint8_t *)was, sizeof was);
+    }
+    for (i = 0; i < GEM_MFORM_WORDS; i++)
+        intin[i] = pmform[i];
+    if (curr)
+        far_put(curr, (const uint8_t *)pmform, GEM_MFORM_WORDS * 2);
+    gl_mform_set = TRUE;
+    gsx_call(VSC_FORM, 0, GEM_MFORM_WORDS);
+}
+
+/* One of the AES's own eight, out of far memory. */
+void gsx_mfform(WORD which, WORD *out)
+{
+    if (which < 0 || which >= GEM_MFORMS)
+        which = 0;
+    far_get((uint8_t *)out, (uint32_t)(const WORD __far *)gem_mforms[which],
+            GEM_MFORM_WORDS * 2);
+}
+
+/* A remembered form: MF_CURR, MF_PREV or MF_SAVED.  FALSE when there is
+ * none -- nothing has been set, or far memory was not there. */
+WORD gsx_mfget(WORD which, WORD *out)
+{
+    uint32_t slot = mf_slot(which);
+
+    if (!slot || !gl_mform_set)
+        return FALSE;
+    far_get((uint8_t *)out, slot, GEM_MFORM_WORDS * 2);
+    return TRUE;
+}
+
+/* graf_mouse(M_SAVE): the form now, kept for M_RESTORE. */
+void gsx_mfsave(void)
+{
+    WORD form[GEM_MFORM_WORDS];
+    uint32_t saved = mf_slot(MF_SAVED);
+
+    if (saved && gsx_mfget(MF_CURR, form))
+        far_put(saved, (const uint8_t *)form, sizeof form);
 }
 
 /* The pointer on whatever the hide count (the donor's ratinit, for the
@@ -701,8 +781,22 @@ void bb_screen(WORD sx, WORD sy, WORD dx, WORD dy, WORD w, WORD h)
 static void bb_save_restore(const GRECT *pr, WORD saveit)
 {
     static MFDB scr, buf;
+    GRECT clip;
     WORD x = (WORD)(pr->g_x & ~1);
     WORD w = (WORD)((pr->g_w + (pr->g_x & 1) + 1) & ~1);
+
+    /* The clip comes off for the duration.  The rectangle is the whole
+     * argument here -- what was taken in is what goes back -- and the
+     * copy to the screen IS clipped by gem4xe's vro_cpyfm (the donor's
+     * raster ops are not).  A clip that cuts the even-aligned rectangle
+     * back to an odd one costs the blitter: the copy falls onto the
+     * per-pixel path through the MEMAC window, which for an alert-sized
+     * 200x70 is 168 frames against one blit.  Measured, once, the hard
+     * way (docs/phase12.md).  menu_sr turns the clip off around its own
+     * save and restore for the same reason; doing it here means no
+     * caller has to know. */
+    gsx_gclip(&clip);
+    gsx_sclip(&gl_rzero);
 
     scr.fd_addr = 0;
     vdi_save_form(&buf);
@@ -718,6 +812,7 @@ static void bb_save_restore(const GRECT *pr, WORD saveit)
     intin[0] = S_ONLY;
     gsx_call(VRO_CPYFM, 4, 1);
     gsx_mon();
+    gsx_sclip(&clip);
 }
 
 void bb_save(const GRECT *pr)

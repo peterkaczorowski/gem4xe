@@ -27,7 +27,8 @@ import vbxeref, vdiref, aesref, symfile     # noqa: E402
 from vdiref import V_OPNWK, V_CLRWK, WORK_IN    # noqa: E402
 from aesref import (Obj, Layout, Text, NIL, G_BOX, G_IBOX, G_BUTTON,   # noqa: E402
                     G_STRING, G_TEXT, G_BOXTEXT, G_FTEXT, G_FBOXTEXT, G_IMAGE,
-                    G_BOXCHAR, G_TITLE, LASTOB, DEFAULT, SELECTABLE, EXIT,
+                    G_BOXCHAR, G_TITLE, G_ICON, Rect, LASTOB, DEFAULT,
+                    SELECTABLE, EXIT, NORMAL,
                     EDITABLE, INDIRECT, SELECTED, DISABLED, SHADOWED, OUTLINED,
                     CHECKED, CROSSED, HIDETREE, TE_LEFT, TE_RIGHT, TE_CNTR,
                     EDINIT, EDCHAR, EDEND, BACKSPACE, DELETE, ESCAPE,
@@ -148,6 +149,32 @@ def form(L):
     ]
 
 
+ICON_MASK = bytes([
+    0x00, 0xFF, 0xFF, 0x00,
+    0x03, 0xFF, 0xFF, 0xC0,
+] + [0x07, 0xFF, 0xFF, 0xE0] * 8 + [
+    0x03, 0xFF, 0xFF, 0xC0,
+    0x00, 0xFF, 0xFF, 0x00,
+])
+
+
+def icons(L):
+    """G_ICON: the mask under the image, the character in the icon's own
+    colours, the label under it.  Two of them, one SELECTED, which swaps
+    the icon's colours instead of XORing the object (gr_gicon)."""
+    ib1 = L.iconblk(ICON_MASK, ICON_ROWS, "DISK", char=ord('A'), xchar=12,
+                    ychar=2, icon=Rect(0, 0, 32, 12), text=Rect(0, 14, 64, 8),
+                    wb=4, hl=12)
+    ib2 = L.iconblk(ICON_MASK, ICON_ROWS, "TRASH", char=0, xchar=0, ychar=0,
+                    icon=Rect(0, 0, 32, 12), text=Rect(0, 14, 64, 8),
+                    wb=4, hl=12)
+    return [
+        Obj(NIL,  1,   2, G_BOX,  0,      0, 0x00021100,  80, 40, 400, 120),
+        Obj(2,  NIL, NIL, G_ICON, 0,      0,        ib1,  40, 20,  64,  24),
+        Obj(0,  NIL, NIL, G_ICON, LASTOB, SELECTED, ib2, 200, 20,  64,  24),
+    ]
+
+
 def draw(start=0, depth=8, clip=FULL):
     return (OBJC_DRAW, clip, (start, depth))
 
@@ -182,6 +209,9 @@ CASES = [
      + [(OBJC_OFFSET, (), (o,)) for o in range(5)]),
     ("draw a subtree only", dialog,
      [draw(2, 0), find(60, 82)]),
+    ("icons: mask, image, character and label; one selected", icons,
+     [draw()] + [find(x, y) for x, y in [(140, 70), (300, 70), (90, 45)]]
+     + [change(1, SELECTED), change(2, NORMAL)]),
     ("form: templates, justification, image", form,
      [draw()] + [find(x, y) for x, y in [(150, 60), (200, 88), (430, 65), (310, 25)]]),
     ("objc_change: select, deselect, disable, no redraw", dialog,
@@ -264,7 +294,14 @@ def main(argv):
             b.key(k)
             b.frames(6)
         b.frames(200)
-        if bytes(b.memdump(STATUS, 3))[:2] != b"VD":
+        # "VD" says the runner is alive; STATUS[2] == 1 says it is
+        # ready for scripts, which is what staging one needs.
+        for _ in range(200):
+            st = bytes(b.memdump(STATUS, 3))
+            if st[:2] == b"VD" and st[2] == 1:
+                break
+            b.frames(4)
+        if st[:2] != b"VD" or st[2] != 1:
             print("FAIL: runner did not come up")
             return 1
 
