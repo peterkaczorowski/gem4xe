@@ -32,8 +32,14 @@
     (list 'memory 'AppBits
           (list 'address (cons (+ near #x700) (+ near #x7ff)))
           '(section cdata idata data_init_table))
+    ;; Two far memories, either side of the bank's $D5 page: the emulator's
+    ;; native-mode branch reads a wrong-page address folded into bank $00,
+    ;; and $D5xx there is cartridge control (src/gem4xe.scm, THE HOLE).
     (list 'memory 'AppFar
-          (list 'address (cons far (+ far #xffff)))
+          (list 'address (cons far (+ far #xd4ff)))
+          '(section farcode switch cfar libcode code))
+    (list 'memory 'AppFarH
+          (list 'address (cons (+ far #xd600) (+ far #xffff)))
           '(section farcode switch cfar libcode code))
     '(block stack (size #x0100))
     '(block heap  (size #x0000))

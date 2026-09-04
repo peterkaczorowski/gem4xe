@@ -81,6 +81,12 @@ class Runner:
             b.frames(4)
         else:
             raise RuntimeError("the runner did not finish")
+        # ST_DONE is set the moment the last op returns, which can be in
+        # the middle of a frame the screenshot would otherwise show: the
+        # frame is scanned out as the blits land, so a shot of it catches
+        # a string half drawn.  One more frame is scanned after the
+        # drawing has stopped; two is the margin.
+        b.frames(2)
         n = b.peek16(self.count)
         assert n == len(script), (n, len(script))
         return vdiref.decode(b.memdump(self.results, n * vdiref.RESULT_WORDS * 2), n)
@@ -542,8 +548,11 @@ def fs_cases(A, B2, rects):
 
     def drag(frm, dy):
         """Press on the elevator, wait out the double-click delay (a
-        TOUCHEXIT press is delivered after it), move, release."""
-        return [M(*frm), B(1), F(14), M(frm[0], frm[1] + dy), F(2), B(0), F(4)]
+        TOUCHEXIT press is delivered after it), move, release.  The
+        release scrolls the list, a page of names redrawn: five frames
+        on the target, so the settle after it is a bound, not a
+        measurement, like drive's FINISH."""
+        return [M(*frm), B(1), F(14), M(frm[0], frm[1] + dy), F(2), B(0), F(8)]
 
     # The arrows and the slider's track are TOUCHEXIT objects the selector
     # keeps asking form_do about, and a button wait is satisfied by the
@@ -707,13 +716,20 @@ def fsel_cases(r, check, b, keep, syms):
             print("   the target is blocked; the cases after this cannot run")
             return
 
-    # -- refused while an application's resource holds the pool ------------------
+    # -- refused while an application holds the pool ----------------------------
     # The selector's tree and work area need more than the pool has left
-    # once the test resource is in it: it says no, takes nothing, draws
-    # nothing (docs/phase11.md).
+    # once an application's resource and its own takings are in it: it
+    # says no, takes nothing, draws nothing (docs/phase11.md).  The test
+    # resource alone no longer fills an 8 KB pool (docs/phase13.md), so
+    # the runner takes the rest on the application's behalf, leaving
+    # less than the selector's tree.
     rec = aes(RSRC_LOAD, (), r.stage(128, b"A:\\TEST.RSC\0"))
     check(rec[0] == 1, f"rsrc_load before the refusal returned {rec[0]}")
-    left = rec[3]
+    tree_bytes = len(fr.build().file())
+    held = sysop(ALLOC)[6] & 0xFFFF
+    rec = sysop(ALLOC, max(rec[3] - tree_bytes // 2, 0))
+    left = rec[7]
+    check(left < tree_bytes, f"the pool still has {left} bytes, more than the selector's tree")
     before = os.path.join(SHOTDIR, "m12-fsel-before.png")
     b.screenshot(before)
     path_addr = r.stage(PATH_OFF, b"A:\\*.*\0")
@@ -730,8 +746,8 @@ def fsel_cases(r, check, b, keep, syms):
     if not keep:
         os.remove(before)
         os.remove(after)
-    tree_bytes = len(fr.build().file())
     print(f"  refused with {left} bytes of pool: the tree alone is {tree_bytes}; nothing taken, nothing drawn")
+    sysop(ALLOC, 0, held)
     rec = aes(RSRC_FREE)
     check(rec[0] == 1, f"rsrc_free after the refusal returned {rec[0]}")
 

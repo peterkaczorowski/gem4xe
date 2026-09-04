@@ -272,6 +272,66 @@ void b8_fix(const char *name, char *out)
 
 char b8_out1[8], b8_out2[8];
 
+/* ---- B9: `got = c ? m : 0` when &got is passed on the other path ------- */
+
+/* gd_xfer (src/sys/gemdos.c): one loop moves bytes either way, a write
+ * setting the count moved from the status (`got = ok ? m : 0`) and a read
+ * having the callee fill it (`cio_read(..., &got)`).  The conditional
+ * assignment on the write path is evaluated into a scratch slot and
+ * thrown away, and `got` is then loaded from an unrelated slot -- the
+ * bytes-moved total is garbage.  -O2.  The sources test the status and
+ * break, then assign `got = m` plainly. */
+uint8_t b9_st;
+uint8_t b9_write(uint8_t *p, uint16_t m) { (void)p; (void)m; return b9_st; }
+uint8_t b9_read(uint8_t *p, uint16_t m, uint16_t *got) { (void)p; *got = m / 2; return 1; }
+
+int32_t b9_bug(int32_t count, WORD write)
+{
+    uint8_t buf[8], st;
+    int32_t done = 0;
+    uint16_t m, got;
+
+    while (count > 0) {
+        m = count > 8L ? 8 : (uint16_t)count;
+        if (write) {
+            st = b9_write(buf, m);
+            got = (st == 1 || st == 3) ? m : 0;
+        } else {
+            st = b9_read(buf, m, &got);
+        }
+        done += got;
+        count -= got;
+        if (got < m || (st != 1 && st != 3))
+            break;
+    }
+    return done;
+}
+
+int32_t b9_fix(int32_t count, WORD write)
+{
+    uint8_t buf[8];
+    WORD st;
+    int32_t done = 0;
+    uint16_t m, got;
+
+    while (count > 0) {
+        m = count > 8L ? 8 : (uint16_t)count;
+        if (write) {
+            st = b9_write(buf, m);
+            if (st != 1 && st != 3)
+                break;
+            got = m;
+        } else {
+            st = b9_read(buf, m, &got);
+        }
+        done += got;
+        count -= got;
+        if (got < m || (st != 1 && st != 3))
+            break;
+    }
+    return done;
+}
+
 /* ---- results ------------------------------------------------------------ */
 
 volatile WORD r_b1_bug, r_b1_fix;                       /* want 476 */
@@ -282,6 +342,7 @@ volatile WORD r_b5_bug, r_b5_fix;                       /* want 120 */
 volatile WORD r_b5_dec_bug, r_b5_dec_fix;               /* want 4 */
 volatile WORD r_b7_bug, r_b7_fix;                       /* want 801 */
 volatile WORD r_b8_bug, r_b8_fix;                       /* want 'T' = 84 */
+volatile WORD r_b9_bug, r_b9_fix;                       /* want 20 */
 
 __task int main(void)
 {
@@ -324,5 +385,9 @@ __task int main(void)
     b8_fix("test", b8_out2);
     r_b8_bug = (uint8_t)b8_out1[0];
     r_b8_fix = (uint8_t)b8_out2[0];
+
+    b9_st = 1;
+    r_b9_bug = (WORD)b9_bug(20, 1);             /* 8 + 8 + 4 written */
+    r_b9_fix = (WORD)b9_fix(20, 1);
     return 0;
 }

@@ -5,6 +5,7 @@
 #include <calypsi/intrinsics65816.h>
 
 IRQ_INFO irq;
+uint8_t  irq_cio_swap;
 
 volatile uint16_t irq_frames, irq_timer, irq_qlo, irq_qhi;
 volatile uint8_t  irq_kb[8], irq_kb_head, irq_kb_tail, irq_kb_count;
@@ -49,9 +50,26 @@ static uint8_t rom_in;                  /* PORTB bit 0 as found */
 static uint8_t win3_fast;               /* MCR bit 3 clear as found (Rapidus) */
 
 /* Window 3 between its two configurations: the OS ROM (as found) and the
- * RAM under it, which on a Rapidus is the SRAM window with write-through
- * on.  Reads with the ROM in come from the motherboard whatever the MCR
- * says (irq.h), so the ROM side needs only PORTB. */
+ * RAM under it, which on a Rapidus is the SRAM window.  Reads with the ROM
+ * in come from the motherboard whatever the MCR says (irq.h), so the ROM
+ * side needs only PORTB.
+ *
+ * THE RAM UNDER THE ROM IS NOT OURS.  A DOS may live there: SpartaDOS 3.2's
+ * X builds load $CC00-$CFF2 and $E6ED-$FFF8 and reach them by switching
+ * the ROM out, and Phase 13 found the port had overwritten them with the
+ * ROM copy -- every CIO open then answered $81, from whatever the DOS's
+ * entry point had become.  So on a Rapidus the copy is written with
+ * write-through OFF: a write to a fast window then lands in the SRAM
+ * alone (Altirra's rapidus.cpp, UpdateSRAMWindows), and the motherboard's
+ * RAM under the ROM keeps whatever the DOS put there, untouched and
+ * invisible until a CIO call makes the window slow again (src/sys/cio.s,
+ * irq_cio_swap).  While write-through is off the other fast windows write
+ * to the SRAM alone as well; what the copy loop writes there is its own
+ * stack and sums, which nothing reads from the motherboard side.
+ *
+ * Without a Rapidus there is only one RAM under the ROM, the copy goes
+ * into it, and a DOS living there does not survive.  SpartaGEM needs the
+ * accelerator's SRAM; docs/phase13.md. */
 static void os_side(void)
 {
     PORTB = irq.portb_before;
@@ -59,11 +77,15 @@ static void os_side(void)
         rapidus_reg_write(RAP_MCR, irq.mcr_before);
 }
 
-static void ram_side(void)
+static void ram_side(uint8_t writing)
 {
     PORTB = (uint8_t)(irq.portb_before & ~PORTB_OSROM);
-    if (rapidus.present)
-        rapidus_reg_write(RAP_MCR, (uint8_t)(irq.mcr_before & ~MCR_SLOW3));
+    if (rapidus.present) {
+        uint8_t mcr = (uint8_t)(irq.mcr_before & ~MCR_SLOW3);
+        if (writing)
+            mcr &= (uint8_t)~MCR_WRTHRU;
+        rapidus_reg_write(RAP_MCR, mcr);
+    }
 }
 
 /* Copy one run of the window from the OS side to the RAM side, a page at a
@@ -81,7 +103,7 @@ static uint8_t copy_run(uint16_t lo, uint16_t hi)
             buf[i] = p[i];
             irq.rom_sum += buf[i];
         }
-        ram_side();
+        ram_side(1);
         for (i = 0; i < 256; i++)
             p[i] = buf[i];
         for (i = 0; i < 256; i++) {
@@ -162,6 +184,7 @@ uint8_t irq_install(void)
     irq.how  = IRQ_OFF;
     irq.fail = IRQ_FAIL_NONE;
     irq.fast = 0;
+    irq_cio_swap = 0;
     irq.timer_div = TIMER_DIV;
     irq.rom_sum = irq.ram_sum = 0;
     irq.portb_before = PORTB;
@@ -186,14 +209,19 @@ uint8_t irq_install(void)
         }
         irq.how = IRQ_ROM_COPIED;
     }
-    ram_side();
+    ram_side(1);
     if (!write_vectors()) {
         os_side();
         irq.how  = IRQ_OFF;
         irq.fail = IRQ_FAIL_VEC;
         return irq.how;
     }
+    ram_side(0);
     irq.fast = rapidus.present;
+    /* What a CIO call has to give the DOS back: the ROM, if it was in when
+     * we came, and on a Rapidus the motherboard behind it. */
+    if (irq.how == IRQ_ROM_COPIED)
+        irq_cio_swap = (uint8_t)(IRQ_SWAP_ROM | (rapidus.present ? IRQ_SWAP_WIN3 : 0));
     sources_on();
     return irq.how;
 }
@@ -214,6 +242,7 @@ void irq_remove(void)
         ;
     __disable_interrupts();
     os_side();
+    irq_cio_swap = 0;
     irq.how  = IRQ_OFF;
     irq.fast = 0;
 }

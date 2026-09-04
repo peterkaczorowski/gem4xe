@@ -18,17 +18,18 @@
  * in sh_doexec for whoever asks (src/m3_vdi.c reads it back in the gate).
  *
  * NAMES.  A GEM application names a file the TOS way, X:\DIR\NAME.EXT,
- * and the Atari OS the CIO way, Dn:NAME.EXT.  sh_cioname maps the first
- * onto the second -- drive A..H is D1..D8 and the directory part is
- * dropped, because DOS 2 has no directories (a SpartaDOS path is a debt,
- * docs/phase11.md) -- and leaves anything else alone for CIO to judge,
- * which is where a name with no device at all gets its D: (src/sys/cio.c).
- * Every file the AES opens on an application's behalf goes through it.
+ * and the Atari OS the CIO way: Dn:NAME.EXT on DOS 2, Dn:>DIR>NAME.EXT
+ * on a SpartaDOS.  sh_cioname maps the first onto whichever the machine
+ * booted -- the rule is the DOS seam's, src/sys/dos.h -- and leaves
+ * anything else alone for CIO to judge, which is where a name with no
+ * device at all gets its D: (src/sys/cio.c).  Every file the AES opens
+ * on an application's behalf goes through it.
  */
 #include <string.h>
 #include "aes/aes.h"
 #include "sys/app.h"
 #include "sys/cio.h"
+#include "sys/dos.h"
 #include "sys/farmem.h"
 
 #define SH_CMDLEN   128         /* MAXPATHLEN: the command, NUL-terminated */
@@ -135,34 +136,11 @@ void sh_envrn(const char **ppath, const char *psrch)
     }
 }
 
-/* X:\DIR\NAME.EXT -> Dn:NAME.EXT, uppercased; anything else copied as it
- * is (CIO adds D: to a bare name).  `cio` holds CIO_NAME_MAX + 1. */
+/* A GEM path into the name CIO opens: the DOS seam's rule (src/sys/dos.h).
+ * `cio` holds CIO_NAME_MAX + 1. */
 void sh_cioname(const char *gem, char *cio)
 {
-    const char *name = gem;
-    WORD k = 0;
-
-    if (gem[0] && gem[1] == ':' && gem[2] == '\\') {
-        char d = (char)(gem[0] | 0x20);
-        const char *p;
-        if (d >= 'a' && d <= 'h') {
-            cio[k++] = 'D';
-            cio[k++] = (char)('1' + (d - 'a'));
-            cio[k++] = ':';
-        }
-        for (p = gem + 3; *p; p++)          /* the last component */
-            if (*p == '\\')
-                name = p + 1;
-        if (name == gem)
-            name = gem + 3;
-    }
-    for (; *name && k < CIO_NAME_MAX; name++, k++) {
-        WORD c = (uint8_t)*name;    /* a WORD, not a char: B8, tools/ccbug */
-        if (c >= 'a' && c <= 'z')
-            c -= 0x20;
-        cio[k] = (char)c;
-    }
-    cio[k] = 0;
+    dos_cioname(gem, cio);
 }
 
 /* Does the file exist where the name says, or on the default drive (the

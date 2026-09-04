@@ -21,6 +21,12 @@ reported, the far bank against where the image ends and the first
 megabyte, and three counts that must agree -- what main() returned, the
 records the application wrote, the COP calls the ABI took -- with none
 refused.  And the screen, against the reference's.
+
+Phase 14 added the third entry, GEMDOS (COP #$01): after appl_exit the
+application asks the version, the drive, the boot disk's directory entry
+by entry, a file that is not there, and how much memory is left, into
+dosres[]; the directory count is checked against the image itself and
+the calls are added to the COP reconciliation.
 """
 import os
 import struct
@@ -30,7 +36,7 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from a8test.launcher import launch          # noqa: E402
-import vbxeref, vdiref, aesref, symfile     # noqa: E402
+import vbxeref, vdiref, aesref, symfile, atr  # noqa: E402
 from vdiref import (WORK_IN, V_OPNVWK, VSF_COLOR, VSF_INTERIOR, VR_RECFL,  # noqa: E402
                     VST_COLOR, V_GTEXT, VSL_COLOR, V_PLINE)
 from aesref import (Obj, Text, APPL_INIT, APPL_EXIT, GRAF_HANDLE, OBJC_DRAW,  # noqa: E402
@@ -195,9 +201,29 @@ def main(argv):
         ncalls = b.peek16(app["ncalls"] + base)
         seq = app_calls(0, 0)
         check(ncalls == len(seq), f"the application wrote {ncalls} records, expected {len(seq)}")
-        check(main_ret == ncalls and calls == ncalls,
-              f"main() returned {main_ret}, {ncalls} records, {calls} COP calls: "
-              f"the three should agree")
+        ndos = b.peek16(app["ndos"] + base)
+        check(main_ret == ncalls and calls == ncalls + ndos,
+              f"main() returned {main_ret}, {ncalls} records, {ndos} GEMDOS calls, "
+              f"{calls} COP calls: they should reconcile")
+
+        # -- GEMDOS through COP #$01 ------------------------------------------
+        dosres = list(struct.unpack("<8h", b.memdump(app["dosres"] + base, 16)))
+        # What Fsfirst/Fsnext should count: the entries a DOS 2 could be
+        # handed (atr.Entry.nameable, the rule src/sys/dos.c lists by); the
+        # fixture disk's dashed dividers are in use and are not files.
+        files = [e.filename for e in atr.Dos2(atr.ATRImage.load(DISK)).entries()
+                 if e.in_use and e.nameable]
+        print(f"  GEMDOS: version ${dosres[0] & 0xFFFF:04X}, drive {dosres[1]}, "
+              f"{dosres[2]} entries (image {len(files)}), Fsnext {dosres[3]}, "
+              f"Fopen(missing) {dosres[4]}, {dosres[5]} banks free, DTA {dosres[6]}")
+        check(dosres[0] == 0x1500, f"Sversion answered ${dosres[0] & 0xFFFF:04X}, not $1500")
+        check(dosres[1] == 0, f"Dgetdrv answered {dosres[1]}, not A")
+        check(dosres[2] == len(files), f"Fsfirst/Fsnext saw {dosres[2]} entries; "
+              f"the image has {len(files)}")
+        check(dosres[3] == -49, f"the search ended with {dosres[3]}, not ENMFIL")
+        check(dosres[4] == -33, f"Fopen of a missing file answered {dosres[4]}, not EFILNF")
+        check(dosres[5] >= 1, f"Malloc(-1) reports {dosres[5]} whole banks free")
+        check(dosres[6] == 1, "Fgetdta did not answer the DTA Fsetdta was given")
         arec = vdiref.decode(b.memdump(app["results"] + base, ncalls * REC_WORDS * 2), ncalls)
         # what the application got back and went on to use
         hbox = arec[1][2 + 4] if ncalls > 1 else 0

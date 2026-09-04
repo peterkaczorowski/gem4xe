@@ -69,7 +69,11 @@ def extents(segs, syms):
     records, and the bss within it must be zeroed; the far region is code
     and ends with its last byte."""
     near = [s for s in segs if s[0] < 0x10000]
-    far = [s for s in segs if s[0] >= 0x10000]
+    # A far memory nothing was placed in still gets a PT_LOAD with no file
+    # bytes (the second half of the bank, above the $D5 hole, in an
+    # application smaller than the first); it carries nothing and must not
+    # stretch the far region to it.
+    far = [s for s in segs if s[0] >= 0x10000 and len(s[1])]
     if not near or not far:
         raise SystemExit("expected both a near and a far region")
     dp = syms["_DirectPageStart"]

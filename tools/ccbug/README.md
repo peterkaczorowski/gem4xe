@@ -1,6 +1,6 @@
 # tools/ccbug — the cc65816 bugs gem4xe works around
 
-Eight defects in Calypsi cc65816 **5.18** — six in code generation, one
+Nine defects in Calypsi cc65816 **5.18** — seven in code generation, one
 crash and one in the front end's arithmetic — each reproduced from a shape
 lifted out of gem4xe, each with the shape the sources use instead. `make check-cc` builds `bugs.c` with the
 vendor's minimal linker script and C library, runs it under `db65816`, and
@@ -12,7 +12,7 @@ compiled on its own and the outcome read from the compiler:
       B1 through a scalar                        want   476 got   476   ok
       ...
       B6 indexed direct-page array                       compiles   still present
-    check-cc: PASSED -- every workaround shape is right; 11 of 11 bug shapes still present
+    check-cc: PASSED -- every workaround shape is right; 12 of 12 bug shapes still present
 
 The run **fails only if a workaround shape stops compiling right**, because
 that is what would break gem4xe. A bug that has gone away is reported as
@@ -51,6 +51,9 @@ What the sources do, in one line each. The reasons follow.
 8. **Never narrow arithmetic into a `char` local on one path of a
    conditional and store the local after the join.** Hold the character
    in a `WORD` and narrow it once, at the store.
+9. **Never `got = c ? a : b` on a local whose address another path passes
+   to a call.** Test the condition, `break` or return on it, then assign
+   plainly.
 
 ## B1 — stack-array element plus operand compiles to a load
 
@@ -248,3 +251,17 @@ matrices above say what does and does not trigger it. They have not been sent
 to Calypsi; that is the user's call. When a release fixes one, `check-cc`
 says so, and the workaround — and for B2 `src/sys/div16.s` plus the two
 `--override` flags in the Makefile — can go.
+
+## B9 — a conditional assignment to an address-taken local is dropped
+
+    if (write) { st = cio_write(iocb, p, m); got = ok ? m : 0; }
+    else       { st = cio_read(iocb, p, m, &got); }     /* gd_xfer(), src/sys/gemdos.c */
+
+The read path hands `&got` to a callee, so `got` has a stack slot.  The
+write path's conditional is evaluated into a scratch slot (`sta 1,s`) and
+never copied to that slot; instead the join loads `got` from an unrelated
+slot (`lda 15,s; sta 26,s`), and the bytes-moved total that Fwrite returns
+is whatever was there — 770 on the target, 259 in the simulator for a
+20-byte write.  Sibling of B3 (the conditional store into a dead slot), on
+a local rather than through a pointer.  -O2.  `gd_xfer` tests the status,
+breaks on failure, and assigns `got = m` on the line after.

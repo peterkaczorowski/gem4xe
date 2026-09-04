@@ -1,4 +1,4 @@
-/* gemlib.c -- an application's GEM bindings, over the two COP entries.
+/* gemlib.c -- an application's GEM bindings, over the three COP entries.
  *
  * The shape is the classic GEM library's: one set of arrays, a parameter
  * block pointing at them, a binding per call that fills the arrays, makes
@@ -183,4 +183,117 @@ WORD evnt_timer(UWORD lo, UWORD hi)
     int_in[0] = (WORD)lo;
     int_in[1] = (WORD)hi;
     return aes(24, 2, 1, 0, 0);
+}
+
+/* -- GEMDOS ---------------------------------------------------------- */
+
+static GDPB dpb;
+
+/* The arguments go into the block as the ST's trap #1 pushes them: at
+ * byte offsets from 6, WORDs two wide and LONGs four, low byte first. */
+static void dw(WORD off, WORD v)
+{
+    dpb.arg[(off - 6) >> 1] = v;
+}
+
+static void dl(WORD off, LONG v)
+{
+    dpb.arg[(off - 6) >> 1] = (WORD)v;
+    dpb.arg[(off - 4) >> 1] = (WORD)(v >> 16);
+}
+
+static LONG dos(WORD fn)
+{
+    dpb.fn = fn;
+    dos_call(&dpb);
+    return dpb.ret;
+}
+
+WORD Sversion(void)                       { return (WORD)dos(0x30); }
+WORD Dgetdrv(void)                        { return (WORD)dos(0x19); }
+WORD Dsetdrv(WORD drive)                  { dw(6, drive); return (WORD)dos(0x0E); }
+LONG Dsetpath(const char __far *path)     { dl(6, (LONG)path); return dos(0x3B); }
+LONG Dcreate(const char __far *path)      { dl(6, (LONG)path); return dos(0x39); }
+LONG Ddelete(const char __far *path)      { dl(6, (LONG)path); return dos(0x3A); }
+LONG Fdelete(const char __far *name)      { dl(6, (LONG)name); return dos(0x41); }
+LONG Fsnext(void)                         { return dos(0x4F); }
+LONG Fclose(WORD handle)                  { dw(6, handle); return dos(0x3E); }
+LONG Malloc(LONG size)                    { dl(6, size); return dos(0x48); }
+LONG Mfree(void __far *block)             { dl(6, (LONG)block); return dos(0x49); }
+void Fsetdta(DTA __far *dta)              { dl(6, (LONG)dta); dos(0x1A); }
+DTA __far *Fgetdta(void)                  { return (DTA __far *)dos(0x2F); }
+
+LONG Dgetpath(char __far *buf, WORD drive)
+{
+    dl(6, (LONG)buf);
+    dw(10, drive);
+    return dos(0x47);
+}
+
+LONG Dfree(DISKINFO __far *info, WORD drive)
+{
+    dl(6, (LONG)info);
+    dw(10, drive);
+    return dos(0x36);
+}
+
+LONG Fsfirst(const char __far *spec, WORD attr)
+{
+    dl(6, (LONG)spec);
+    dw(10, attr);
+    return dos(0x4E);
+}
+
+LONG Fopen(const char __far *name, WORD mode)
+{
+    dl(6, (LONG)name);
+    dw(10, mode);
+    return dos(0x3D);
+}
+
+LONG Fcreate(const char __far *name, WORD attr)
+{
+    dl(6, (LONG)name);
+    dw(10, attr);
+    return dos(0x3C);
+}
+
+LONG Fread(WORD handle, LONG count, void __far *buf)
+{
+    dw(6, handle);
+    dl(8, count);
+    dl(12, (LONG)buf);
+    return dos(0x3F);
+}
+
+LONG Fwrite(WORD handle, LONG count, const void __far *buf)
+{
+    dw(6, handle);
+    dl(8, count);
+    dl(12, (LONG)buf);
+    return dos(0x40);
+}
+
+LONG Fseek(LONG offset, WORD handle, WORD mode)
+{
+    dl(6, offset);
+    dw(10, handle);
+    dw(12, mode);
+    return dos(0x42);
+}
+
+LONG Frename(const char __far *oldname, const char __far *newname)
+{
+    dw(6, 0);
+    dl(8, (LONG)oldname);
+    dl(12, (LONG)newname);
+    return dos(0x56);
+}
+
+LONG Fattrib(const char __far *name, WORD wflag, WORD attr)
+{
+    dl(6, (LONG)name);
+    dw(10, wflag);
+    dw(12, attr);
+    return dos(0x43);
 }

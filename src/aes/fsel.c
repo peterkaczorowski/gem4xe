@@ -23,17 +23,21 @@
  * a flag byte, the name, and its NUL, which is what the donor's
  * ad_fsnames holds at the offsets g_fslist counts; the slots being of one
  * size, the list holds slot numbers and the sort swaps those.  The flag
- * is the donor's -- 0x07 for a folder, ' ' for a file -- and is always
- * ' ': DOS 2 has no folders, and the selector's FCLSBOX does what the
- * donor does at the root, nothing.  Subdirectories (MyDOS, SpartaDOS)
- * are a debt, docs/phase11.md.
+ * is the donor's -- 0x07 for a folder, ' ' for a file.  On DOS 2 it is
+ * always ' ', there being no folders, and the selector's FCLSBOX does
+ * what the donor does at the root, nothing; on a SpartaDOS a folder
+ * clicked goes into the path and FCLSBOX comes back out of it, the
+ * donor's own code, which never knew the DOS underneath had changed.
  *
  * THE DIRECTORY.  The donor's dos_sfirst/dos_snext is CIO's directory
  * read here: the path's file part replaced by *.* and mapped through
- * sh_cioname (X:\*.* -> Dn:*.*), opened with aux1 = 6 and read a record
- * at a time.  A record is DOS 2's 17-character line -- a lock mark, a
- * space, the name in 8, the extension in 3, a space, and the sector
- * count in 3 -- and fs_entry() takes only the lines shaped so with a
+ * sh_cioname (X:\DIR\*.* -> Dn:*.* or Dn:>DIR>*.*, the DOS seam's rule,
+ * src/sys/dos.h), opened with aux1 = 6 and read a record at a time.  A
+ * record is DOS 2's 17-character line -- a lock mark, a space, the name
+ * in 8, the extension in 3, a space, and the sector count in 3 -- which
+ * a SpartaDOS prints too, marking a subdirectory its own way: 3.2 in the
+ * extension field, X in the flag column (dos_folder_line knows both).
+ * fs_entry() takes only the lines shaped so with a
  * name of DOS 2's characters, which passes over the deleted entries, the
  * FREE SECTORS line, and what a RAM disk with nothing on it says (an
  * unformatted D8: answers with 34 lines of noise).  The mask is applied
@@ -50,6 +54,7 @@
 #include "aes/aes.h"
 #include "sys/app.h"
 #include "sys/cio.h"
+#include "sys/dos.h"
 #include "sys/farmem.h"
 #include "fsel_rsc.h"
 
@@ -66,6 +71,8 @@
 #define PATHSEP     '\\'
 #define DRIVESEP    ':'
 #define DIRLINE     17                  /* DOS 2's directory record, less its EOL */
+#define FS_FILE     ' '                 /* the flag: the donor's */
+#define FS_FOLDER   0x07
 
 WORD gl_drvbits = 0x00FF;               /* drives A..H: buttons enabled */
 
@@ -161,32 +168,6 @@ static WORD inf_what(OBJECT *tree, WORD ok)
     return -1;
 }
 
-/* The name against the pattern, name and extension in turn, '*' and '?'
- * as on the ST. */
-static WORD wildcmp(const char *pattern, const char *filename)
-{
-    WORD i;
-
-    for (i = 0; i < 2; i++) {
-        for (; *filename && *filename != '.'; filename++) {
-            if (*pattern == '*')
-                continue;
-            if (*pattern == '?' || *pattern == *filename) {
-                pattern++;
-                continue;
-            }
-            return FALSE;
-        }
-        while (*pattern == '*' || *pattern == '?')
-            pattern++;
-        if (*pattern == '.')
-            pattern++;
-        if (*filename == '.')
-            filename++;
-    }
-    return *pattern == *filename;
-}
-
 /* 0..7 for A..H at the front of the path, else -1. */
 static WORD extract_drive_number(const char *path)
 {
@@ -273,56 +254,25 @@ static WORD fs_comp(WORD i, WORD j)
     return (WORD)strcmp(a, b);
 }
 
-static void fs_add(WORD thefile, const char *fname)
+static void fs_add(WORD thefile, char flag, const char *fname)
 {
     uint32_t slot;
 
     g_fslist[thefile] = thefile;
     slot = fs_slot(thefile);
-    far_write8(slot, ' ');              /* a file: DOS 2 has no folders */
+    far_write8(slot, (uint8_t)flag);
     far_strput(slot + 1, fname, LEN_FSNAME - 1);
 }
 
-/* A directory field -- the name's 8 columns or the extension's 3 -- less
- * its trailing spaces: its length, or -1 when a character in it is not
- * one DOS 2 puts in a name. */
-static WORD fs_field(const char *p, WORD n, char *out)
+/* A DOS 2 directory line into NAME.EXT and its flag -- FS_FILE, or
+ * FS_FOLDER for a subdirectory where the DOS has them -- or 0 for a
+ * line that is not one.  The parsing is the DOS seam's (dos_dirline),
+ * shared with Fsfirst so that the selector and GEMDOS list alike. */
+static char fs_entry(const char *line, WORD got, char *fname)
 {
-    WORD k;
+    uint8_t e = dos_dirline(line, got, fname, 0) & DOS_ENT_KIND;
 
-    while (n > 0 && p[n - 1] == ' ')
-        n--;
-    for (k = 0; k < n; k++) {
-        WORD c = (uint8_t)p[k];         /* a WORD: B8, tools/ccbug */
-        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-              || c == '_' || c == '@'))
-            return -1;
-        out[k] = (char)c;
-    }
-    out[n] = 0;
-    return n;
-}
-
-/* A DOS 2 directory line into NAME.EXT, or FALSE for a line that is not
- * one: the deleted entry's dashes, the FREE SECTORS line, noise. */
-static WORD fs_entry(const char *line, WORD got, char *fname)
-{
-    char ext[4];
-    WORD n, e;
-
-    if (got < DIRLINE || line[1] != ' ' || line[13] != ' ')
-        return FALSE;
-    n = fs_field(line + 2, 8, fname);
-    if (n <= 0 || !(fname[0] >= 'A' && fname[0] <= 'Z'))
-        return FALSE;
-    e = fs_field(line + 10, 3, ext);
-    if (e < 0)
-        return FALSE;
-    if (e) {
-        fname[n] = '.';
-        strcpy(fname + n + 1, ext);
-    }
-    return TRUE;
+    return e == DOS_ENT_DIR ? FS_FOLDER : e ? FS_FILE : 0;
 }
 
 /* Read the directory the path names into the far slots, those matching
@@ -330,7 +280,7 @@ static WORD fs_entry(const char *line, WORD got, char *fname)
 static WORD fs_active(char *ppath, const char *pspec, WORD *pcount)
 {
     char allpath[LEN_FSPATH], name[CIO_NAME_MAX + 1];
-    char line[DIRLINE + 8], entry[LEN_FSNAME];
+    char line[DIRLINE + 8], entry[LEN_FSNAME], flag;
     char *fname;
     WORD thefile = 0, i, j, gap;
     int16_t fd;
@@ -350,8 +300,9 @@ static WORD fs_active(char *ppath, const char *pspec, WORD *pcount)
         st = cio_getrec(fd, line, sizeof line, &got);
         if (st != CIO_OK && st != CIO_OK_EOF)
             break;
-        if (fs_entry(line, (WORD)got, entry) && wildcmp(pspec, entry))
-            fs_add(thefile++, entry);
+        flag = fs_entry(line, (WORD)got, entry);
+        if (flag == FS_FOLDER || (flag && dos_wildcmp(pspec, entry)))
+            fs_add(thefile++, flag, entry);
         if (st == CIO_OK_EOF)
             break;
     }

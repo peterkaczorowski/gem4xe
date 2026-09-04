@@ -2,6 +2,7 @@
 #include <string.h>
 #include "sys/app.h"
 #include "sys/abi.h"
+#include "sys/gemdos.h"
 #include "sys/farmem.h"
 
 /* The pool's bounds, from the linker (src/sys/apppool.s). */
@@ -148,6 +149,7 @@ int16_t app_exec(const APP *app)
 
 void app_free(const APP *app)
 {
+    gemdos_release();               /* its handles, searches and DTA */
     pool_release(app->pool_mark);
-    farmem.brk = app->far_mark;
+    farmem.brk = app->far_mark;     /* and everything it Malloc'd */
 }

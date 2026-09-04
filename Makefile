@@ -35,10 +35,18 @@ CFLAGS    = --code-model=large --data-model=small -O2
 LDFLAGS   = --rtattr exit=simplified --override _Div16 --override _Mod16
 
 SRC_DOS  ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['dos']['sd_dos2'])" 2>/dev/null)
+# SpartaDOS 3.2 boot disk and the SpartaDOS X cartridge, [spartados] in
+# fixtures.toml -- the SpartaGEM gate (docs/phase13.md) boots the one and
+# then the other, with the same program.
+SRC_SP32 ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['spartados']['disk_32'])" 2>/dev/null)
+SRC_SDX  ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['spartados']['sdx_cart'])" 2>/dev/null)
+# An Ultimate 1MB flash image carrying SpartaDOS X (test-m14u, test-m15u):
+# needs the patched emulator's --u1mbrom (tools/altirra/), ALTIRRASDL=...
+SRC_U1MB ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['u1mb']['flash'])" 2>/dev/null)
 
 HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
 M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o
 
 # A gem4xe application: its own C startup and bindings (src/app), linked
 # against nothing of gem4xe's, on the application's own linker rules.
@@ -60,7 +68,7 @@ build/vbxe.o: src/vbxe/vbxe.c src/vbxe/vbxe.h
 	$(CC) $(CFLAGS) -I src/vbxe -o $@ $<
 
 build/m2_vbxe.o: src/m2_vbxe.c src/vbxe/vbxe.h
-build/m3_vdi.o:  src/m3_vdi.c  src/vbxe/vbxe.h src/vdi/vdi.h src/sys/irq.h src/sys/abi.h src/sys/app.h src/sys/cio.h
+build/m3_vdi.o:  src/m3_vdi.c  src/vbxe/vbxe.h src/vdi/vdi.h src/sys/irq.h src/sys/abi.h src/sys/app.h src/sys/cio.h src/sys/dos.h
 
 build/vdi.o: src/vdi/vdi.c src/vdi/vdi.h src/vdi/pointer.h src/vbxe/vbxe.h src/sys/irq.h
 	@mkdir -p build
@@ -131,7 +139,7 @@ build/irqs.o: src/sys/irq.s
 # The application ABI: the COP handler and the far-call trampoline in
 # assembly, the parameter-block copy-in/out and the AES's crysbind in C,
 # then the loader and the linker-reported bounds of its bank-$00 pool.
-build/abi.o: src/sys/abi.c src/sys/abi.h src/vdi/vdi.h src/aes/aes.h
+build/abi.o: src/sys/abi.c src/sys/abi.h src/vdi/vdi.h src/aes/aes.h src/sys/gemdos.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -139,7 +147,7 @@ build/abis.o: src/sys/abi.s
 	@mkdir -p build
 	$(AS) -o $@ $<
 
-build/app.o: src/sys/app.c src/sys/app.h src/sys/abi.h src/sys/farmem.h
+build/app.o: src/sys/app.c src/sys/app.h src/sys/abi.h src/sys/farmem.h src/sys/gemdos.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -156,6 +164,16 @@ build/cio.o: src/sys/cio.c src/sys/cio.h src/sys/irq.h
 build/cios.o: src/sys/cio.s
 	@mkdir -p build
 	$(AS) -o $@ $<
+
+# The DOS seam: which DOS booted, its path syntax, its listing's marks.
+build/dos.o: src/sys/dos.c src/sys/dos.h src/sys/cio.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+# GEMDOS for the applications: the ST's trap #1 on CIO, through the seam.
+build/gemdos.o: src/sys/gemdos.c src/sys/gemdos.h src/sys/dos.h src/sys/cio.h src/sys/farmem.h src/sys/app.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
 
 # The file layer proper: the resource loader and the shell library.
 build/rsrc.o: src/aes/rsrc.c src/aes/aes.h src/sys/app.h src/sys/cio.h
@@ -175,10 +193,10 @@ build/fsel_rsc.c build/fsel_rsc.h: tools/fselrsc.py tools/rsc.py tools/aesref.py
 	python3 tools/fselrsc.py build/fsel_rsc.c build/fsel_rsc.h
 build/fsel_rsc.o: build/fsel_rsc.c
 	$(CC) $(CFLAGS) -o $@ $<
-build/fsel.o: src/aes/fsel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/farmem.h build/fsel_rsc.h
+build/fsel.o: src/aes/fsel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/dos.h src/sys/farmem.h build/fsel_rsc.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -I build -o $@ $<
-build/shel.o: src/aes/shel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/farmem.h
+build/shel.o: src/aes/shel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/dos.h src/sys/farmem.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -291,6 +309,15 @@ build/m3-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt b
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM $(DISK_DENSITY) $(DISK_FILES)
 
+# The SpartaDOS disk: a fresh SDFS volume booting the 3.2 fixture's DOS,
+# the same files as the DOS 2 disk and a directory tree for the selector
+# (tools/mkspdisk.py).  1040 sectors: SpartaDOS loads M3.COM's 91 KB from
+# anywhere, where DOS 2.5 could not go past sector 720.
+build/m14-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc tools/mkspdisk.py tools/atr.py
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(DISK_FILES)
+
 # The same program linked with bank $01 cut down to its top 16 KB, so that
 # the far image is forced to spill into bank $02 today rather than on the day
 # the code grows past 64 KB.  test-m6 boots this one as well as the real
@@ -318,7 +345,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d
 
 # The cc65816 code generation bugs gem4xe works around, run in the vendor's
 # own simulator: fails only if a workaround shape has stopped compiling
@@ -394,6 +421,43 @@ test-m12: build/m3-boot.atr build/m12-d2.atr
 test-m13: build/m3-boot.atr
 	python3 tests/emu/m13_alert.py
 
+# SpartaGEM: the same program on a SpartaDOS disk, loaded by SpartaDOS
+# 3.2g from it (test-m14) and by SpartaDOS X 4.50 from the vendor's
+# emulator cartridge with the disk as D1: (test-m14x).  The DOS seam,
+# CIO in the directory tree and the file selector walking it, against
+# the image and the reference.
+test-m14: build/m14-boot.atr
+	python3 tests/emu/m14_sparta.py
+
+test-m14x: build/m14-boot.atr
+	@test -n "$(SRC_SDX)" || { echo "no SDX fixture: set [spartados].sdx_cart in fixtures.toml"; exit 1; }
+	python3 tests/emu/m14_sparta.py --sdx="$(SRC_SDX)"
+
+# ... and SpartaDOS X from an Ultimate 1MB flash image, U1MB switched on
+# (test-m14u, test-m15u): the machine as it is actually built.  Not in
+# `make test`: it needs the patched emulator and a saved BIOS profile.
+test-m14u: build/m14-boot.atr
+	@test -n "$(SRC_U1MB)" || { echo "no U1MB fixture: set [u1mb].flash in fixtures.toml"; exit 1; }
+	python3 tests/emu/m14_sparta.py --u1mb="$(SRC_U1MB)"
+
+# GEMDOS on CIO: the ST's trap #1 as a call block, answered from CIO and
+# the DOS seam -- searches, paths, files, far memory, errors -- against the
+# image, on SpartaDOS 3.2g (test-m15), SpartaDOS X (test-m15x) and DOS 2
+# (test-m15d), whose flat directory answers the tree calls with EPTHNF.
+test-m15: build/m14-boot.atr
+	python3 tests/emu/m15_gdos.py
+
+test-m15x: build/m14-boot.atr
+	@test -n "$(SRC_SDX)" || { echo "no SDX fixture: set [spartados].sdx_cart in fixtures.toml"; exit 1; }
+	python3 tests/emu/m15_gdos.py --sdx="$(SRC_SDX)"
+
+test-m15u: build/m14-boot.atr
+	@test -n "$(SRC_U1MB)" || { echo "no U1MB fixture: set [u1mb].flash in fixtures.toml"; exit 1; }
+	python3 tests/emu/m15_gdos.py --u1mb="$(SRC_U1MB)"
+
+test-m15d: build/m3-boot.atr build/m12-d2.atr
+	python3 tests/emu/m15_gdos.py --dos2
+
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.
 demo: build/m3-boot.atr
@@ -426,4 +490,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 demo movie bench emu-stop clean
+.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d demo movie bench emu-stop clean

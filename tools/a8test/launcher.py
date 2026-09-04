@@ -38,8 +38,14 @@ from a8test.bridge import Bridge, BridgeError, find_token  # noqa: E402
 ALTIRRA = os.environ.get("ALTIRRASDL", "AltirraSDL")
 XLROM = os.environ.get("ATARIXL_ROM", "/opt/altirra/roms/ATARIXL.ROM")
 
+# --noultimate1mb: the emulator saves its profile to ~/.config/altirra on
+# exit, U1MB state included, so a run that switched it on (--u1mbrom) would
+# leave it on for every run after.  Pinned off here; an extra_args
+# --u1mbrom comes later on the line and wins.  Only the patched emulator
+# (tools/altirra/) knows the switch; the installed one logs it and goes on.
 BASE_ARGS = ["--pal", "--hardware", "800xl", "--kernel", "xl", "--nobasic",
-             "--diskemu", "fastestpossible", "--siopatch", "--nofastboot"]
+             "--diskemu", "fastestpossible", "--siopatch", "--nofastboot",
+             "--noultimate1mb"]
 VBXE_DEVICE = "vbxe,version=126,alt_page=false,shared_mem=false"
 RAPIDUS_DEVICE = "rapidus"
 

@@ -1,0 +1,516 @@
+diff --git a/src/AltirraSDL/AltirraBridge/docs/COMMANDS.md b/src/AltirraSDL/AltirraBridge/docs/COMMANDS.md
+index 63a2ccc..1993cdb 100644
+--- a/src/AltirraSDL/AltirraBridge/docs/COMMANDS.md
++++ b/src/AltirraSDL/AltirraBridge/docs/COMMANDS.md
+@@ -8,7 +8,7 @@ examples. For full request/response schemas and field semantics see
+ |--------------|----------|
+ | [Lifecycle](#lifecycle)               | `HELLO`, `PING`, `PAUSE`, `RESUME`, `FRAME`, `QUIT` |
+ | [State read](#state-read)             | `REGS`, `PEEK`, `PEEK16`, `ANTIC`, `GTIA`, `POKEY`, `PIA`, `DLIST`, `HWSTATE`, `PALETTE`, `PALETTE_LOAD_ACT`, `PALETTE_RESET` |
+-| [State write & input](#state-write--input) | `POKE`, `POKE16`, `HWPOKE`, `MEMDUMP`, `MEMLOAD`, `JOY`, `KEY`, `CONSOL`, `BOOT`, `BOOT_BARE`, `MOUNT`, `COLD_RESET`, `WARM_RESET`, `CONFIG`, `DEVICE_LIST`, `DEVICE_GET`, `DEVICE_SET`, `DEVICE_REMOVE`, `DEVICE_CLEAR` |
++| [State write & input](#state-write--input) | `POKE`, `POKE16`, `HWPOKE`, `MEMDUMP`, `MEMLOAD`, `JOY`, `KEY`, `KEYRAW`, `CONSOL`, `BOOT`, `BOOT_BARE`, `MOUNT`, `COLD_RESET`, `WARM_RESET`, `CONFIG`, `DEVICE_LIST`, `DEVICE_GET`, `DEVICE_SET`, `DEVICE_REMOVE`, `DEVICE_CLEAR` |
+ | [Save states](#save-states)           | `STATE_SAVE`, `STATE_LOAD`, `STATE_LIST`, `STATE_DROP` |
+ | [Rendering](#rendering)               | `SCREENSHOT`, `RAWSCREEN`, `RENDER_FRAME` |
+ | [Debugger introspection](#debugger-introspection) | `DISASM`, `HISTORY`, `EVAL`, `CALLSTACK`, `MEMMAP`, `BANK_INFO`, `CART_INFO`, `PMG`, `AUDIO_STATE` |
+@@ -68,6 +68,7 @@ a.memload(0x4000, open("loader.bin", "rb").read())
+ data = a.memdump(0x4000, 0x100)
+ a.joy(0, "upright", fire=True)
+ a.key("A", shift=True)                  # types capital A
++a.key_raw("ESC"); a.frame(6); a.key_raw("ESC", down=False)   # matrix, for IRQ-off pollers
+ a.consol(start=True)
+ a.boot("/path/to/game.xex"); a.frame(240)   # wait for OS boot + XEX load
+ ```
+@@ -78,6 +79,7 @@ atb_memload(c, 0x4000, loader_bytes, loader_len);
+ unsigned char dump[256]; atb_memdump(c, 0x4000, 256, dump);
+ atb_joy(c, 0, "upright", 1);
+ atb_key(c, "A", 1, 0);
++atb_key_raw(c, "ESC", 1, 0, 0); atb_frame(c, 6); atb_key_raw(c, "ESC", 0, 0, 0);
+ atb_consol(c, 1, 0, 0);
+ atb_boot(c, "/path/to/game.xex"); atb_frame(c, 120);
+ ```
+@@ -192,6 +194,8 @@ Supported keys:
+ | `randmem`, `randdelay` | `on`, `off`                                           | no          |
+ | `diskemu`     | `generic`, `fastest`, `810`, `1050`, `xf551`, etc.              | no          |
+ | `debugbrkrun` | `true`, `false`, `on`, `off`                                    | no          |
++| `u1mb`        | `true`, `false`, `on`, `off`                                    | yes; forces `1088K` |
++| `u1mbrom`     | path, or a registered U1MB firmware's name/id                   | yes; registers the file, makes it the default flash, enables U1MB |
+ 
+ Device commands:
+ 
+diff --git a/src/AltirraSDL/AltirraBridge/docs/PROTOCOL.md b/src/AltirraSDL/AltirraBridge/docs/PROTOCOL.md
+index 2d4d3e5..4863c7f 100644
+--- a/src/AltirraSDL/AltirraBridge/docs/PROTOCOL.md
++++ b/src/AltirraSDL/AltirraBridge/docs/PROTOCOL.md
+@@ -516,16 +516,40 @@ from the bridge's key table:
+ - Special: `RETURN` / `ENTER`, `SPACE`, `ESC` / `ESCAPE`,
+   `TAB`, `BACKSPACE` / `DELETE` / `DEL`, `MINUS`, `EQUALS`,
+   `COMMA`, `PERIOD`, `SLASH`, `SEMICOLON`, `CAPS` / `CAPSLOCK`,
+-  `HELP` (XL/XE Help key).
++  `HELP` (XL/XE Help key), `PLUS`, `ASTERISK` / `STAR`, `LESS`,
++  `GREATER`, `INVERSE` / `ATARI`, `F1`..`F4` (1200XL).
++- Cursor keys: `LEFT`, `RIGHT`, `UP`, `DOWN` — CONTROL + `+ * - =`,
++  carried as the modified KBCODE (`$86 $87 $8E $8F`).
+ 
+ Optional words `shift` and/or `ctrl` set the corresponding KBCODE
+-modifier bits (POKEY KBCODE bit 7 = shift, bit 6 = ctrl). The
++modifier bits (POKEY KBCODE bit 6 = shift, bit 7 = ctrl). The
+ underlying scan code values come straight from
+ `src/AltirraSDL/source/input/input_sdl3.cpp`'s SDL3 keyboard
+ mapping table.
+ 
+ ```json
+-{"ok":true,"name":"a","kbcode":"$bf"}
++{"ok":true,"name":"a","kbcode":"$7f"}
++```
++
++(`KEY a shift`: `$3F` with bit 6, a capital A.)
++
++#### `KEYRAW name [down|up] [shift] [ctrl]`
++
++Hold a key down in POKEY's key matrix (`down`, the default) or
++release it (`up`), the way the physical keyboard does. `KEY` goes
++through the cooked queue, which waits for the keyboard IRQ to be
++enabled and acknowledged, so a program that polls `SKSTAT`/`KBCODE`
++with the IRQ off (a firmware setup screen such as the U1MB BIOS)
++never sees it. The matrix path drives the keyboard scan emulation
++instead: `KBCODE`, `SKSTAT` bit 2 and the IRQ line all follow, and
++the key stays down until released. `shift`/`ctrl` press or release
++the modifier keys alongside. `KEYRAW all up` releases every key and
++modifier. Same key names as `KEY`; a name that stands for a
++modified key (`LEFT`, `RIGHT`, `UP`, `DOWN` are CONTROL + `+ * - =`
++on an XL) holds the modifier with it.
++
++```json
++{"ok":true,"name":"esc","kbcode":"$1c","down":true}
+ ```
+ 
+ #### `CONSOL [start] [select] [option]`
+@@ -767,6 +791,8 @@ Set a config key. Returns the full config state after the set.
+ | `kernel`      | `default`, `lle`, `llexl`, `hle`, `osa`, `osb`, `xl`, path/id   | Triggers cold reset         |
+ | `basicrom`    | `default`, `atbasic`, `reva`, `revb`, `revc`, path/id           | Triggers cold reset         |
+ | `debugbrkrun` | `true`, `false`, `on`, `off`, `1`, `0`                          | Break at EXE run address    |
++| `u1mb`        | `true`, `false`, `on`, `off`, `1`, `0`                          | Ultimate1MB; forces `1088K`; cold reset |
++| `u1mbrom`     | path, or a registered U1MB firmware's name/id                  | Registers the file, makes it the default U1MB flash, enables U1MB; cold reset |
+ 
+ Memory modes: `8K`, `16K`, `24K`, `32K`, `40K`, `48K`, `52K`, `64K`,
+ `128K`, `256K`, `320K`, `320K_Compy`, `576K`, `576K_Compy`, `1088K`.
+diff --git a/src/AltirraSDL/AltirraBridge/sdk/c/altirra_bridge.c b/src/AltirraSDL/AltirraBridge/sdk/c/altirra_bridge.c
+index 609f783..57da49f 100644
+--- a/src/AltirraSDL/AltirraBridge/sdk/c/altirra_bridge.c
++++ b/src/AltirraSDL/AltirraBridge/sdk/c/altirra_bridge.c
+@@ -821,6 +821,17 @@ int atb_key(atb_client_t* c, const char* name, int shift, int ctrl) {
+ 	return atb_simple_cmd(c, cmd);
+ }
+ 
++int atb_key_raw(atb_client_t* c, const char* name, int down,
++                int shift, int ctrl) {
++	if (!name) return ATB_ERR_BAD_ARG;
++	char cmd[96];
++	int n = snprintf(cmd, sizeof cmd, "KEYRAW %s %s%s%s",
++		name, down ? "down" : "up",
++		shift ? " shift" : "", ctrl ? " ctrl" : "");
++	if (n <= 0 || (size_t)n >= sizeof cmd) return ATB_ERR_BAD_ARG;
++	return atb_simple_cmd(c, cmd);
++}
++
+ int atb_consol(atb_client_t* c, int start, int select, int option) {
+ 	char cmd[64];
+ 	int n = snprintf(cmd, sizeof cmd, "CONSOL%s%s%s",
+diff --git a/src/AltirraSDL/AltirraBridge/sdk/c/altirra_bridge.h b/src/AltirraSDL/AltirraBridge/sdk/c/altirra_bridge.h
+index 4d2c451..167159e 100644
+--- a/src/AltirraSDL/AltirraBridge/sdk/c/altirra_bridge.h
++++ b/src/AltirraSDL/AltirraBridge/sdk/c/altirra_bridge.h
+@@ -274,6 +274,17 @@ int atb_joy(atb_client_t* c, unsigned int port,
+  */
+ int atb_key(atb_client_t* c, const char* name, int shift, int ctrl);
+ 
++/*
++ * Hold a key down in POKEY's key matrix (`down` non-zero) or release
++ * it, the way the physical keyboard does -- for programs that poll
++ * SKSTAT/KBCODE with the keyboard IRQ off, which never see a queued
++ * atb_key(). The key stays down until released. `shift`/`ctrl`
++ * hold or release the modifier keys alongside; name "all" with
++ * `down` zero releases every key and modifier.
++ */
++int atb_key_raw(atb_client_t* c, const char* name, int down,
++                int shift, int ctrl);
++
+ /*
+  * Set console switch state (active-low). Each non-zero argument
+  * holds the corresponding switch down; zero releases it. Pass all
+diff --git a/src/AltirraSDL/AltirraBridge/sdk/python/altirra_bridge/client.py b/src/AltirraSDL/AltirraBridge/sdk/python/altirra_bridge/client.py
+index 29678f4..f9307b1 100644
+--- a/src/AltirraSDL/AltirraBridge/sdk/python/altirra_bridge/client.py
++++ b/src/AltirraSDL/AltirraBridge/sdk/python/altirra_bridge/client.py
+@@ -469,6 +469,24 @@ class AltirraBridge:
+         if ctrl:  cmd += " ctrl"
+         return self._cmd_ok(cmd)
+ 
++    def key_raw(self, name: str, down: bool = True,
++                shift: bool = False, ctrl: bool = False) -> dict:
++        """Hold a key down in POKEY's key matrix (``down=True``) or
++        release it, the way the physical keyboard does.
++
++        ``key()`` goes through the cooked queue, which waits for the
++        keyboard IRQ to be enabled and acknowledged; a program that
++        polls SKSTAT/KBCODE with the IRQ off (a firmware setup screen)
++        never sees it. The matrix path drives the scan emulation
++        instead, and the key stays down until released. ``shift`` and
++        ``ctrl`` hold or release the modifier keys alongside.
++        ``key_raw("all", down=False)`` releases every key and modifier.
++        """
++        cmd = f"KEYRAW {name} " + ("down" if down else "up")
++        if shift: cmd += " shift"
++        if ctrl:  cmd += " ctrl"
++        return self._cmd_ok(cmd)
++
+     def consol(self, start: bool = False, select: bool = False,
+                option: bool = False) -> dict:
+         """Hold the named console switches down (active-low). Any
+diff --git a/src/AltirraSDL/source/app/commandline_sdl3.cpp b/src/AltirraSDL/source/app/commandline_sdl3.cpp
+index c99c273..21d2650 100644
+--- a/src/AltirraSDL/source/app/commandline_sdl3.cpp
++++ b/src/AltirraSDL/source/app/commandline_sdl3.cpp
+@@ -316,7 +316,7 @@ bool ATProcessCommandLineSDL3(int argc, char **argv) {
+ 		// ---- Help ----
+ 		if (MatchSwitch(sw, "help") || MatchSwitch(sw, "?")) {
+ 			consumed[i] = true;
+-			LOG_INFO("CmdLine", "Usage: AltirraSDL [options] [image-file ...]\n\n" "Display:  --f  --ntsc --pal --secam --ntsc50 --pal60\n" "          --artifact <mode>  --vsync/--novsync\n" "          --renderer <sdlgpu|opengl|sdlrenderer>\n" "Hardware: --hardware <mode>  --kernel <name>  --memsize <size>\n" "          --stereo/--nostereo  --basic/--nobasic\n" "Media:    --cart/--disk/--run/--runbas/--tape <file>\n" "          --bootro/--bootrw/--bootvrw/--bootvrwsafe\n" "Devices:  --adddevice/--setdevice/--removedevice <spec>\n" "          --cleardevices  --pclink <mode,path>  --hdpath <path>\n" "Online:   --join-session <id>  --join-code <code>\n" "          --host-session <title>\n" "Debugger: --debug  --debugcmd <cmd>  --autotest\n" "Other:    --type <text>  --rawkeys  --diskemu <mode>\n\n" "Use Help > Command-Line Help in the menu for full details.");
++			LOG_INFO("CmdLine", "Usage: AltirraSDL [options] [image-file ...]\n\n" "Display:  --f  --ntsc --pal --secam --ntsc50 --pal60\n" "          --artifact <mode>  --vsync/--novsync\n" "          --renderer <sdlgpu|opengl|sdlrenderer>\n" "Hardware: --hardware <mode>  --kernel <name>  --memsize <size>\n" "          --stereo/--nostereo  --basic/--nobasic\n" "          --ultimate1mb/--noultimate1mb  --u1mbrom <file>\n" "Media:    --cart/--disk/--run/--runbas/--tape <file>\n" "          --bootro/--bootrw/--bootvrw/--bootvrwsafe\n" "Devices:  --adddevice/--setdevice/--removedevice <spec>\n" "          --cleardevices  --pclink <mode,path>  --hdpath <path>\n" "Online:   --join-session <id>  --join-code <code>\n" "          --host-session <title>\n" "Debugger: --debug  --debugcmd <cmd>  --autotest\n" "Other:    --type <text>  --rawkeys  --diskemu <mode>\n\n" "Use Help > Command-Line Help in the menu for full details.");
+ 			continue;
+ 		}
+ 
+@@ -585,6 +585,65 @@ bool ATProcessCommandLineSDL3(int argc, char **argv) {
+ 			continue;
+ 		}
+ 
++		// ---- Ultimate1MB ----
++		// The core has had the emulation all along (ATUltimate1MBEmulator);
++		// only the ImGui checkbox and System.ToggleUltimate1MB reached it,
++		// so a headless run could not have it.  Enabling forces 1088K, as
++		// the simulator requires, and needs the cold reset every other
++		// system change here gets.
++		if (MatchSwitch(sw, "ultimate1mb") || MatchSwitch(sw, "u1mb")) {
++			consumed[i] = true;
++			if (!g_sim.IsUltimate1MBEnabled()) {
++				g_sim.SetUltimate1MBEnabled(true);
++				coldResetPending = true;
++			}
++			continue;
++		}
++		if (MatchSwitch(sw, "noultimate1mb") || MatchSwitch(sw, "nou1mb")) {
++			consumed[i] = true;
++			if (g_sim.IsUltimate1MBEnabled()) {
++				g_sim.SetUltimate1MBEnabled(false);
++				coldResetPending = true;
++			}
++			continue;
++		}
++
++		// A U1MB flash image by path.  This build embeds no U1MB recovery
++		// BIOS (oshelper_sdl3.cpp's resource table has none), so with
++		// nothing registered the flash is blank and an enabled U1MB has
++		// nothing to boot.  The manager keys firmware by a hash of the
++		// path, so registering here is idempotent; it becomes the default
++		// U1MB firmware and the U1MB is switched on with it.
++		if ((val = ConsumeArg(argc, argv, i, consumed, "u1mbrom")) != nullptr) {
++			const VDStringW wval = VDTextU8ToW(VDStringSpanA(val));
++			if (!VDDoesPathExist(wval.c_str())) {
++				LOG_INFO("CmdLine", "U1MB firmware not found: %s", val);
++				continue;
++			}
++			ATFirmwareManager *const fwm = g_sim.GetFirmwareManager();
++			uint64 id = fwm->GetFirmwareByRefString(wval.c_str(),
++				[](ATFirmwareType type) { return type == kATFirmwareType_U1MB; });
++			if (!id) {
++				ATFirmwareInfo info{};
++				info.mPath        = wval;
++				info.mName        = VDFileSplitPathRight(wval);
++				info.mType        = kATFirmwareType_U1MB;
++				info.mbVisible    = true;
++				info.mbAutoselect = false;
++				info.mFlags       = kATFirmwareFlags_None;
++				info.mId          = ATGetFirmwareIdFromPath(wval.c_str());
++				fwm->AddFirmware(info);
++				id = info.mId;
++			}
++			fwm->SetDefaultFirmware(kATFirmwareType_U1MB, id);
++			if (g_sim.IsUltimate1MBEnabled())
++				g_sim.LoadROMs();
++			else
++				g_sim.SetUltimate1MBEnabled(true);
++			coldResetPending = true;
++			continue;
++		}
++
+ 		// ---- Online Play deep-link ----
+ 		// `--join-session <id>` and `--join-code <code>` arrive from:
+ 		//   - the WASM page reading `?s=<id>` (and optional `?code=<c>`)
+diff --git a/src/AltirraSDL/source/bridge/bridge_commands_write.cpp b/src/AltirraSDL/source/bridge/bridge_commands_write.cpp
+index 32eb848..d0eb75e 100644
+--- a/src/AltirraSDL/source/bridge/bridge_commands_write.cpp
++++ b/src/AltirraSDL/source/bridge/bridge_commands_write.cpp
+@@ -762,6 +762,14 @@ const KeyMapEntry kKeyMap[] = {
+ 	{ "SEMICOLON", 0x02 },
+ 	{ "CAPS",   0x3C }, { "CAPSLOCK", 0x3C },
+ 	{ "HELP",   0x11 },
++	{ "PLUS",   0x06 }, { "ASTERISK", 0x07 }, { "STAR", 0x07 },
++	{ "LESS",   0x36 }, { "GREATER",  0x37 },
++	{ "INVERSE", 0x27 }, { "ATARI",   0x27 },
++	{ "F1",     0x03 }, { "F2", 0x04 }, { "F3", 0x13 }, { "F4", 0x14 },
++	// The XL's cursor keys are CONTROL + the arrow-marked keys; these
++	// carry the modifier in bit 7, which KEY passes through as a
++	// KBCODE and KEYRAW turns back into the CONTROL key.
++	{ "LEFT",   0x86 }, { "RIGHT", 0x87 }, { "UP", 0x8E }, { "DOWN", 0x8F },
+ };
+ 
+ bool LookupKey(const std::string& name, uint8_t& kbcode) {
+@@ -1031,6 +1039,42 @@ bool ResolveBasicRomArg(ATSimulator& sim, const std::string& raw,
+ 	return true;
+ }
+ 
++// Resolve a `CONFIG u1mbrom <value>` value to a firmware id.
++//
++// Accepts a registered U1MB firmware by ref string (name, filename or
++// path) or a filesystem path, registered on the fly as kernel and
++// basicrom are.  This build embeds no U1MB recovery BIOS, so a U1MB
++// with nothing registered has a blank flash and nothing to boot; this
++// is the way to give it one headlessly.
++bool ResolveU1MBRomArg(ATSimulator& sim, const std::string& raw,
++                       uint64_t& out, std::string& err) {
++	out = 0;
++
++	ATFirmwareManager* fwm = sim.GetFirmwareManager();
++	if (!fwm) { err = "firmware manager unavailable"; return false; }
++
++	const VDStringW wraw = VDTextU8ToW(VDStringSpanA(raw.c_str()));
++	uint64 id = fwm->GetFirmwareByRefString(wraw.c_str(),
++		[](ATFirmwareType type) { return type == kATFirmwareType_U1MB; });
++	if (id) { out = id; return true; }
++
++	if (!VDDoesPathExist(wraw.c_str())) {
++		err = "U1MB firmware not found: " + raw;
++		return false;
++	}
++	ATFirmwareInfo info{};
++	info.mPath        = wraw;
++	info.mName        = VDFileSplitPathRight(wraw);
++	info.mType        = kATFirmwareType_U1MB;
++	info.mbVisible    = false;
++	info.mbAutoselect = false;
++	info.mFlags       = kATFirmwareFlags_None;
++	info.mId          = ATGetFirmwareIdFromPath(wraw.c_str());
++	fwm->AddFirmware(info);
++	out = info.mId;
++	return true;
++}
++
+ std::string BuildConfigPayload(ATSimulator& sim) {
+ 	IATDebugger* dbg = ATGetDebugger();
+ 	std::string payload;
+@@ -1046,6 +1090,11 @@ std::string BuildConfigPayload(ATSimulator& sim) {
+ 	payload += "\"fastboot\":";
+ 	payload += (sim.IsFastBootEnabled() ? "true" : "false");
+ 	payload += ',';
++	payload += "\"u1mb\":";
++	payload += (sim.IsUltimate1MBEnabled() ? "true" : "false");
++	payload += ',';
++	if (ATFirmwareManager* fwm = sim.GetFirmwareManager())
++		payload += "\"u1mbrom_id\":" + Hex64(fwm->GetCompatibleFirmware(kATFirmwareType_U1MB)) + ",";
+ 	payload += "\"fppatch\":";
+ 	payload += (sim.IsFPPatchEnabled() ? "true" : "false");
+ 	payload += ',';
+@@ -1396,11 +1445,12 @@ std::string CmdKey(ATSimulator& sim, const std::vector<std::string>& tokens) {
+ 		else return JsonError("KEY: unexpected modifier");
+ 	}
+ 
+-	// KBCODE bit 6 = control, bit 7 = shift (Atari keyboard scan
+-	// code convention, used by POKEY's KBCODE register at $D209).
++	// KBCODE bit 6 = shift, bit 7 = control, as POKEY's keyboard scan
++	// builds the register ($D209) and as the OS's key table is laid out
++	// (KEYDEF: plain, shift, control).
+ 	uint8_t code = kb;
+-	if (ctrl)  code |= 0x40;
+-	if (shift) code |= 0x80;
++	if (shift) code |= 0x40;
++	if (ctrl)  code |= 0x80;
+ 
+ 	// useCooldown=true → respects key repeat timing.
+ 	// flushQueue=false → don't drop pending keystrokes.
+@@ -1414,6 +1464,72 @@ std::string CmdKey(ATSimulator& sim, const std::vector<std::string>& tokens) {
+ 	return JsonOk(payload);
+ }
+ 
++// ---------------------------------------------------------------------------
++// KEYRAW name [down|up] [shift] [ctrl]
++//
++// Hold a key down in POKEY's key matrix, or release it, the way the
++// keyboard does.  KEY goes through the cooked queue, which waits for the
++// keyboard IRQ to be enabled and acknowledged -- so a program that polls
++// SKSTAT/KBCODE with the IRQ off (the U1MB BIOS, most firmware setup
++// screens) never sees a KEY.  The matrix path feeds the scan emulation
++// instead: KBCODE, SKSTAT bit 2 and the IRQ line all follow, and the key
++// stays down until it is released here.  `KEYRAW all up` releases
++// everything, modifiers included.
++// ---------------------------------------------------------------------------
++
++std::string CmdKeyRaw(ATSimulator& sim, const std::vector<std::string>& tokens) {
++	if (tokens.size() < 2)
++		return JsonError("KEYRAW: usage: KEYRAW name [down|up] [shift] [ctrl]");
++
++	bool down = true, shift = false, ctrl = false;
++	for (size_t i = 2; i < tokens.size(); ++i) {
++		if (tokens[i] == "down" || tokens[i] == "press") down = true;
++		else if (tokens[i] == "up" || tokens[i] == "release") down = false;
++		else if (tokens[i] == "shift") shift = true;
++		else if (tokens[i] == "ctrl" || tokens[i] == "control") ctrl = true;
++		else return JsonError("KEYRAW: unexpected word '" + tokens[i] + "'");
++	}
++
++	ATPokeyEmulator& pokey = sim.GetPokey();
++	std::string lower;
++	for (char c : tokens[1]) lower += (char)((c >= 'A' && c <= 'Z') ? (c + 32) : c);
++
++	if (lower == "all") {
++		if (down)
++			return JsonError("KEYRAW: 'all' can only be released");
++		pokey.ReleaseAllRawKeys(false);
++		pokey.SetShiftKeyState(false, false);
++		pokey.SetControlKeyState(false);
++		return JsonOk("\"name\":\"all\",\"down\":false");
++	}
++
++	uint8_t kb = 0;
++	if (!LookupKey(tokens[1], kb))
++		return JsonError("KEYRAW: unknown key name");
++	// A name that carries modifier bits (the cursor keys) means those
++	// keys are held with it; the matrix itself only knows the low six.
++	if (kb & 0x40) shift = true;
++	if (kb & 0x80) ctrl  = true;
++	kb &= 0x3F;
++
++	if (down) {
++		if (shift) pokey.SetShiftKeyState(true, false);
++		if (ctrl)  pokey.SetControlKeyState(true);
++		pokey.PushRawKey(kb, false);
++	} else {
++		pokey.ReleaseRawKey(kb, false);
++		if (shift) pokey.SetShiftKeyState(false, false);
++		if (ctrl)  pokey.SetControlKeyState(false);
++	}
++
++	std::string payload;
++	AddString(payload, "name", tokens[1]);
++	AddField(payload, "kbcode", Hex8(kb));
++	payload += "\"down\":"; payload += (down ? "true" : "false"); payload += ',';
++	StripTrailingComma(payload);
++	return JsonOk(payload);
++}
++
+ // ---------------------------------------------------------------------------
+ // CONSOL [start] [select] [option]
+ //
+@@ -2013,6 +2129,13 @@ std::string CmdConfig(ATSimulator& sim, const std::vector<std::string>& tokens)
+ 			return JsonOk(std::string("\"selftest\":") + (sim.IsForcedSelfTest() ? "true" : "false"));
+ 		if (key == "fastboot")
+ 			return JsonOk(std::string("\"fastboot\":") + (sim.IsFastBootEnabled() ? "true" : "false"));
++		if (key == "u1mb" || key == "ultimate1mb")
++			return JsonOk(std::string("\"u1mb\":") + (sim.IsUltimate1MBEnabled() ? "true" : "false"));
++		if (key == "u1mbrom" || key == "u1mbrom_id") {
++			ATFirmwareManager* fwm = sim.GetFirmwareManager();
++			return JsonOk(std::string("\"u1mbrom_id\":") +
++				Hex64(fwm ? fwm->GetCompatibleFirmware(kATFirmwareType_U1MB) : 0));
++		}
+ 		if (key == "fppatch")
+ 			return JsonOk(std::string("\"fppatch\":") + (sim.IsFPPatchEnabled() ? "true" : "false"));
+ 		if (key == "stereo")
+@@ -2164,6 +2287,19 @@ std::string CmdConfig(ATSimulator& sim, const std::vector<std::string>& tokens)
+ 			return JsonError("CONFIG: expected boolean for fastboot");
+ 		sim.SetFastBootEnabled(v);
+ 	}
++	else if (key == "u1mb" || key == "ultimate1mb") {
++		bool v = false;
++		if (!ParseBoolLiteral(rawVal, v))
++			return JsonError("CONFIG: expected boolean for u1mb");
++		if (v != sim.IsUltimate1MBEnabled()) {
++			// As "memory": a system change, so a cold reset -- and enabling
++			// forces the memory mode to 1088K, which the reply shows.
++			const bool wasPaused = sim.IsPaused();
++			sim.SetUltimate1MBEnabled(v);
++			sim.ColdReset();
++			if (wasPaused) sim.Pause(); else sim.Resume();
++		}
++	}
+ 	else if (key == "fppatch") {
+ 		bool v = false;
+ 		if (!ParseBoolLiteral(rawVal, v))
+@@ -2342,6 +2478,22 @@ std::string CmdConfig(ATSimulator& sim, const std::vector<std::string>& tokens)
+ 		sim.ColdReset();
+ 		if (wasPaused) sim.Pause(); else sim.Resume();
+ 	}
++	else if (key == "u1mbrom") {
++		uint64_t id = 0;
++		std::string err;
++		if (!ResolveU1MBRomArg(sim, rawVal, id, err))
++			return JsonError("CONFIG: u1mbrom: " + err);
++		sim.GetFirmwareManager()->SetDefaultFirmware(kATFirmwareType_U1MB, id);
++		// The flash is loaded when the U1MB is created, or by LoadROMs
++		// if it already exists; either way a system change, so cold.
++		const bool wasPaused = sim.IsPaused();
++		if (sim.IsUltimate1MBEnabled())
++			sim.LoadROMs();
++		else
++			sim.SetUltimate1MBEnabled(true);
++		sim.ColdReset();
++		if (wasPaused) sim.Pause(); else sim.Resume();
++	}
+ 	else {
+ 		return JsonError("CONFIG: unknown key '" + tokens[1] + "'");
+ 	}
+diff --git a/src/AltirraSDL/source/bridge/bridge_commands_write.h b/src/AltirraSDL/source/bridge/bridge_commands_write.h
+index da882ff..9f2723f 100644
+--- a/src/AltirraSDL/source/bridge/bridge_commands_write.h
++++ b/src/AltirraSDL/source/bridge/bridge_commands_write.h
+@@ -44,6 +44,7 @@ std::string CmdMemLoad(ATSimulator& sim, const std::vector<std::string>& tokens)
+ 
+ std::string CmdJoy(ATSimulator& sim, const std::vector<std::string>& tokens);
+ std::string CmdKey(ATSimulator& sim, const std::vector<std::string>& tokens);
++std::string CmdKeyRaw(ATSimulator& sim, const std::vector<std::string>& tokens);
+ std::string CmdConsol(ATSimulator& sim, const std::vector<std::string>& tokens);
+ 
+ std::string CmdBoot(ATSimulator& sim, const std::vector<std::string>& tokens);
+diff --git a/src/AltirraSDL/source/bridge/bridge_server.cpp b/src/AltirraSDL/source/bridge/bridge_server.cpp
+index 337c16f..d90d1c8 100644
+--- a/src/AltirraSDL/source/bridge/bridge_server.cpp
++++ b/src/AltirraSDL/source/bridge/bridge_server.cpp
+@@ -205,7 +205,7 @@ bool ShouldLogCommand(const std::string& verb) {
+ 	return verb == "PAUSE" || verb == "RESUME" || verb == "FRAME"
+ 		|| verb == "QUIT" || verb == "POKE" || verb == "POKE16"
+ 		|| verb == "HWPOKE" || verb == "MEMLOAD" || verb == "JOY"
+-		|| verb == "KEY" || verb == "CONSOL" || verb == "BOOT"
++		|| verb == "KEY" || verb == "KEYRAW" || verb == "CONSOL" || verb == "BOOT"
+ 		|| verb == "BOOT_BARE" || verb == "MOUNT" || verb == "EJECT"
+ 		|| verb == "CART_EJECT" || verb == "COLD_RESET"
+ 		|| verb == "WARM_RESET" || verb == "FRESH"
+@@ -353,6 +353,7 @@ std::string DispatchCommand(const std::string& line, ATSimulator& sim) {
+ 	if (verb == "MEMLOAD")    return CmdMemLoad(sim, tokens);
+ 	if (verb == "JOY")        return CmdJoy(sim, tokens);
+ 	if (verb == "KEY")        return CmdKey(sim, tokens);
++	if (verb == "KEYRAW")     return CmdKeyRaw(sim, tokens);
+ 	if (verb == "CONSOL")     return CmdConsol(sim, tokens);
+ 	if (verb == "BOOT")       return CmdBoot(sim, tokens);
+ 	if (verb == "BOOT_BARE")  return CmdBootBare(sim, tokens);
+diff --git a/src/AltirraSDL/source/ui/core/ui_main_aboutdialogs.cpp b/src/AltirraSDL/source/ui/core/ui_main_aboutdialogs.cpp
+index 05b37a8..78b2651 100644
+--- a/src/AltirraSDL/source/ui/core/ui_main_aboutdialogs.cpp
++++ b/src/AltirraSDL/source/ui/core/ui_main_aboutdialogs.cpp
+@@ -99,6 +99,10 @@ void ATUIRenderCommandLineHelpDialog(ATUIState &state) {
+ 				"  --nosoundboard        Remove SoundBoard\n"
+ 				"  --slightsid / --noslightsid\n"
+ 				"  --covox / --nocovox\n"
++				"  --ultimate1mb / --noultimate1mb\n"
++				"                        Ultimate1MB (forces 1088K memory)\n"
++				"  --u1mbrom <file>      U1MB flash image (512K); registers it,\n"
++				"                        makes it the default and enables U1MB\n"
+ 				"  --cleardevices        Remove all devices\n"
+ 				"  --adddevice <tag[,params]>\n"
+ 				"                        Add device (e.g. --adddevice soundboard)\n"

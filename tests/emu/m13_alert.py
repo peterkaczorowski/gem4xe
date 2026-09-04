@@ -204,7 +204,7 @@ def alert_run(r, b, ptr, check, keep, mark, room):
         # placeholder plan to get the geometry, then again for real.
         if isinstance(plan_or_click, str):
             nth = int(plan_or_click.split(":")[1])
-            rect = button_rect(script, addr, defbut, alstr, nth)
+            rect = button_rect(script, addr, defbut, alstr, nth, mark)
             mid = (rect.x + rect.w // 2, rect.y + rect.h // 2)
             steps = [F(SETTLE), SHOT] + CLICK(mid)[:-1]
         else:
@@ -254,12 +254,12 @@ def alert_run(r, b, ptr, check, keep, mark, room):
                 os.remove(sp)
 
 
-def button_rect(script, addr, defbut, alstr, nth):
+def button_rect(script, addr, defbut, alstr, nth, mark):
     """The nth button's rectangle, from a model run of the same alert.
     The model is the specification for where the AES puts them."""
     steps = [F(SETTLE), K("RETURN", RETURN)]
     _, a, _ = aesref.run(script, [], {}, plan={len(PRELUDE): steps},
-                         pool=0xA000, buffers={addr: alstr})
+                         pool=mark, buffers={addr: alstr})
     return a.alert_buttons[nth - 1]
 
 

@@ -38,6 +38,8 @@ RESULTS = {
     "r_b7_fix": (801, "fix", "B7 the byte count written out"),
     "r_b8_bug": (84,  "bug", "B8 byte local narrowed on one path, stored"),
     "r_b8_fix": (84,  "fix", "B8 the character held in a WORD"),
+    "r_b9_bug": (20,  "bug", "B9 got = c ? m : 0 beside a call taking &got"),
+    "r_b9_fix": (20,  "fix", "B9 tested, then assigned plainly"),
 }
 B2 = ("r_b2_eq", "r_b2_lt", "r_b2_mod")
 

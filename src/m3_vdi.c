@@ -40,6 +40,8 @@
 #include "sys/abi.h"
 #include "sys/app.h"
 #include "sys/cio.h"
+#include "sys/dos.h"
+#include "sys/gemdos.h"
 #include "vbxe/vbxe.h"
 
 #define STATUS ((volatile unsigned char *) 0x0600)
@@ -52,6 +54,8 @@
  * than the frame counter the VBI keeps.  The host reads the emulator's
  * cycle counter at the frame boundaries around a script and takes the
  * idle tail off with the stamps (tests/emu/bench_gem.py).
+ * STATUS[8..13] the DOS (src/sys/dos.h): kind, caps, dirsep, and MEMTOP
+ * as a little-endian word, then the CIO name limit.
  * STATUS[30..37] the interrupt regime (src/sys/irq.h): how, fail, fast,
  * timer_div, rom_sum, ram_sum -- the sums as two little-endian words.   */
 #define ST_STAGE     2
@@ -61,6 +65,8 @@
 #define ST_VC_DONE   6
 #define ST_VC_PERIOD 7
 #define VCOUNT (*(volatile uint8_t *)0xD40B)
+#define NMIEN  (*(volatile uint8_t *)0xD40E)
+#define PORTB  (*(volatile uint8_t *)0xD301)
 
 /* Both buffers are host-poked staging, so they go in the `teststage` section,
  * which src/gem4xe.scm gives a memory of its own.  Naming the section means
@@ -90,7 +96,11 @@ volatile unsigned char vdi_scratch[SCRATCH_BYTES];
 #define MAX_RESULTS  48
 __attribute__((section("teststage")))
 volatile WORD vdi_results[MAX_RESULTS * RESULT_WORDS];
-__attribute__((section("teststage")))
+/* The count is the one word the host polls WHILE a call runs, so it
+ * stays in ordinary data, out of $4000-$7FFF: SpartaDOS X banks its
+ * own RAM in there for the length of a CIO call, and the bridge reads
+ * what the CPU sees (tests/emu/m14_sparta.py).  The buffers above are
+ * only touched between calls. */
 volatile WORD vdi_result_count;
 
 
@@ -230,8 +240,12 @@ static UWORD bench_op(WORD which)
  * gate application (below); 3005-3009 are CIO (src/sys/cio.h): open
  * (name address, aux1, aux2), close (iocb), read / write / getrec (iocb,
  * buffer address, length), the name and the buffer staged by the host in
- * vdi_scratch.  Those add [6] the status -- or, for open, the IOCB number
- * -- [7] the bytes moved and [8] the round trips made so far.
+ * vdi_scratch, and 3014 is XIO (command, name address, aux1, aux2).
+ * Those add [6] the status -- or, for open, the IOCB number -- [7] the
+ * bytes moved and [8] the round trips made so far.  3012 is one GEMDOS
+ * call on the block at intin[0] (src/sys/gemdos.h), adding [6] the
+ * round trips so far, [7] the GEMDOS calls made and [8] the ones
+ * refused; 3013 is gemdos_release(), the application's exit.
  * intout[0..5] report the handler's state after each: frames, timer,
  * the two axes, keys, fault. */
 static uint8_t exit_req;
@@ -292,7 +306,7 @@ static void sys_op(WORD op)
         c4 = 12;
         break;
     }
-    case 5: case 6: case 7: case 8: case 9: {
+    case 5: case 6: case 7: case 8: case 9: case 14: {
         uint16_t got = 0;
         int16_t st;
         void *buf = (void *)(uint16_t)intin[1];
@@ -302,6 +316,8 @@ static void sys_op(WORD op)
         case 6:  st = cio_close(intin[0]); break;
         case 7:  st = cio_read(intin[0], buf, intin[2], &got); break;
         case 8:  st = cio_write(intin[0], buf, intin[2]); break;
+        case 14: st = cio_xio((uint8_t)intin[0], (const char *)(uint16_t)intin[1],
+                              (uint8_t)intin[2], (uint8_t)intin[3]); break;
         default: st = cio_getrec(intin[0], buf, intin[2], &got); break;
         }
         intout[6] = st;
@@ -315,12 +331,53 @@ static void sys_op(WORD op)
         c4 = 6;
         break;
     /* The pool and the far allocator, so the gate can see what a load
-     * took and a free gave back. */
+     * took and a free gave back -- and, with ints, so it can stand in
+     * for an application that holds the pool: intin[0] bytes taken,
+     * then the cursor wound back to intin[1] when that is not zero. */
     case 11:
+        if (contrl[3] >= 1 && intin[0] > 0)
+            pool_alloc((uint16_t)intin[0], 2);
+        if (contrl[3] >= 2 && intin[1])
+            pool_release((uint16_t)intin[1]);
         intout[6] = (WORD)pool_mark();
         intout[7] = (WORD)pool_room();
         intout[8] = (WORD)farmem.brk;
         intout[9] = (WORD)(farmem.brk >> 16);
+        c4 = 10;
+        break;
+    /* GEMDOS, on a call block the harness staged in bank $00 (its ret,
+     * function and arguments as src/sys/gemdos.h lays them out): the
+     * result, and the round trips it cost.  13 is the application's
+     * exit as GEMDOS sees it, between tests. */
+    case 12:
+        gemdos_call((uint32_t)(uint16_t)intin[0]);
+        intout[6] = (WORD)cio_calls;
+        intout[7] = (WORD)gemdos_calls;
+        intout[8] = (WORD)gemdos_bad;
+        c4 = 9;
+        break;
+    case 13:
+        gemdos_release();
+        c4 = 6;
+        break;
+    /* The environment a CIO call runs in, one knob at a time, so a DOS
+     * path that dies under gem4xe and lives under a plain program can be
+     * bisected from the host: intin[0] the knob, intin[1] its value. */
+    case 15:
+        switch (intin[0]) {
+        case 0: irq_remove(); break;
+        case 1: rapidus_restore(); break;
+        case 2: rapidus_reg_write(RAP_MCR, (uint8_t)intin[1]); break;
+        case 3: rapidus_reg_write(RAP_CMCR, (uint8_t)intin[1]); break;
+        case 4: irq_cio_swap = (uint8_t)intin[1]; break;
+        case 5: cio_env = (uint8_t)intin[1]; break;
+        case 6: NMIEN = (uint8_t)intin[1]; break;
+        default: break;
+        }
+        intout[6] = rapidus.present ? rapidus_reg_read(RAP_MCR) : 0;
+        intout[7] = rapidus.present ? rapidus_reg_read(RAP_CMCR) : 0;
+        intout[8] = irq_cio_swap;
+        intout[9] = PORTB;
         c4 = 10;
         break;
     default:
@@ -356,6 +413,7 @@ static void run_script(void)
         for (k = 0; k < nint && k < INTIN_SIZE; k++)
             intin[k] = vdi_script[i++];
         if (op >= 3000) {
+            contrl[3] = nint;           /* how many ints the op was given */
             sys_op((WORD)(op - 3000));
         } else if (op >= 2000) {
             intout[0] = (WORD)bench_op((WORD)(op - 2000));
@@ -796,6 +854,15 @@ __task void main(void)
     STATUS[ST_GO] = 0;
     STATUS[ST_DONE] = 0;
 
+    /* Which DOS loaded us: read while the machine is still all its own. */
+    dos_ident();
+    STATUS[8] = dos.kind;
+    STATUS[9] = dos.caps;
+    STATUS[10] = (unsigned char)dos.dirsep;
+    STATUS[11] = (unsigned char)dos.memtop;
+    STATUS[12] = (unsigned char)(dos.memtop >> 8);
+    STATUS[13] = CIO_NAME_MAX;
+
     /* First, before the MEMAC window exists and before anything is timed:
      * switch the accelerator's SRAM in over bank $00.  Reported so the
      * harness can refuse a target that is still running its data at
@@ -857,6 +924,7 @@ __task void main(void)
         STATUS[22] = ok;
         STATUS[23] = (unsigned char)(a >> 16);
     }
+    gemdos_init();              /* its far state below any application's */
 
     /* Which bank is this code actually executing in?  src/farload.s copies it
      * up at load time and nothing else can confirm that it landed: the bridge

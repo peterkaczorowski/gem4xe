@@ -30,18 +30,10 @@ static uint8_t has_device(const char *name)
     return (uint8_t)(is_digit(name[1]) && name[2] == ':');
 }
 
-int16_t cio_open(const char *name, uint8_t aux1, uint8_t aux2)
+/* The name into cio_name, "D:" prefixed when it names no device. */
+static void put_name(const char *name)
 {
-    volatile IOCB *io;
-    int16_t n;
     uint8_t i = 0;
-
-    for (n = 1; n < CIO_IOCBS; n++)
-        if (CIO_IOCB[n].ichid == 0xFF)
-            break;
-    if (n == CIO_IOCBS)
-        return -(int16_t)CIO_E_INUSE;
-
     if (!has_device(name)) {
         cio_name[i++] = 'D';
         cio_name[i++] = ':';
@@ -49,7 +41,26 @@ int16_t cio_open(const char *name, uint8_t aux1, uint8_t aux2)
     while (*name && i < CIO_NAME_MAX)
         cio_name[i++] = *name++;
     cio_name[i] = (char)CIO_EOL;
+}
 
+/* A free IOCB, or -1. */
+static int16_t free_iocb(void)
+{
+    int16_t n;
+    for (n = 1; n < CIO_IOCBS; n++)
+        if (CIO_IOCB[n].ichid == 0xFF)
+            return n;
+    return -1;
+}
+
+int16_t cio_open(const char *name, uint8_t aux1, uint8_t aux2)
+{
+    volatile IOCB *io;
+    int16_t n = free_iocb();
+
+    if (n < 0)
+        return -(int16_t)CIO_E_INUSE;
+    put_name(name);
     io = &CIO_IOCB[n];
     io->iccom = CIO_OPEN;
     io->icbal = (uint16_t)cio_name;
@@ -108,4 +119,29 @@ uint8_t cio_status(int16_t iocb)
 {
     CIO_IOCB[iocb].iccom = CIO_STATUS;
     return call(iocb);
+}
+
+uint8_t cio_xio(uint8_t cmd, const char *name, uint8_t aux1, uint8_t aux2)
+{
+    volatile IOCB *io;
+    int16_t n = free_iocb();
+    uint8_t st;
+
+    if (n < 0)
+        return CIO_E_INUSE;
+    put_name(name);
+    io = &CIO_IOCB[n];
+    io->iccom = cmd;
+    io->icbal = (uint16_t)cio_name;
+    io->icbll = 0;
+    io->icax1 = aux1;
+    io->icax2 = aux2;
+    st = call(n);
+    /* CIO serves a special command on a closed IOCB by opening it to the
+     * device for the call; whether it is left claimed afterwards is the
+     * handler's business, so it is closed here regardless -- closing a
+     * free IOCB is a status, not a fault. */
+    if (io->ichid != 0xFF)
+        cio_close(n);
+    return st;
 }

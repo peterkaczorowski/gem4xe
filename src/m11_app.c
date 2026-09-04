@@ -17,6 +17,13 @@
  * bindings in src/app/gemlib.c leave them as the call left them -- so a
  * record here is a record of what came back THROUGH the ABI's copy-out,
  * not of gem4xe's internal state.
+ *
+ * After the AES is done it asks GEMDOS -- the third entry, COP #$01 --
+ * the questions a desktop asks first: the version, the drive, how many
+ * entries the boot disk's directory has, what a missing file answers,
+ * how much memory there is.  Those go into dosres[], and ndos counts the
+ * calls so the harness can reconcile gem4xe's COP count with the
+ * application's.
  */
 #include "gem.h"
 
@@ -26,6 +33,9 @@
 
 WORD results[NREC][REC_WORDS];
 WORD ncalls;
+WORD dosres[8];
+WORD ndos;
+static DTA dta;
 
 /* The object tree: a box with a string and a button in it.  The strings
  * are addressed at run time, as rsrc_obfix would address a resource's,
@@ -113,5 +123,26 @@ int main(void)
     wind_close(wh);                                     record_aes();
     wind_delete(wh);                                    record_aes();
     appl_exit();                                        record_aes();
+
+    {
+        LONG r, m;
+        WORD n = 0;
+
+        dosres[0] = Sversion();
+        dosres[1] = Dgetdrv();
+        Fsetdta(&dta);
+        r = Fsfirst("A:\\*.*", FA_SUBDIR);
+        while (r == E_OK) {
+            n++;
+            r = Fsnext();
+        }
+        dosres[2] = n;
+        dosres[3] = (WORD)r;                            /* ENMFIL */
+        dosres[4] = (WORD)Fopen("A:\\NOPE.XYZ", 0);      /* EFILNF */
+        m = Malloc(-1L);
+        dosres[5] = (WORD)(m >> 16);                    /* banks left */
+        dosres[6] = (WORD)(Fgetdta() == &dta);
+        ndos = (WORD)(7 + n);
+    }
     return ncalls;
 }

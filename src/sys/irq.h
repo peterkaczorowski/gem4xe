@@ -98,6 +98,15 @@ typedef struct {
 
 extern IRQ_INFO irq;
 
+/* For src/sys/cio.s, set by irq_install(): what to put back for the DOS's
+ * benefit around a CIO call and take again after it.  Bit 0: the OS ROM
+ * (PORTB bit 0 high again -- the DOS finds the ROM in, and the RAM under
+ * it as it left it); bit 1: window 3 slow (a Rapidus, so the motherboard
+ * is what is behind the ROM, not the SRAM copy).  Zero: touch nothing. */
+#define IRQ_SWAP_ROM   0x01
+#define IRQ_SWAP_WIN3  0x02
+extern uint8_t irq_cio_swap;
+
 /* --- the handlers' state, written at interrupt time (src/sys/irq.s) ----- */
 extern volatile uint16_t irq_frames;       /* vertical blanks             */
 extern volatile uint16_t irq_timer;        /* timer-1 interrupts taken    */

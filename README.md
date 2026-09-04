@@ -39,6 +39,10 @@ full-screen repaints.
 | `make test-m11` | PASS | the application ABI: a separately linked program loaded, relocated and run, calling the VDI and the AES through `COP` — its records, the loader's, and the screen against the reference |
 | `make test-m12` | PASS | the file layer: CIO through the OS in emulation mode, `rsrc_load`/`rsrc_obfix`, `shel_*`, and the file selector driven over two disks — its listings, its scrolling and its returned strings against the reference, pixel for pixel |
 | `make test-m13` | 19/19 | alerts, icons and the pointer: `form_alert` parsed, laid out and drawn against the reference; every mouse form `graf_mouse` owns, and the caller's own |
+| `make test-m14` | PASS | SpartaGEM on SpartaDOS 3.2: the DOS identified behind CIO, paths mapped into its `>` syntax, files read through subdirectories, and the file selector walked into a folder and back out -- listings and strings against the reference, pixel for pixel |
+| `make test-m14x` | PASS | the same on SpartaDOS X 4.50, the cartridge -- with the application pool and the test stage moved out of its way, into the banked window it services calls from |
+| `make test-m15` | PASS | GEMDOS: the ST's trap #1 as gem4xe's third `COP` face, answered from CIO and the DOS seam -- directory searches, paths, files, far memory, attributes and errors, every answer against the disk image; `test-m15x` on SpartaDOS X, `test-m15d` on DOS 2 |
+| `make test-m14u` `test-m15u` | PASS | the same two on SpartaDOS X 4.49b booted from a real Ultimate 1MB flash image, U1MB switched on -- needs the patched emulator in `tools/altirra/`, so not in `make test` |
 | `make check-cc` | PASS | the eight compiler bugs worked around, in the vendor's simulator |
 | `make movie` | PASS | a session with the AES itself, filmed frame by frame and checked as a gate: `build/movie/gem4xe.mp4` |
 | `make bench` | — | GEMBench's tests on this machine, in milliseconds, not a gate (`docs/bench.md`) |
@@ -139,6 +143,40 @@ objects three times and diffing; the loader puts the near part in a
 bank-`$00` pool and the code in a far bank. The gate application makes
 eighteen VDI and AES calls and the harness checks what each returned,
 from the application's own memory, against the reference.
+
+**SpartaGEM: gem4xe runs on SpartaDOS** (`docs/phase13.md`), 3.2 from
+disk and X 4.50 from its cartridge, as well as on DOS 2 -- the same
+binary, which asks the DOS what it is at start-up (`src/sys/dos.h`) and
+reads its answer for the shape of a path and the mark on a folder in a
+listing; a GEM application sees `A:\DIR\NAME.EXT` on all three. Making
+room for the cartridge moved the application pool and the test stage
+into `$4000-$7FFF`, the banked window the port had kept out of for
+twelve phases: a DOS banks there only inside its own call, and puts it
+back. Two things bit on the way. SpartaDOS 3.2 keeps 7 KB of itself
+under the OS ROM, where the interrupt layer's ROM copy had overwritten
+it, so the copy now goes to the Rapidus's SRAM alone -- gem4xe on
+SpartaDOS 3.2 needs the accelerator. And the bridge reads what the CPU
+sees, SpartaDOS X's bank included, so the one word the harness polls
+during a call moved out of the window. Every call costs more than on
+DOS 2 (a directory read about twice as long a record), measured in
+`docs/phase13.md`, and everything is Altirra: no real SpartaDOS machine
+has been near this.
+
+**GEMDOS, and two emulator bugs** (`docs/phase14.md`). The ST's trap #1
+is gem4xe's third `COP` face: a call block laid out as the ST's stack
+frame with the result in front, so an ST binding's picture of the
+arguments is the block's picture four bytes along, and the donor's
+desktop code can read unchanged above it. Building it found two places
+where Altirra's 65C816 is not a 65C816 in native mode -- a taken branch
+that does the 6502's page-crossing dummy read, in bank `$00`, which
+puts `$D5xx` on the cartridge bus from code running at `$xxD5xx`; and
+`SEI` with an IRQ pending, whose "one more interrupt" shadow the native
+vector states never clear, an IRQ storm that wraps the stack. Both are
+fixed in `tools/altirra/` and sent upstream; until then the linker map
+leaves the `$D5` page of every far bank empty. The Ultimate 1MB, which
+the SDL emulator could not switch on headlessly, now can be: the same
+patches add the switches, and the two `*u` gates boot SpartaDOS X from
+the machine's own flash.
 
 ## Verification
 

@@ -1,8 +1,9 @@
 /* abi.h -- the application binary interface.
  *
  * An application reaches gem4xe with a COP instruction: COP #$73 for the
- * VDI, COP #$C8 for the AES, X:C holding the address of its parameter block
- * (src/app/gem.h documents the application's side).  The handler in abi.s
+ * VDI, COP #$C8 for the AES, COP #$01 for GEMDOS (the ST's trap numbers),
+ * X:C holding the address of its parameter block (src/app/gem.h documents
+ * the application's side).  The handler in abi.s
  * catches the trap, records where the block is and which signature was used,
  * and calls gem_entry() on gem4xe's own direct page, data bank and stack.
  * gem_entry() copies the block's inputs into gem4xe's arrays, runs the call,
@@ -20,8 +21,9 @@
 
 #include <stdint.h>
 
-#define ABI_VDI 0x73        /* COP signature bytes; the app's gemabi.s */
-#define ABI_AES 0xC8
+#define ABI_GEMDOS 0x01     /* COP signature bytes; the app's gemabi.s */
+#define ABI_VDI    0x73
+#define ABI_AES    0xC8
 
 /* Written by the handler in abi.s before gem_entry() runs. */
 extern uint32_t gem_pb;        /* the parameter block: X:C at the COP */

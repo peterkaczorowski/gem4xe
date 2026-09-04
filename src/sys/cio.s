@@ -25,10 +25,19 @@
 ;;;                           Set BEFORE xce, so an NMI arriving between the
 ;;;                           two lands on it and not on the gem4xe stack
 ;;;                           pointer's low byte forced into page 1
-;;;   sec, xce, cli           emulation mode; the OS's vectors; interrupts
-;;;   jsr CIOV                the OS's, from the copy in the accelerator's
-;;;                           SRAM under $E456 -- the same bytes
-;;;   sei, clc, xce           back
+;;;   sec, xce                emulation mode; the OS's vectors
+;;;   ROM in, window 3 slow   what src/sys/irq.c took: the DOS gets the OS
+;;;                           ROM back at $C000-$FFFF and, on a Rapidus, the
+;;;                           motherboard behind it -- SpartaDOS 3.2 keeps
+;;;                           7 KB of itself under the ROM and switches it
+;;;                           in for every call.  irq_cio_swap says which.
+;;;                           The ROM goes in FIRST: with the ROM in, reads
+;;;                           come from the motherboard whatever the MCR
+;;;                           says, so the vectors at $FFFA are the OS's
+;;;                           at every step (in emulation mode the SRAM
+;;;                           copy and the ROM agree on them anyway)
+;;;   cli, jsr CIOV           the OS's, from the ROM itself
+;;;   sei, window 3 fast, ROM out, clc, xce      back, in that order
 ;;;
 ;;; and then the state the OS's handlers have kept for us while gem4xe's
 ;;; were off: irq_frames is caught up from RTCLOK -- the OS counted the
@@ -50,7 +59,8 @@
 
               .extern ae_sp, ae_pokmsk      ; src/crt_atari.s
               .extern irq_frames, irq_kput  ; src/sys/irq.c, irq.s
-              .public cio_call
+              .extern irq_cio_swap          ; src/sys/irq.c
+              .public cio_call, cio_env
 
 #define POKMSK 0x0010                 /* OS shadow of IRQEN */
 #define RTCLOK 0x0012                 /* three bytes, high first */
@@ -58,11 +68,17 @@
 #define ATRACT 0x004D
 #define CH     0x02FC                 /* the OS keyboard buffer: one key */
 #define IRQEN  0xD20E
+#define PORTB  0xD301
 #define CIOV   0xE456
+#define RAP_MCR 0xFF0080              /* src/sys/rapidus.h */
+#define MCR_SLOW3 0x08
+#define IRQ_SWAP_ROM  0x01            /* src/sys/irq.h */
+#define IRQ_SWAP_WIN3 0x02
 
               .section zdata, bss
 cio_sp:       .space  2               ; gem4xe's S across the call
 cio_clk:      .space  2               ; RTCLOK+1..2 at entry, low byte first
+cio_env:      .space  1               ; bisection knobs: 1 = leave CRITIC alone
 cio_iocb:     .space  1               ; iocb * 16, for X
 cio_pokmsk:   .space  1               ; gem4xe's POKMSK across the call
 cio_stat:     .space  2               ; the OS's Y, zero-extended
@@ -92,9 +108,12 @@ cio_call:     php
               lda     abs:ae_pokmsk
               sta     POKMSK
               sta     IRQEN           ; DOS's sources: keyboard, break
+              lda     abs:cio_env
+              lsr     a
+              bcs     cio_nocrit
               lda     #1
               sta     CRITIC
-              stz     ATRACT
+cio_nocrit:   stz     ATRACT
               lda     RTCLOK+2
               sta     abs:cio_clk
               lda     RTCLOK+1
@@ -106,19 +125,44 @@ cio_call:     php
               tcs                     ; S = $01xx while still native
               sec
               xce                     ; emulation mode: 8-bit everything
-              cli
+              lda     abs:irq_cio_swap
+              beq     cio_go
+              lda     PORTB           ; the ROM in, other bits as they are
+              ora     #1
+              sta     PORTB
+              lda     abs:irq_cio_swap
+              and     #IRQ_SWAP_WIN3
+              beq     cio_go
+              lda     long:RAP_MCR    ; and the motherboard behind it
+              ora     #MCR_SLOW3
+              sta     long:RAP_MCR
+cio_go:       cli
               ldx     abs:cio_iocb
               jsr     CIOV
               sei
               sty     abs:cio_stat
-              clc
+              lda     abs:irq_cio_swap
+              beq     cio_took
+              and     #IRQ_SWAP_WIN3
+              beq     cio_rom
+              lda     long:RAP_MCR    ; the SRAM copy again ...
+              and     #~MCR_SLOW3
+              sta     long:RAP_MCR
+cio_rom:      lda     PORTB           ; ... which the ROM going out reveals
+              and     #~1
+              sta     PORTB
+cio_took:     clc
               xce                     ; native; M and X are 8 bits, and X
                                       ; stays so until the end
               rep     #0x20
               lda     abs:cio_sp
               tcs                     ; gem4xe's stack, straight away
               sep     #0x20
+              lda     abs:cio_env
+              lsr     a
+              bcs     cio_keepcrit
               stz     CRITIC
+cio_keepcrit:
 ;;; The blanks the OS counted: RTCLOK is big-endian, so its low two bytes
 ;;; are picked up one at a time into a little-endian word.
               lda     RTCLOK+2

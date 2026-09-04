@@ -72,6 +72,7 @@ class Bridge:
         else:
             raise BridgeError(f"bridge connect failed ({addr}): {last}")
         self.f = self.s.makefile("rwb")
+        self._keyraw = None             # has_keyraw(), asked when first needed
         r = self.cmd(f"HELLO {token}")
         if not r.get("ok"):
             raise BridgeError(f"HELLO rejected: {r}")
@@ -133,21 +134,68 @@ class Bridge:
     def poke(self, addr, value):
         return self.ok(f"POKE ${addr:04X} ${value & 0xFF:02X}")
 
-    def key(self, name, shift=False, ctrl=False):
-        """Press a key for one frame, with modifiers in the OS's sense.
+    def has_keyraw(self):
+        """Whether this emulator carries the bridge patch in tools/altirra/
+        (KEYRAW, CONFIG u1mb, and the KEY modifier fix -- one patch, so one
+        probe answers for all three).  `KEYRAW all up` releases nothing
+        that is not held and is refused as an unknown verb by a build
+        without it.  Asked once, remembered."""
+        if self._keyraw is None:
+            self._keyraw = bool(self.cmd("KEYRAW all up").get("ok"))
+        return self._keyraw
 
-        AltirraSDL's KEY verb has its modifier bits swapped: its `shift` word
-        sets KBCODE bit 7 and `ctrl` sets bit 6, but the XL OS keyboard table
-        (KEYDEF, $79) is laid out plain / shift=bit 6 / control=bit 7 --
-        measured by injecting KEY A: `shift` yields ctrl-A ($01) and `ctrl`
-        yields 'A'.  So the words are crossed over here, and a caller's
-        `shift=True` means what SHIFT on the keyboard means.
+    def key(self, name, shift=False, ctrl=False):
+        """Press a key for one frame, with modifiers in the keyboard's sense.
+
+        POKEY builds KBCODE as scan / shift = bit 6 / control = bit 7, and
+        the XL OS's key table (KEYDEF, $79) is laid out the same way.  The
+        stock AltirraSDL bridge has KEY's two words crossed: its `shift`
+        sets bit 7 and `ctrl` bit 6 -- measured by injecting KEY A: `shift`
+        yielded ctrl-A ($01) and `ctrl` a capital A.  The patched build
+        (tools/altirra/) fixes it, so the words are crossed here only for a
+        build without the patch, and a caller's `shift=True` means what
+        SHIFT on the keyboard means either way.  The reply's kbcode is
+        checked against that, so a build the probe misjudged fails loudly.
 
         The key reaches the program only if POKEY's keyboard IRQ is enabled
         (IRQEN bit 6) and acknowledged after every key; otherwise the bridge
         queues it forever.  The key is held for a single frame.
         """
-        return self.ok(f"KEY {name}" + (" ctrl" if shift else "") + (" shift" if ctrl else ""))
+        want = (0x40 if shift else 0) | (0x80 if ctrl else 0)
+        s, c = (shift, ctrl) if self.has_keyraw() else (ctrl, shift)
+        r = self.ok(f"KEY {name}" + (" shift" if s else "") + (" ctrl" if c else ""))
+        code = int(r.get("kbcode", "$00")[1:], 16)
+        if (code & want) != want:
+            raise BridgeError(f"KEY {name}: the bridge pushed ${code:02X}, "
+                              f"not the modifier bits ${want:02X} asked for")
+        return r
+
+    def key_raw(self, name, down=True, shift=False, ctrl=False):
+        """Hold a key down in POKEY's matrix, or release it -- the way the
+        keyboard does, rather than through the cooked queue `key` uses.
+
+        The difference is who gets to see it.  KEY waits for the keyboard IRQ
+        to be enabled and acknowledged, so a program that polls SKSTAT and
+        KBCODE with the IRQ off (a firmware setup screen -- the U1MB BIOS)
+        never gets one.  KEYRAW drives the scan emulation instead: KBCODE,
+        SKSTAT bit 2 and the IRQ line all follow, and the key stays down
+        until released.  The modifiers are the real SHIFT and CONTROL keys,
+        not KBCODE bits, so nothing is crossed over here.  Needs the KEYRAW
+        verb (the patched AltirraSDL in tools/altirra/).
+        """
+        words = ["down" if down else "up"]
+        if shift: words.append("shift")
+        if ctrl:  words.append("ctrl")
+        return self.ok(f"KEYRAW {name} " + " ".join(words))
+
+    def key_tap(self, name, hold=6, gap=6, shift=False, ctrl=False):
+        """A raw press: hold `name` for `hold` frames, release, then run
+        `gap` frames so a polling program sees the key go away before the
+        next one.  Six frames is a tenth of a second, a human tap."""
+        self.key_raw(name, True, shift, ctrl)
+        self.frames(hold)
+        self.key_raw(name, False, shift, ctrl)
+        self.frames(gap)
 
     def joy(self, port, direction, fire=False):
         """Set joystick `port` (0..3) to one of the nine stick states --

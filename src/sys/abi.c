@@ -30,10 +30,16 @@
  * gem_bad rather than truncated to something that would draw garbage.
  * Message buffers and the parameter block's own arrays are written through
  * far pointers and can be anywhere.
+ *
+ * GEMDOS (COP #$01): the block is the ST's trap #1 frame with the result
+ * in front of it (src/sys/gemdos.h); gemdos_call() reads its arguments
+ * through far pointers and writes the result back, so nothing is copied
+ * here.
  */
 #include "vdi/vdi.h"
 #include "aes/aes.h"
 #include "sys/abi.h"
+#include "sys/gemdos.h"
 
 uint32_t gem_pb;
 uint8_t  gem_which;
@@ -533,6 +539,9 @@ void gem_entry(void)
         break;
     case ABI_AES:
         aes_entry((const AESPB_IMG __far *)gem_pb);
+        break;
+    case ABI_GEMDOS:
+        gemdos_call(gem_pb);
         break;
     default:
         gem_bad++;

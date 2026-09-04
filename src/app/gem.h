@@ -6,12 +6,13 @@
  * interrupt, here the 65816's COP, with a parameter block whose five (VDI)
  * or six (AES) fields point at the caller's own arrays:
  *
- *     COP #$73   VDI   X:C = address of a VDIPB     (vdi_call)
- *     COP #$C8   AES   X:C = address of an AESPB    (aes_call)
+ *     COP #$73   VDI     X:C = address of a VDIPB     (vdi_call)
+ *     COP #$C8   AES     X:C = address of an AESPB    (aes_call)
+ *     COP #$01   GEMDOS  X:C = address of a GDPB      (dos_call)
  *
- * The signature bytes and the block layouts are the ST's (the AES's
- * function numbers too), so a GEM binding written for the ST needs only
- * its trap replaced.  gem4xe copies the caller's arrays in before the call
+ * The signature bytes and the block layouts are the ST's (the AES's and
+ * GEMDOS's function numbers too), so a GEM binding written for the ST
+ * needs only its trap replaced.  gem4xe copies the caller's arrays in before the call
  * and out after it -- the DRI entry discipline -- so an application's
  * arrays may be exactly as large as its own calls need, and nothing of the
  * application's is ever read while the call is not in progress.
@@ -50,10 +51,21 @@ typedef struct {
     LONG __far *addr_out;
 } AESPB;
 
-/* The two entry points (src/app/gemabi.s).  __simple_call puts the block's
- * address in X:C, which is where the COP handler looks. */
+/* GEMDOS's block is the ST's trap #1 stack frame with the result in front
+ * of it: the function number, then the arguments in the ST's order and
+ * sizes (WORD 2, LONG 4), little-endian.  16 bytes holds the longest,
+ * Fread's. */
+typedef struct {
+    LONG ret;
+    WORD fn;
+    WORD arg[5];
+} GDPB;
+
+/* The three entry points (src/app/gemabi.s).  __simple_call puts the
+ * block's address in X:C, which is where the COP handler looks. */
 __simple_call void vdi_call(VDIPB __far *pb);
 __simple_call void aes_call(AESPB __far *pb);
+__simple_call void dos_call(GDPB __far *pb);
 
 /* -- The AES object, as in aes.h: ob_spec is a LONG whose low word holds
  * a bank-$00 address for the types that point at something. */
@@ -124,5 +136,64 @@ WORD wind_get(WORD handle, WORD field, WORD *o1, WORD *o2, WORD *o3, WORD *o4);
 WORD wind_close(WORD handle);
 WORD wind_delete(WORD handle);
 WORD evnt_timer(UWORD lo, UWORD hi);
+
+/* -- GEMDOS, the ST's osbind names.  Pointers are far so that a buffer
+ * Malloc gave out -- which is far memory -- can be read into directly;
+ * a near pointer widens to one.  Errors are the ST's negative numbers,
+ * src/sys/gemdos.h; Fseek, Fdatime and Tget* answer EINVFN today. */
+#define E_OK      0L
+#define EINVFN  -32L
+#define EFILNF  -33L
+#define EPTHNF  -34L
+#define ENHNDL  -35L
+#define EACCDN  -36L
+#define EIHNDL  -37L
+#define ENSMEM  -39L
+#define EDRIVE  -46L
+#define ENMFIL  -49L
+
+#define FA_RDONLY  0x01
+#define FA_HIDDEN  0x02
+#define FA_SYSTEM  0x04
+#define FA_VOLUME  0x08
+#define FA_SUBDIR  0x10
+#define FA_ARCHIVE 0x20
+
+typedef struct {                /* the ST's, 44 bytes */
+    char  d_reserved[21];
+    char  d_attrib;
+    UWORD d_time;
+    UWORD d_date;
+    LONG  d_length;             /* unsigned on the ST; long is enough here */
+    char  d_fname[14];
+} DTA;
+
+typedef struct {                /* Dfree's answer, in clusters of 1 sector */
+    LONG b_free, b_total, b_secsiz, b_clsiz;
+} DISKINFO;
+
+WORD Sversion(void);
+WORD Dsetdrv(WORD drive);       /* returns the drive map */
+WORD Dgetdrv(void);
+LONG Dsetpath(const char __far *path);
+LONG Dgetpath(char __far *buf, WORD drive);
+LONG Dcreate(const char __far *path);
+LONG Ddelete(const char __far *path);
+LONG Dfree(DISKINFO __far *info, WORD drive);
+void Fsetdta(DTA __far *dta);
+DTA __far *Fgetdta(void);
+LONG Fsfirst(const char __far *spec, WORD attr);
+LONG Fsnext(void);
+LONG Fopen(const char __far *name, WORD mode);
+LONG Fcreate(const char __far *name, WORD attr);
+LONG Fclose(WORD handle);
+LONG Fread(WORD handle, LONG count, void __far *buf);
+LONG Fwrite(WORD handle, LONG count, const void __far *buf);
+LONG Fseek(LONG offset, WORD handle, WORD mode);
+LONG Fdelete(const char __far *name);
+LONG Frename(const char __far *oldname, const char __far *newname);
+LONG Fattrib(const char __far *name, WORD wflag, WORD attr);
+LONG Malloc(LONG size);         /* -1 asks how much is left */
+LONG Mfree(void __far *block);
 
 #endif /* GEM4XE_APP_GEM_H */

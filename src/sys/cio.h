@@ -40,6 +40,9 @@
 /* ICAX1 at open */
 #define CIO_A_READ   0x04
 #define CIO_A_DIR    0x06       /* the directory, as lines */
+#define CIO_A_RAWDIR 0x14       /* the directory as its own 23-byte
+                                   entries, on a SpartaDOS (src/sys/dos.h,
+                                   DOS_CAP_RAWDIR) */
 #define CIO_A_WRITE  0x08
 #define CIO_A_APPEND 0x09
 #define CIO_A_UPDATE 0x0C
@@ -57,10 +60,11 @@
 
 #define CIO_EOL      0x9B
 
-#define CIO_NAME_MAX 31         /* the longest name the buffer holds:
-                                   "D8:XXXXXXXX.XXX" is 15, and bank $00
-                                   is short of room for more than a
-                                   modest SpartaDOS path */
+#define CIO_NAME_MAX 63         /* the longest name the buffer holds:
+                                   "D8:XXXXXXXX.XXX" is 15, and a
+                                   SpartaDOS path is nine more per
+                                   directory (src/sys/dos.h); bank $00
+                                   is short of room for a longer one */
 
 /* The IOCB the OS lays out at $0340 (ksyms.h). */
 typedef struct {
@@ -94,11 +98,24 @@ uint8_t  cio_getrec(int16_t iocb, void *buf, uint16_t len, uint16_t *got);
 
 uint8_t  cio_write(int16_t iocb, const void *buf, uint16_t len);
 uint8_t  cio_status(int16_t iocb);
+/* A special command on a name -- XIO: delete (33), rename (32, the name
+ * "OLD,NEW"), lock and unlock (35, 36), and on a DOS with directories
+ * make, remove and change one (42, 43, 44).  A free IOCB is used and
+ * given back; the status is returned. */
+uint8_t  cio_xio(uint8_t cmd, const char *name, uint8_t aux1, uint8_t aux2);
+#define CIO_X_RENAME  32
+#define CIO_X_DELETE  33
+#define CIO_X_LOCK    35
+#define CIO_X_UNLOCK  36
+#define CIO_X_MKDIR   42
+#define CIO_X_RMDIR   43
+#define CIO_X_CHDIR   44
 
 /* The bare call: the IOCB is filled in already.  src/sys/cio.s. */
 __attribute__((simple_call)) uint16_t cio_call(uint16_t iocb);
 
 extern uint16_t cio_calls;      /* round trips made */
+extern uint8_t  cio_env;        /* bisection knobs (src/sys/cio.s): 1 = leave CRITIC alone */
 extern uint8_t  cio_last;       /* the last status */
 
 #endif /* GEM4XE_CIO_H */

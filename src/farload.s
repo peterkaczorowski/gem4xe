@@ -49,7 +49,10 @@
               .public _fl_hdr, _fl_buf, _fl_scr
               .public _fl_running_bank
 
-FL_CHUNK:     .equ    0x1f00          ; staging payload: 31 whole pages
+FL_CHUNK:     .equ    0x1b00          ; staging payload: 27 whole pages -- with
+                                      ; the 20 bytes around it, what fits the
+                                      ; Stage memory (src/gem4xe.scm), which
+                                      ; stops under SpartaDOS X's screen
 
 ;;; CIO, for the two failure messages.  DOS is still resident and IOCB #0 is
 ;;; open on E: at this point, which is the whole reason the diagnostics can be

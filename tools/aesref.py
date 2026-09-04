@@ -514,31 +514,58 @@ def fs_pspec(path, pend=None):
     return path, p
 
 
-def fs_cioname(gem):
-    """shel.c's sh_cioname: X:\\DIR\\NAME.EXT -> Dn:NAME.EXT, uppercased."""
+# The selector's flag on a name (fsel.c FS_FILE / FS_FOLDER): a listing
+# entry is "NAME.EXT" for a file or FOLDER + "NAME" for a subdirectory.
+FS_FILE, FS_FOLDER = " ", "\x07"
+
+
+def fs_cioname(gem, dirsep=""):
+    """The DOS seam's dos_cioname (src/sys/dos.c), which sh_cioname is:
+    X:\\DIR\\NAME.EXT -> Dn:NAME.EXT on a flat DOS (the last component),
+    Dn:>DIR>NAME.EXT on one with directories (`dirsep` its separator),
+    uppercased, at most CIO_NAME_MAX (63) characters."""
     out = ""
     name = gem
     if len(gem) >= 3 and gem[1] == ":" and gem[2] == "\\":
         d = gem[0].lower()
         if "a" <= d <= "h":
             out = "D" + str(ord(d) - ord("a") + 1) + ":"
-        name = gem[3:].split("\\")[-1]
-    return (out + name.upper())[:31]
+        name = gem[3:]
+        out += dirsep
+    if not dirsep:
+        name = name.split("\\")[-1]
+    return (out + name.upper().replace("\\", dirsep))[:63]
+
+
+def fs_flagged(entry):
+    """A listing entry -> (flag, name): a plain string is a file's."""
+    if entry[:1] in (FS_FILE, FS_FOLDER):
+        return entry[0], entry[1:]
+    return FS_FILE, entry
 
 
 def fs_entry(line):
-    """A DOS 2 directory line -> NAME.EXT, or None for a line that is not
-    a file's (fsel.c's fs_entry): the deleted entry's dashes, the FREE
-    SECTORS line, noise."""
+    """A DOS 2 directory line -> NAME.EXT, FOLDER + NAME for a
+    subdirectory, or None for a line that is not an entry (fsel.c's
+    fs_entry): the deleted entry's dashes, the FREE SECTORS line, noise.
+    The subdirectory marks are the DOS seam's (src/sys/dos.h): SpartaDOS
+    X puts ':' in the second flag column and the directory's own
+    extension after the name; SpartaDOS 3.2 puts "DIR" in inverse video
+    (the high bits set) where the extension would be.  A DOS 2 line has
+    neither."""
     ok = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_@")
-    if len(line) < 17 or line[1] != " " or line[13] != " ":
+    if len(line) < 17 or line[13] != " ":
         return None
-    name, ext = line[2:10].rstrip(), line[10:13].rstrip()
+    mark_ext = line[10:13] == "".join(chr(ord(c) | 0x80) for c in "DIR")
+    folder = mark_ext or line[1] == ":"
+    if not folder and line[1] != " ":
+        return None
+    name, ext = line[2:10].rstrip(), "" if mark_ext else line[10:13].rstrip()
     if not name or not "A" <= name[0] <= "Z":
         return None
     if any(c not in ok for c in name) or any(c not in ok for c in ext):
         return None
-    return name + ("." + ext if ext else "")
+    return (FS_FOLDER if folder else "") + name + ("." + ext if ext else "")
 
 
 class AES:
@@ -585,6 +612,7 @@ class AES:
         # live, and where the target's pool starts, which is where the
         # selector's tree is laid out (run(..., dirs=, pool=)).
         self.dirs = {}
+        self.dos_dirsep = ""
         self.gl_drvbits = 0x00FF
         self.pool_mark = None
         # the strings the harness staged for the selector's buffers, by
@@ -3356,14 +3384,21 @@ class AES:
         names = []
 
         def fs_active(ppath, pspec):
+            # the directory's CIO name is the key: "D1:" on DOS 2,
+            # "D1:>" or "D1:>SUB>" on a SpartaDOS; a folder is listed
+            # whatever the mask, and sorts first, its flag being lower
             allpath, pend = fs_pspec(ppath)
             allpath = allpath[:pend] + "*.*"
-            dev = fs_cioname(allpath)[:3]
-            listing = self.dirs.get(dev)
+            key = fs_cioname(allpath, self.dos_dirsep)[:-3]
+            listing = self.dirs.get(key)
             if listing is None:
                 return False, []
-            found = [n for n in listing if fs_wildcmp(pspec, n)][:64]
-            return True, sorted(found)
+            found = []
+            for e in listing:
+                flag, n = fs_flagged(e)
+                if flag == FS_FOLDER or fs_wildcmp(pspec, n):
+                    found.append(flag + n)
+            return True, sorted(found[:64])
 
         def fs_1scroll(curr, count, touchob):
             newcurr = curr - 1 if touchob == FUPAROW else curr + 1
@@ -3376,7 +3411,8 @@ class AES:
         def fs_format(currtop, count):
             cnt = min(count - currtop, NM_NAMES)
             for i in range(NM_NAMES):
-                name = " " + fs_fmt_str(names[currtop + i]) if i < cnt else " "
+                name = (names[currtop + i][0] + fs_fmt_str(names[currtop + i][1:])
+                        if i < cnt else " ")
                 inf_sset(F1NAME + i, name)
                 tree[F1NAME + i].ob_type = G_FBOXTEXT
                 tree[F1NAME + i].ob_state = NORMAL
@@ -4004,7 +4040,7 @@ FSEL_INPUT, FSEL_EXINPUT = 1090, 1091
 
 
 def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None,
-        dirs=None, pool=None, buffers=None):
+        dirs=None, pool=None, buffers=None, dirsep=""):
     """Run a mixed VDI/AES script against fresh models; returns
     (vdi, aes, results) with one result record per script record, the
     way vdiref.VDI.run() does for a pure VDI script.
@@ -4036,6 +4072,7 @@ def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None,
     a.trees = trees or {}
     a.home = tree               # the tree a record that names none means
     a.dirs = dirs or {}
+    a.dos_dirsep = dirsep       # the DOS seam's: "" on DOS 2, ">" on a SpartaDOS
     a.pool_mark = pool
     a.fs_strings = dict(buffers or {})
     return v, a, resume(v, a, script, plan)
