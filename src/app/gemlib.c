@@ -365,6 +365,14 @@ WORD objc_change(OBJECT *tree, WORD obj, WORD resvd, WORD x, WORD y, WORD w, WOR
     return aes(47, 8, 1, 1, 0);
 }
 
+WORD objc_order(OBJECT *tree, WORD obj, WORD newpos)
+{
+    int_in[0] = obj;
+    int_in[1] = newpos;
+    addr_in[0] = tree_addr(tree);
+    return aes(45, 2, 1, 1, 0);
+}
+
 WORD form_do(OBJECT *tree, WORD start)
 {
     int_in[0] = start;
@@ -410,6 +418,30 @@ WORD form_center(OBJECT *tree, WORD *x, WORD *y, WORD *w, WORD *h)
     *w = int_out[3];
     *h = int_out[4];
     return r;
+}
+
+static WORD graf_box(WORD op, WORD x1, WORD y1, WORD w1, WORD h1,
+                     WORD x2, WORD y2, WORD w2, WORD h2)
+{
+    int_in[0] = x1;
+    int_in[1] = y1;
+    int_in[2] = w1;
+    int_in[3] = h1;
+    int_in[4] = x2;
+    int_in[5] = y2;
+    int_in[6] = w2;
+    int_in[7] = h2;
+    return aes(op, 8, 1, 0, 0);
+}
+
+WORD graf_growbox(WORD x1, WORD y1, WORD w1, WORD h1, WORD x2, WORD y2, WORD w2, WORD h2)
+{
+    return graf_box(73, x1, y1, w1, h1, x2, y2, w2, h2);
+}
+
+WORD graf_shrinkbox(WORD x1, WORD y1, WORD w1, WORD h1, WORD x2, WORD y2, WORD w2, WORD h2)
+{
+    return graf_box(74, x1, y1, w1, h1, x2, y2, w2, h2);
 }
 
 WORD graf_mouse(WORD mode, const WORD *form)

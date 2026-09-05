@@ -58,9 +58,11 @@ GEM_OBJS   = $(filter-out build/m3_vdi.o build/app_blob.o,$(M3_OBJS)) build/gem.
 # against nothing of gem4xe's, on the application's own linker rules.
 APP_OBJS   = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o build/app/m11_app.o
 # Its near budget (src/app/gemapp.scm): the stack and data, then the
-# constants.  Decimal, because a `#` in a make variable starts a comment.
+# constants; and the stack's share of the first.  Decimal, because a `#`
+# in a make variable starts a comment.
 APP_BSS    = 2048
 APP_BITS   = 256
+APP_STACK  = 256
 
 # Everything a gate boots, and the product: a plain `make` leaves no disk
 # behind its sources (a gate run by hand, rather than through its test-m*
@@ -218,21 +220,24 @@ build/shel.o: src/aes/shel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/d
 # body) is linked three times -- at its placeholder addresses, with the
 # near region up a page, with the far region up a bank -- so that
 # tools/mkg4a.py can find every byte that depends on where it is loaded.
-# $(call g4a,name,objects,near bss,near bits,more mkg4a args,more targets)
+# $(call g4a,name,objects,near bss,near bits,stack,more mkg4a args,more targets)
+# The stack is part of the near bss (src/app/gemapp.scm); its size is the
+# linker's --stack-size, so the map shows what each application asked for.
 G4A_LIB = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o
 define g4a
 build/$(1).elf: $(2) src/app/gemapp.scm
 	$$(LD) src/app/gemapp.scm $(2) $$(LIB) --rtattr exit=simplified --cstartup gemapp -o $$@ \
-	    --list-file build/$(1).map --memories-expression "(app-layout #x1000 #x020000 $(3) $(4))"
+	    --list-file build/$(1).map --stack-size $(5) \
+	    --memories-expression "(app-layout #x1000 #x020000 $(3) $(4))"
 build/$(1)-near.elf: $(2) src/app/gemapp.scm
 	$$(LD) src/app/gemapp.scm $(2) $$(LIB) --rtattr exit=simplified --cstartup gemapp -o $$@ \
-	    --memories-expression "(app-layout #x1100 #x020000 $(3) $(4))"
+	    --stack-size $(5) --memories-expression "(app-layout #x1100 #x020000 $(3) $(4))"
 build/$(1)-far.elf: $(2) src/app/gemapp.scm
 	$$(LD) src/app/gemapp.scm $(2) $$(LIB) --rtattr exit=simplified --cstartup gemapp -o $$@ \
-	    --memories-expression "(app-layout #x1000 #x030000 $(3) $(4))"
-build/$(1).g4a build/$(1).sym $(6): build/$(1).elf build/$(1)-near.elf build/$(1)-far.elf tools/mkg4a.py
+	    --stack-size $(5) --memories-expression "(app-layout #x1000 #x030000 $(3) $(4))"
+build/$(1).g4a build/$(1).sym $(7): build/$(1).elf build/$(1)-near.elf build/$(1)-far.elf tools/mkg4a.py
 	python3 tools/mkg4a.py build/$(1).elf build/$(1)-near.elf build/$(1)-far.elf \
-	        build/$(1).g4a --syms build/$(1).sym $(5)
+	        build/$(1).g4a --syms build/$(1).sym $(6)
 endef
 
 build/app/%.o: src/app/%.s
@@ -250,7 +255,7 @@ build/app/%.o: src/%.c src/app/gem.h
 # The gate application (src/m11_app.c).  The .g4a is what a loader reads
 # from disk; the C array is the same bytes for the runner to load from
 # the image, there being no file layer yet.
-$(eval $(call g4a,m11_app,$(APP_OBJS),$(APP_BSS),$(APP_BITS),--c-array build/app_blob.c app_blob,build/app_blob.c))
+$(eval $(call g4a,m11_app,$(APP_OBJS),$(APP_BSS),$(APP_BITS),$(APP_STACK),--c-array build/app_blob.c app_blob,build/app_blob.c))
 
 build/app_blob.o: build/app_blob.c
 	$(CC) $(CFLAGS) -o $@ $<
@@ -261,17 +266,26 @@ build/app_blob.o: build/app_blob.c
 # through tools/iconconv.py, checked in like the font).  The milestone-3
 # desktop (src/m16_desk.c: a line of help, R/X/Q) stays as the stand-in
 # test-m16 drives the shell loop with.
-DESK_OBJS  = $(G4A_LIB) build/desk/desktop.o build/desk/deskobj.o
-DESK_BSS   = 2560
+# The near region is 14 pages: the direct page, the bss, the constants.
+# The bss holds the desktop's globals (GLOBES, src/desk/desk.h: the screen
+# tree, the window nodes, the icon records, ~2 KB) and its stack, which
+# is the gate application's 256 bytes and more: the folder window's open
+# -- the button, do_open, do_dopen, do_wopen, a call to the AES on top --
+# ran 256 bytes out (phase 14, milestone 5), and the runner's pool has
+# room for no larger a region: DESKTOP.RSC (4150 bytes) follows it, and
+# GEMDOS takes its work area from what is left (src/sys/gemdos.c).
+DESK_OBJS  = $(G4A_LIB) build/desk/desktop.o build/desk/deskobj.o build/desk/deskwin.o
+DESK_BSS   = 2816
 DESK_BITS  = 512
+DESK_STACK = 640
 DESK_H     = src/app/gem.h src/desk/desk.h build/deskrsc.h
 
 build/desk/%.o: src/desk/%.c $(DESK_H)
 	@mkdir -p build/desk
 	$(CC) $(CFLAGS) -I src/app -I build -o $@ $<
 
-$(eval $(call g4a,desktop,$(DESK_OBJS),$(DESK_BSS),$(DESK_BITS)))
-$(eval $(call g4a,m16_desk,$(G4A_LIB) build/app/m16_desk.o,$(APP_BSS),$(APP_BITS)))
+$(eval $(call g4a,desktop,$(DESK_OBJS),$(DESK_BSS),$(DESK_BITS),$(DESK_STACK)))
+$(eval $(call g4a,m16_desk,$(G4A_LIB) build/app/m16_desk.o,$(APP_BSS),$(APP_BITS),$(APP_STACK)))
 
 tools/deskicons.py: tools/iconconv.py
 	python3 tools/iconconv.py $(EMUTOS)/desk/icons.c $@
@@ -378,11 +392,15 @@ build/m3-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt b
 
 # The product disks: GEM.COM with the desktop beside it, one per DOS.  Its
 # own disks because GEM.COM and M3.COM are 95 KB each and neither DOS's
-# 1040 sectors hold both.
-build/gem-boot.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS)
+# 1040 sectors hold both.  The DOS II+/D disk holds GEM.COM and the
+# desktop alone: with the folder windows the three are 1,000 of its 1,010
+# sectors, so the gate fixtures and M11.G4A are on the SpartaDOS disk only
+# (tools/atr.py knows no double density, which is where DOS II+/D would go).
+build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ GEM.COM $(DISK_DENSITY) $(DISK_FILES) $(DESK_FILES)
+	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ GEM.COM $(DISK_DENSITY) \
+	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC
 
 build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }

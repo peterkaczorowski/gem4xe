@@ -44,6 +44,11 @@ RESULTS = {
     "r_b10_fix": (207, "fix", "B10 clamped into fresh locals"),
 }
 B2 = ("r_b2_eq", "r_b2_lt", "r_b2_mod")
+# file stem: note -- the shapes the compiler cannot get through at all
+CRASHES = {
+    "b6": "B6 indexed direct-page array",
+    "b11": "B11 near <-> far struct copy over 8 bytes",
+}
 
 
 def run(cmd, **kw):
@@ -108,12 +113,15 @@ def main():
             + [e for e in extra if not e.endswith(".o")])
         elfs[tag] = simulate(db, elf, names)
 
-    # B6 is a compiler crash: compile its file alone and read the outcome
-    b6 = subprocess.run([cc, "--code-model=large", "--data-model=small",
-                         f"-O{a.O}", "-o", os.path.join(a.out, "b6.o"),
-                         os.path.join(ROOT, "tools", "ccbug", "b6.c")],
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    b6_present = b6.returncode != 0 and "internal error" in b6.stdout
+    # B6 and B11 are compiler crashes: compile each file alone and read
+    # the outcome from the compiler
+    crashes = {}
+    for tag, note in CRASHES.items():
+        r = subprocess.run([cc, "--code-model=large", "--data-model=small",
+                            f"-O{a.O}", "-o", os.path.join(a.out, f"{tag}.o"),
+                            os.path.join(ROOT, "tools", "ccbug", f"{tag}.c")],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        crashes[note] = r.returncode != 0 and "internal error" in r.stdout
 
     print(f"{version}, -O{a.O}, {os.path.relpath(scm, a.calypsi)}")
     bad = 0
@@ -136,15 +144,16 @@ def main():
             bad += 1
         print(f"  {'B2 with src/sys/div16.s':42s} want {want:5d} got {got:5d}   "
               f"{'ok' if got == want else 'BROKEN'}")
-    print(f"  {'B6 indexed direct-page array':42s} {'compiles':>16s}   "
-          f"{'still present' if b6_present else 'FIXED upstream'}")
-    present += b6_present
+    for note, here in crashes.items():
+        print(f"  {note:42s} {'compiles':>16s}   "
+              f"{'still present' if here else 'FIXED upstream'}")
+        present += here
     print()
     if bad:
         print(f"check-cc: FAILED -- {bad} workaround shape(s) miscompile")
         return 1
     print(f"check-cc: PASSED -- every workaround shape is right; "
-          f"{present} of {sum(1 for v in RESULTS.values() if v[1] == 'bug') + 1} "
+          f"{present} of {sum(1 for v in RESULTS.values() if v[1] == 'bug') + len(CRASHES)} "
           f"bug shapes still present")
     return 0
 

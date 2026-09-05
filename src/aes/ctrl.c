@@ -210,8 +210,9 @@ void hctl_rect(void)
  * pointer is shown whatever the application's hide count -- an
  * application that hid it to draw must not have the menu run unseen --
  * and the count is put back afterwards.  The donor also swaps the
- * pointer's form for the arrow and back; there is no graf_mouse yet to
- * have changed it. */
+ * pointer's form for the arrow while it has it and puts the
+ * application's back; not done -- no program yet reaches a menu with
+ * anything but the arrow set. */
 void ct_mouse(WORD grabit)
 {
     if (grabit) {

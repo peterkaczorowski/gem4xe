@@ -594,6 +594,17 @@ class AES:
         # GEMDOS's drive: the current one and the map Dsetdrv reports,
         # what the harness read from the DOS seam (src/sys/gemdos.c)
         self.dos_drive, self.dos_drvmap = 0, 1
+        # ... and what its file calls see: where the far heap's first
+        # Malloc lands (the gate derives it from the shell's brk), the
+        # DTA's address and what the last search put in it, the
+        # directories by their search path ("A:\\" -> [(name, attr, time,
+        # date, size)] as gemdos.c gd_next lists the disk), and the
+        # search Fsnext goes on with
+        self.dos_brk = 0
+        self.dos_dta = 0
+        self.dos_dta_data = None
+        self.dos_dirs = {}
+        self.dos_search = None
         # shel_write's request, kept for the shell loop
         self.sh_doex = self.sh_isgr = 0
         # What the last level-triggered button quick-out found (ev_wait):
@@ -1659,6 +1670,9 @@ class AES:
             # the screen as it stands, between frames: no input, no tick
             self.shots.append(v.to_rgb())
             return check()
+        if kind == "probe":
+            # the harness reads the target between frames; nothing here
+            return check()
         if kind == "move":
             v.ptr_x, v.ptr_y = step[1], step[2]
         elif kind == "button":
@@ -1950,13 +1964,17 @@ class AES:
     def gsx_mfset(self, form):
         """vsc_form with 37 words: hot spot, planes, the mask's colour and
         the data's, sixteen mask words, sixteen data.  The previous form is
-        kept for graf_mouse(M_PREVIOUS)."""
+        kept for graf_mouse(M_PREVIOUS).  Under a hide and a show, as the
+        donor does it: vsc_form defines the form, and a pointer on the
+        screen keeps its old picture until it is drawn again."""
         form = list(form)
         assert len(form) == gemdata.MFORM_WORDS, len(form)
+        self.gsx_moff()
         if self.gl_mform is not None:
             self.gl_pmform = self.gl_mform
         self.gl_mform = form
         self.vcall(VSC_FORM, (), tuple(form))
+        self.gsx_mon()
 
     def gr_mouse(self, mode, form=None):
         """graf_mouse: a shape, or a command about the pointer.  The
@@ -3932,6 +3950,11 @@ class AES:
         elif n == 44:
             io[0], io[1] = self.offset(ints[0])
             c4 = 2
+        elif n == 45:
+            # objc_order
+            self.ob_order(self.tree, ints[0], ints[1])
+            io[0] = 1
+            c4 = 1
         elif n == 46:
             io[0], io[1] = self.edit(ints[0], ints[1], ints[2], ints[3])
             c4 = 2
@@ -4061,17 +4084,70 @@ class AES:
             # program's calls keeps the target's gem_calls as its index.
             # The drive calls only, from the DOS seam the harness read.
             fn = op - GEMDOS_OP
+            c4 = 1
             if fn == 0x19:              # Dgetdrv
                 io[0] = self.dos_drive
             elif fn == 0x0E:            # Dsetdrv: the map of drives
                 self.dos_drive = ints[0]
                 io[0] = self.dos_drvmap
             else:
-                raise ValueError(f"unknown GEMDOS function {fn:#x}")
-            c4 = 1
+                ret = self.gemdos(fn, ints)
+                io[0], io[1] = ret & 0xFFFF, (ret >> 16) & 0xFFFF
+                c4 = 2
         else:
             raise ValueError(f"unknown AES op {op}")
         return vdiref.record(c2, c4, io, po)
+
+    def gemdos(self, fn, ints):
+        """The file calls of src/sys/gemdos.c the desktop makes, on the
+        listing the harness read off the disk (dos_dirs) and the far heap
+        the gate placed (dos_brk).  `ints` are the trap frame's words
+        from offset 6, a LONG low word first (src/app/gemlib.c); the
+        LONG result."""
+        def long_(i):
+            return ints[i] | (ints[i + 1] << 16)
+
+        if fn == 0x1A:                  # Fsetdta
+            self.dos_dta = long_(0)
+            return 0
+        if fn == 0x2F:                  # Fgetdta
+            return self.dos_dta
+        if fn == 0x48:                  # Malloc: far_alloc, or the room
+            n = long_(0)
+            if n & 0x80000000:
+                # the room left: the far probe's last bank less brk, which
+                # nothing here mirrors
+                raise ValueError("Malloc(-1): the room is the target's to know")
+            if n == 0:
+                return 0
+            ret = self.dos_brk
+            self.dos_brk += (n + 3) & ~3
+            return ret
+        if fn == 0x4E:                  # Fsfirst
+            spec = self.mem[long_(0)].s
+            k = spec.rfind("\\") + 1
+            path, pattern = spec[:k], spec[k:]
+            if path not in self.dos_dirs:
+                raise ValueError(f"Fsfirst {spec!r}: no listing for {path!r}")
+            self.dos_search = (list(self.dos_dirs[path]), pattern, ints[2])
+            return self.gemdos(0x4F, ())
+        if fn == 0x4F:                  # Fsnext
+            if self.dos_search is None:
+                return GD_ENMFIL & 0xFFFFFFFF
+            entries, pattern, want = self.dos_search
+            while entries:
+                name, attr, time, date, size = entries.pop(0)
+                if attr & FA_SUBDIR and not want & FA_SUBDIR:
+                    continue
+                if attr & FA_HIDDEN and not want & FA_HIDDEN:
+                    continue
+                if not fs_wildcmp(pattern, name):
+                    continue
+                self.dos_dta_data = (name, attr, time, date, size)
+                return 0
+            self.dos_search = None
+            return GD_ENMFIL & 0xFFFFFFFF
+        raise ValueError(f"unknown GEMDOS function {fn:#x}")
 
 
 AES_OP = 1000
@@ -4097,6 +4173,12 @@ SHEL_WRITE = 1121
 # (src/app/gemlib.c has the numbers)
 GEMDOS_OP = 2000
 DSETDRV, DGETDRV = GEMDOS_OP + 0x0E, GEMDOS_OP + 0x19
+FSETDTA, FGETDTA, MALLOC = GEMDOS_OP + 0x1A, GEMDOS_OP + 0x2F, GEMDOS_OP + 0x48
+FSFIRST, FSNEXT = GEMDOS_OP + 0x4E, GEMDOS_OP + 0x4F
+# src/sys/gemdos.h: the attributes and the error the searches answer
+FA_RDONLY, FA_HIDDEN, FA_SYSTEM, FA_VOLUME, FA_SUBDIR, FA_ARCHIVE = (
+    0x01, 0x02, 0x04, 0x08, 0x10, 0x20)
+GD_ENMFIL = -49
 
 
 def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None,
@@ -4160,7 +4242,7 @@ def resume(v, a, script, plan=None, base=0):
             if op in (FSEL_INPUT, FSEL_EXINPUT):
                 a.fs_path_addr = rec[3]
                 a.tree = tree
-            elif op == FORM_ALERT:
+            elif op == FORM_ALERT or op >= GEMDOS_OP:
                 a.tree = tree
             else:
                 a.tree = trees[rec[3]] if len(rec) > 3 else tree

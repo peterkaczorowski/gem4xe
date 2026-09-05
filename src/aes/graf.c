@@ -241,7 +241,13 @@ void gsx_mon(void)
  * (M_SAVE) -- are 222 bytes, which bank $00 has not got: they live in
  * far memory too, taken once, and travel through a local on the way in
  * and out.  Far memory is where everything the AES keeps and does not
- * read every frame belongs (docs/phase12.md). */
+ * read every frame belongs (docs/phase12.md).
+ *
+ * The change is made under a hide and a show, as the donor makes it:
+ * vsc_form only defines the form, and a pointer that is on the screen
+ * and not moving keeps its old picture until something redraws it.
+ * Without the pair the desktop's hourglass stayed over a folder it had
+ * finished opening until the mouse moved (phase 14, milestone 5). */
 #define MF_CURR   0
 #define MF_PREV   1
 #define MF_SAVED  2
@@ -260,6 +266,7 @@ void gsx_mfset(const WORD *pmform)
     WORD i;
     uint32_t curr = mf_slot(MF_CURR), prev = mf_slot(MF_PREV);
 
+    gsx_moff();
     if (curr && prev && gl_mform_set) {
         WORD was[GEM_MFORM_WORDS];
         far_get((uint8_t *)was, curr, sizeof was);
@@ -271,6 +278,7 @@ void gsx_mfset(const WORD *pmform)
         far_put(curr, (const uint8_t *)pmform, GEM_MFORM_WORDS * 2);
     gl_mform_set = TRUE;
     gsx_call(VSC_FORM, 0, GEM_MFORM_WORDS);
+    gsx_mon();
 }
 
 /* One of the AES's own eight, out of far memory. */

@@ -137,7 +137,7 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
     /* Every op that takes a tree takes it in addr_in[0]. */
     switch (opcode) {
     case 30: case 31: case 32: case 33: case 34:
-    case 42: case 43: case 44: case 46: case 47:
+    case 42: case 43: case 44: case 45: case 46: case 47:
     case 50: case 54: case 55: case 56:
     case 75:
     case 114:
@@ -256,6 +256,9 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
         break;
     case 44:                        /* objc_offset: obj */
         objc_offset(tree, int_in[0], &int_out[1], &int_out[2]);
+        break;
+    case 45:                        /* objc_order: obj, newpos */
+        ret = ob_order(tree, int_in[0], int_in[1]);
         break;
     case 46: {                      /* objc_edit: obj, char, idx, kind */
         WORD idx = int_in[2];

@@ -1,18 +1,19 @@
 # tools/ccbug — the cc65816 bugs gem4xe works around
 
-Ten defects in Calypsi cc65816 **5.18** — eight in code generation, one
-crash and one in the front end's arithmetic — each reproduced from a shape
+Eleven defects in Calypsi cc65816 **5.18** — eight in code generation, two
+crashes and one in the front end's arithmetic — each reproduced from a shape
 lifted out of gem4xe, each with the shape the sources use instead. `make check-cc` builds `bugs.c` with the
 vendor's minimal linker script and C library, runs it under `db65816`, and
-reads the results back; `b6.c`, which the compiler cannot get through, is
-compiled on its own and the outcome read from the compiler:
+reads the results back; `b6.c` and `b11.c`, which the compiler cannot get
+through, are compiled on their own and the outcome read from the compiler:
 
     make check-cc
       B1 stack array element + operand           want   476 got   376   still present
       B1 through a scalar                        want   476 got   476   ok
       ...
       B6 indexed direct-page array                       compiles   still present
-    check-cc: PASSED -- every workaround shape is right; 13 of 13 bug shapes still present
+      B11 near <-> far struct copy over 8 bytes          compiles   still present
+    check-cc: PASSED -- every workaround shape is right; 14 of 14 bug shapes still present
 
 The run **fails only if a workaround shape stops compiling right**, because
 that is what would break gem4xe. A bug that has gone away is reported as
@@ -56,6 +57,9 @@ What the sources do, in one line each. The reasons follow.
    plainly.
 10. **Never clamp a parameter back into itself in a `static` function.**
     `WORD cx = gx > n ? n : gx;` into a fresh local, then use `cx`.
+11. **Never assign a struct of more than 8 bytes between a near object and
+    a far one.** Copy it byte by byte (`fn_copy`, src/desk/deskwin.c), or
+    keep both sides far — far-to-far copies of any size compile.
 
 ## B1 — stack-array element plus operand compiles to a load
 
@@ -294,3 +298,24 @@ parameters alone compiles right.
 Found by hand-running the desktop (milestone 4, `docs/phase14.md`) and
 dumping its screen tree: two of three icons at impossible coordinates, the
 first one right.
+
+## B11 — a near ↔ far struct copy over 8 bytes is an internal compiler error
+
+    FNODE __far *pf;  FNODE fn;          /* pn_active(), src/desk/deskwin.c */
+    *pf = fn;
+
+    internal error: labeling failed
+
+Either direction — a near local, a near global or a near pointer target,
+to or from a far pointer target — at every `-O` level and in both the small
+and medium data models. A struct of up to 8 bytes is copied through the
+registers and compiles; from 9 bytes up it is a block move the back end
+cannot label. Near-to-near and far-to-far copies of any size compile, so
+the listing's insertion sort slides FNODEs with `*pf = *(pf - 1)` (far to
+far) and puts the new one in through a byte loop.
+
+Found in Phase 14, milestone 5, as the first compile of the folder windows
+failed at once; bisected to the one statement with a delta-minimiser (the
+three-function "minimal failing set" it first reported was an artefact of
+unused statics being dropped: the function alone, `static` and unreferenced,
+compiles because it is never translated).

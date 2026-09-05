@@ -241,7 +241,7 @@ def apply_step(b, ptr, step, done=None):
             if done and done():
                 break
         return
-    if kind == "shot":
+    if kind in ("shot", "probe"):
         # between frames, as the reference takes its: step[1](bridge)
         step[1](b)
         return

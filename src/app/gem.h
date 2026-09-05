@@ -27,6 +27,7 @@
 #define GEM4XE_APP_GEM_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 typedef short          WORD;
 typedef unsigned short UWORD;
@@ -109,6 +110,7 @@ typedef struct {
 #define DISABLED   0x0008
 #define OUTLINED   0x0010
 #define SHADOWED   0x0020
+#define WHITEBAK   0x0040       /* an icon over a white ground: leave it */
 #define NIL        (-1)
 #define TRUE       1
 #define FALSE      0
@@ -163,6 +165,12 @@ typedef struct {
 #define MOVER   0x0008
 #define INFO    0x0010
 #define SIZER   0x0020
+#define UPARROW 0x0040
+#define DNARROW 0x0080
+#define VSLIDE  0x0100
+#define LFARROW 0x0200
+#define RTARROW 0x0400
+#define HSLIDE  0x0800
 #define WF_KIND     1
 #define WF_NAME     2
 #define WF_INFO     3
@@ -170,10 +178,23 @@ typedef struct {
 #define WF_CURRXYWH 5
 #define WF_PREVXYWH 6
 #define WF_FULLXYWH 7
+#define WF_HSLIDE   8
+#define WF_VSLIDE   9
 #define WF_TOP      10
 #define WF_FIRSTXYWH 11
 #define WF_NEXTXYWH 12
 #define WF_NEWDESK  14
+#define WF_HSLSIZ   15
+#define WF_VSLSIZ   16
+/* WM_ARROWED's word 4 */
+#define WA_UPPAGE   0
+#define WA_DNPAGE   1
+#define WA_UPLINE   2
+#define WA_DNLINE   3
+#define WA_LFPAGE   4
+#define WA_RTPAGE   5
+#define WA_LFLINE   6
+#define WA_RTLINE   7
 #define WC_BORDER   0
 #define WC_WORK     1
 #define END_UPDATE  0
@@ -249,6 +270,9 @@ WORD objc_find(OBJECT *tree, WORD start, WORD depth, WORD mx, WORD my);
 WORD objc_offset(OBJECT *tree, WORD obj, WORD *x, WORD *y);
 WORD objc_change(OBJECT *tree, WORD obj, WORD resvd, WORD x, WORD y, WORD w, WORD h,
                  WORD state, WORD redraw);
+/* newpos: 0 puts the object first among its siblings (the bottom of the
+ * stack), NIL last (the top), n after the nth. */
+WORD objc_order(OBJECT *tree, WORD obj, WORD newpos);
 
 WORD form_do(OBJECT *tree, WORD start);
 WORD form_dial(WORD type, WORD x1, WORD y1, WORD w1, WORD h1,
@@ -259,6 +283,8 @@ WORD form_center(OBJECT *tree, WORD *x, WORD *y, WORD *w, WORD *h);
 
 WORD graf_handle(WORD *wchar, WORD *hchar, WORD *wbox, WORD *hbox);
 WORD graf_mouse(WORD mode, const WORD *form);  /* form only for USER_DEF */
+WORD graf_growbox(WORD x1, WORD y1, WORD w1, WORD h1, WORD x2, WORD y2, WORD w2, WORD h2);
+WORD graf_shrinkbox(WORD x1, WORD y1, WORD w1, WORD h1, WORD x2, WORD y2, WORD w2, WORD h2);
 WORD graf_mkstate(WORD *mx, WORD *my, WORD *mb, WORD *ks);
 
 WORD wind_create(WORD kind, WORD x, WORD y, WORD w, WORD h);

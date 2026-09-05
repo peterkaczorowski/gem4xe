@@ -10,7 +10,7 @@
 
 static const OBJECT gl_sampob[2] = {
     { NIL, NIL, NIL, G_IBOX, NONE, NORMAL, 0L,        0, 0, 0, 0 },
-    { NIL, NIL, NIL, G_BOX,  NONE, NORMAL, DESK_SPEC, 0, 0, 0, 0 },
+    { NIL, NIL, NIL, G_BOX,  NONE, NORMAL, WINDOW_SPEC, 0, 0, 0, 0 },
 };
 
 static void r_set(OBJECT *obj, WORD x, WORD y, WORD w, WORD h)
@@ -130,4 +130,41 @@ WORD obj_get_obid(WORD drive)
 SCREENINFO *obj_info(WORD obj)
 {
     return &G.g_screeninfo[obj - WOBS_START];
+}
+
+/* An icon item under wparent at (x, y): a copy of the resource's
+ * ICONBLK with the label and the letter, the image centred in the cell
+ * -- the donor's app_blddesk for one ANODE, and win_bldview for one
+ * FNODE.  0 when the items are all in use. */
+WORD obj_icon(WORD wparent, WORD x, WORD y, WORD which,
+              const char __far *label, WORD letter)
+{
+    WORD obid;
+    OBJECT *pob;
+    SCREENINFO *si;
+    ICONBLK *pic;
+    char *d;
+
+    obid = obj_ialloc(wparent, x, y, G.g_wicon, G.g_hicon);
+    if (!obid)
+        return 0;
+    pob = &G.g_screen[obid];
+    pob->ob_state = NORMAL;
+    pob->ob_flags = NONE;
+    pob->ob_type = G_ICON;
+    si = obj_info(obid);
+    pic = &si->icon;
+    *pic = G.a_iblist[which];
+    pob->ob_spec = (LONG)(uint16_t)pic;
+    pic->ib_xicon = (WORD)((G.g_wicon - pic->ib_wicon) / 2);
+    pic->ib_ytext = pic->ib_hicon;
+    pic->ib_wtext = (WORD)(MAX_ICONTEXT_WIDTH * G.g_wchar);
+    pic->ib_htext = (WORD)(G.g_hchar + 2);
+    pic->ib_char = (WORD)((pic->ib_char & 0xFF00) | letter);
+    d = si->label;
+    while (*label && d < si->label + LABEL_LEN - 1)
+        *d++ = *label++;
+    *d = 0;
+    pic->ib_ptext = (LONG)(uint16_t)si->label;
+    return obid;
 }

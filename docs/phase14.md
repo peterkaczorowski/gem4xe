@@ -7,8 +7,9 @@ Dcreate/Ddelete and Dfree, every answer compared with the image on the
 host; DOS 2 and SpartaDOS X are recorded below as they are measured.
 Milestone 3, the shell loop: `make test-m16` PASS, and GEM.COM itself
 boots, runs the desktop, runs a program from it, and returns to the DOS
-prompt on both product disks (the section at the end).  Nothing here
-has run on a Rapidus, a VBXE or a real SpartaDOS machine.
+prompt on both product disks.  Milestones 4 and 5, the desktop and its
+folder windows: `make test-m17` PASS (the sections at the end).
+Nothing here has run on a Rapidus, a VBXE or a real SpartaDOS machine.
 
 The GEM Desktop is a GEM application: it draws through the VDI, runs
 under the AES, and asks **GEMDOS** for everything else -- which files
@@ -601,3 +602,130 @@ in Altirra with the joystick's trigger for the button.  Not in this
 milestone: the View and Options items and File's window items are in
 the menu, disabled (`NOT_YET`), until milestone 5 opens a folder window
 and 6 runs a program from an icon and brings the desktop back.
+
+## Milestone 5: the folder windows
+
+`make test-m17` PASS, extended.  A double-click on a drive icon opens a
+window on the drive's root, sorted folders first; a double-click on a
+folder in it walks the window into the folder, File -> Close and the
+closer walk it back out (at the root they close the window); the
+fuller grows the window to the desk and back; the arrows scroll the
+listing; File -> Close Window closes it wherever it is.
+`src/desk/deskwin.c` is the donor's deskwin.c and deskfpd.c with the
+window half of its desksupp.c and deskact.c, for the one view this
+desktop has (icons) and the one order (name, folders first).  A window
+is a WNODE: the AES window, its box in the screen tree (the four boxes
+under ROOT that deskobj.c has always built, one per window, in stacking
+order -- `objc_order` moves the topped one last), the rows of the item
+grid in view, and a PNODE, the directory it lists -- the search spec
+and an FNODE per entry read through `Fsfirst`/`Fsnext`.  The FNODEs
+are in far memory: a window's worth (64) is 1.7 KB, four windows' more
+than the near data allows, so the desktop `Malloc`s one arena at start
+(the listing's DTA, then the FNODEs; 7212 bytes) and the AES never
+reads there.  What it does read -- the window's name and information
+lines, the labels behind `ib_ptext` -- stays in bank `$00`, in the
+WNODE.
+
+Opening lists the directory into the FNODEs by insertion as they are
+read (the donor sorts its list afterwards; here there are 64 at most),
+names the window after the spec (" A:\SUB\*.* "), puts the total on
+the information line (" 145320 bytes used in 9 items."), and builds
+the items -- a G_ICON per entry in the rows shown, the folder, program
+or document icon by its attribute and name -- under the window's box
+for the AES to draw when it asks.  Every redraw is a `WM_REDRAW`
+answered with `objc_draw` under the window's rectangle list, so a
+window under another draws only what shows; the open grows out of the
+icon and the fuller between the two rectangles (`graf_growbox`,
+`graf_shrinkbox`), as the donor animates them, and a close is not
+animated.  Scrolling rebuilds the items a row on.  The bindings the
+desktop needed (`src/app/gemlib.c`): `objc_order`, `graf_growbox` and
+`graf_shrinkbox`, the slider modes of `wind_get`/`wind_set`, and
+`Fsfirst`, `Fsnext`, `Fsetdta`, `Fgetdta`, `Malloc` and `Mfree`
+through the GEMDOS face.  The resource gained the three item icons
+(folder, program, document: 4150 bytes, from 3278), and the desktop's
+globals are 1960 bytes now, the WNODEs in them.
+
+### What was wrong on the way
+
+An eleventh compiler defect, B11 in `tools/ccbug/`: a struct
+assignment between a near object and a far one is an internal error
+("labeling failed") when the struct is longer than 8 bytes, at every
+`-O` level and in both data models -- up to 8 bytes the copy goes
+through registers, from 9 it is a block move the back end cannot
+label.  Near to near and far to far copy at any size.  `fn_copy`
+moves the FNODE byte by byte; the shuffle within the far list is a
+far-to-far assignment and compiles as it is written.
+
+The first window never opened.  The gate stalled with the CPU parked
+in the fault handler, and the post-mortem it gained for the purpose --
+the screen, REGS, HISTORY, `irq_fault`, the application's S read off
+the ABI's saved stack pointer -- showed S at `$5109`, below the
+desktop's stack, whose bottom was `$5126`: the open (the button,
+`do_open`, `do_dopen`, `do_wopen`, `graf_growbox` and the COP's frame
+on top) had run the 256 bytes out into the globals below it.  A
+`.G4A`'s stack is part of its near bss and had been the
+linker script's `(block stack (size #x0100))` for every application;
+the size is now the link's `--stack-size`, which the Makefile's `g4a`
+macro takes as an argument and the map shows, and the desktop's is
+640.  The measured low-water mark is 347, so 256 was ninety bytes
+short.  Not 3 KB of bss, which is what the first attempt was: the
+runner's pool is 8192 bytes, and the desktop's near region (3584, a
+page multiple), `DESKTOP.RSC` (4150) and the 320-byte work area every
+GEMDOS call takes from what is left (`gd_work_t`: two 128-byte paths
+and a CIO name) leave 138 bytes for the directory read-ahead; another
+page of near region would have left 202, and every GEMDOS call
+`ENSMEM`.  The gate paints the desktop's stack when the desktop first
+waits and reports its low-water mark with the runner's, and fails if
+the margin is under 64 bytes.
+
+The hourglass stayed over the folder the desktop had finished opening,
+until the mouse moved -- in the target and in the model, so the gate
+was green with it in both screens, the phase-8 lesson again.
+`graf_mouse(ARROW)` is `vsc_form`, and `vsc_form` only defines the
+form: a pointer that is on the screen and not moving keeps its old
+picture until something draws it again, in the donor's VDI as in ours.
+What the donor's AES does about it is in `gsx_mfset`, which hides the
+pointer before the change and shows it after; both `src/aes/graf.c`
+and `tools/aesref.py` do now, and every path to it -- `graf_mouse`,
+`form_alert`'s arrow -- was re-run (`test-m13`, `test-m16`).  Not
+done: the donor's control manager also swaps the arrow in while it
+owns the mouse for a menu and puts the application's form back; no
+program yet reaches a menu with anything but the arrow set
+(`src/aes/ctrl.c`).
+
+One thing the model settled before the emulator did, again: the
+desktop asks `evnt_multi` for two clicks, so a press on a window gadget
+is held for the double-click time before the AES acts on it, and only
+then does the control manager watch the gadget while the button is down
+and send its message at the release.  The gate's gadget click is a
+press, fourteen frames, and the release (`GCLICK`).  The arrow is the
+exception: its message comes at the delayed press and again for as
+long as it is held, so its plan ends with the press and the next
+wait's begins with the release.
+
+### The gate, and the product disk
+
+The transcription (`tools/deskref.py`) grew with the desktop: 250
+calls, eleven waits, and the GEMDOS calls among them answered on the
+model from the listing the gate reads off the disk image with
+`tools/atr.py` -- the same entries, attributes and stamps `gemdos.c`
+derives from SpartaDOS's raw directory -- and `Malloc` from a brk the
+gate derives from the shell's.  Checked: thirteen screens (the desk,
+the Desk menu, About, the dialog, the window on A:, on A:\SUB, on A:
+again, full, back, scrolled, closed, the File menu, Quit); `G`, all
+1960 bytes, at the nine waits where it changed, against the model's;
+250 calls on both sides and none refused; the pool back at `$4800`
+with 8192 free and the far heap higher by the desktop's file exactly
+(16812 bytes: near 3584, far 11858, and 669 fixups); the runner's
+stack low-water mark, 1223 of 2048, and the desktop's, 347 of 640.
+The desktop comes up 690 frames after GO on the SpartaDOS disk (430 in
+milestone 4; the file is nearly twice the size).  The model's screens
+are what the target matched pixel for pixel; `--shot` keeps the
+target's in `build/shots/`.
+
+The DOS II+/D product disk holds GEM.COM, DESKTOP.G4A and DESKTOP.RSC
+and nothing else now, 18 sectors free: `tools/atr.py` knows no double
+density, and the three fill a single-density disk.  The gate fixtures
+and M11.G4A are on the SpartaDOS disk only, which is where milestone 6
+-- a program run from an icon, and the desktop back -- will find a
+program to run; what the DOS 2 disk runs is a question for then.

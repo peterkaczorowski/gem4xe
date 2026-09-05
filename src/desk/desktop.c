@@ -7,10 +7,11 @@
  * with a screen tree of drive icons and the trash, put the menu bar
  * up, and answer evnt_multi until Quit.
  *
- * Milestone 4 of docs/phase14.md is this much: the bar, the icons, the
- * About dialog, Quit, and an icon that selects when clicked.  The items
- * that open windows and act on files are in the menu, disabled, until
- * the milestones that bring them (NOT_YET_ITEMS, build/deskrsc.h).
+ * Milestone 4 of docs/phase14.md was the bar, the icons, the About
+ * dialog, Quit, and an icon that selects when clicked; milestone 5 is
+ * the folder windows (deskwin.c) a double-click on a drive icon opens.
+ * The items that act on files are in the menu, disabled, until the
+ * milestones that bring them (NOT_YET_ITEMS, build/deskrsc.h).
  */
 #include "desk.h"
 
@@ -32,7 +33,7 @@ static void end_dialog(void)
     form_dial(FMD_FINISH, 0, 0, 0, 0, dlg.g_x, dlg.g_y, dlg.g_w, dlg.g_h);
 }
 
-static void desk_busy(WORD on)
+void desk_busy(WORD on)
 {
     wind_update(BEG_UPDATE);
     graf_mouse(on ? HOURGLASS : ARROW, 0);
@@ -40,24 +41,6 @@ static void desk_busy(WORD on)
 }
 
 /* -- the desk ---------------------------------------------------------- */
-
-/* Draw the screen tree from obj, once per rectangle of the desktop's
- * list that meets *pc: the donor's do_wredraw for DESKWH. */
-static void desk_redraw(WORD obj, const GRECT *pc)
-{
-    GRECT r;
-
-    wind_get(DESKWH, WF_FIRSTXYWH, &r.g_x, &r.g_y, &r.g_w, &r.g_h);
-    while (r.g_w && r.g_h) {
-        WORD x0 = r.g_x > pc->g_x ? r.g_x : pc->g_x;
-        WORD y0 = r.g_y > pc->g_y ? r.g_y : pc->g_y;
-        WORD x1 = r.g_x + r.g_w < pc->g_x + pc->g_w ? r.g_x + r.g_w : pc->g_x + pc->g_w;
-        WORD y1 = r.g_y + r.g_h < pc->g_y + pc->g_h ? r.g_y + r.g_h : pc->g_y + pc->g_h;
-        if (x0 < x1 && y0 < y1)
-            objc_draw(G.g_screen, obj, MAX_DEPTH, x0, y0, (WORD)(x1 - x0), (WORD)(y1 - y0));
-        wind_get(DESKWH, WF_NEXTXYWH, &r.g_x, &r.g_y, &r.g_w, &r.g_h);
-    }
-}
 
 /* The donor's snap_icon: grid position (gx, gy) as a pixel position,
  * the spare pixels shared out between the columns and the rows. */
@@ -80,40 +63,13 @@ static void snap_icon(WORD gx, WORD gy, WORD *px, WORD *py)
     *py = (WORD)(cy * G.g_ich + spare / rows + G.g_desk.g_y);
 }
 
-/* An icon on the desk at grid (gx, gy): a copy of the resource's ICONBLK
- * with the label and the letter, the image centred in the cell -- the
- * donor's app_blddesk for one ANODE. */
+/* An icon on the desk at grid (gx, gy). */
 static WORD desk_icon(WORD gx, WORD gy, WORD which, const char *label, WORD letter)
 {
-    WORD x, y, obid;
-    OBJECT *pob;
-    SCREENINFO *si;
-    ICONBLK *pic;
-    char *d;
+    WORD x, y;
 
     snap_icon(gx, gy, &x, &y);
-    obid = obj_ialloc(DROOT, x, y, G.g_wicon, G.g_hicon);
-    if (!obid)
-        return 0;
-    pob = &G.g_screen[obid];
-    pob->ob_state = NORMAL;
-    pob->ob_flags = NONE;
-    pob->ob_type = G_ICON;
-    si = obj_info(obid);
-    pic = &si->icon;
-    *pic = G.a_iblist[which];
-    pob->ob_spec = (LONG)(uint16_t)pic;
-    pic->ib_xicon = (WORD)((G.g_wicon - pic->ib_wicon) / 2);
-    pic->ib_ytext = pic->ib_hicon;
-    pic->ib_wtext = (WORD)(MAX_ICONTEXT_WIDTH * G.g_wchar);
-    pic->ib_htext = (WORD)(G.g_hchar + 2);
-    pic->ib_char = (WORD)((pic->ib_char & 0xFF00) | letter);
-    d = si->label;
-    while (*label && d < si->label + LABEL_LEN - 1)
-        *d++ = *label++;
-    *d = 0;
-    pic->ib_ptext = (LONG)(uint16_t)si->label;
-    return obid;
+    return obj_icon(DROOT, x, y, which, label, letter);
 }
 
 /* The desk: a disk icon per drive in GEMDOS's map, floppies for the
@@ -166,18 +122,15 @@ static void desk_build(void)
     desk_icon(gx, gy, IB_TRASH, trash, 0);
 }
 
-/* Select one icon and no other, or none (obj 0); redrawn in place. */
-static void desk_select(WORD obj)
+/* The selected item under root, or 0. */
+static WORD sel_item(WORD root)
 {
     WORD i;
 
-    for (i = G.g_screen[DROOT].ob_head; i >= WOBS_START; i = G.g_screen[i].ob_next) {
-        UWORD state = G.g_screen[i].ob_state;
-        UWORD want = (i == obj) ? (state | SELECTED) : (state & ~SELECTED);
-        if (want != state)
-            objc_change(G.g_screen, i, 0, G.g_desk.g_x, G.g_desk.g_y,
-                        G.g_desk.g_w, G.g_desk.g_h, (WORD)want, TRUE);
-    }
+    for (i = G.g_screen[root].ob_head; i >= WOBS_START; i = G.g_screen[i].ob_next)
+        if (G.g_screen[i].ob_state & SELECTED)
+            return i;
+    return 0;
 }
 
 /* -- the menu ---------------------------------------------------------- */
@@ -197,9 +150,31 @@ static WORD do_deskmenu(WORD item)
 
 static WORD do_filemenu(WORD item)
 {
-    if (item == QUITITEM) {
+    WNODE *pw = win_ontop();
+    WORD obj;
+
+    switch (item) {
+    case OPENITEM:                              /* the top window's selection,
+                                                 * else the desk's */
+        obj = pw ? sel_item(pw->w_root) : 0;
+        if (obj)
+            do_open(pw->w_id, obj);
+        else if ((obj = sel_item(DROOT)) != 0)
+            do_open(DESKWH, obj);
+        break;
+    case CLOSITEM:
+        if (pw)
+            win_close(pw, FALSE);
+        break;
+    case CLSWITEM:
+        if (pw)
+            win_close(pw, TRUE);
+        break;
+    case QUITITEM:
         shel_write(SHW_SHUTDOWN, 0, 0, "", "\0");
         return TRUE;
+    default:
+        break;
     }
     return FALSE;
 }
@@ -224,16 +199,28 @@ static WORD hndl_menu(WORD title, WORD item)
 
 /* -- events ------------------------------------------------------------ */
 
+/* A press on the desk or in a window's work area (the control manager
+ * keeps the gadgets and the windows under the top one): select the
+ * item under it and no other there; two clicks open it. */
 static WORD hndl_button(WORD clicks, WORD mx, WORD my)
 {
-    WORD wh, obj;
+    WORD wh, root, obj;
 
-    (void)clicks;
     wh = wind_find(mx, my);
-    if (wh != DESKWH)
-        return FALSE;
-    obj = objc_find(G.g_screen, DROOT, MAX_DEPTH, mx, my);
-    desk_select(obj >= WOBS_START ? obj : 0);
+    if (wh == DESKWH) {
+        root = DROOT;
+    } else {
+        WNODE *pw = win_find(wh);
+        if (!pw)
+            return FALSE;
+        root = pw->w_root;
+    }
+    obj = objc_find(G.g_screen, root, MAX_DEPTH, mx, my);
+    if (obj < WOBS_START)
+        obj = 0;
+    act_select(wh, root, obj);
+    if (obj && clicks == 2)
+        do_open(wh, obj);
     return FALSE;
 }
 
@@ -244,6 +231,18 @@ static WORD hndl_msg(void)
     switch (msg[0]) {
     case MN_SELECTED:
         return hndl_menu(msg[3], msg[4]);
+    case WM_REDRAW:
+    case WM_TOPPED:
+    case WM_CLOSED:
+    case WM_FULLED:
+    case WM_ARROWED:
+    case WM_HSLID:
+    case WM_VSLID:
+    case WM_SIZED:
+    case WM_MOVED:
+    case WM_NEWTOP:
+        hndl_wmsg(msg);
+        return FALSE;
     default:
         return FALSE;
     }
@@ -290,9 +289,17 @@ int main(void)
 
     obj_init();
     desk_build();
+    if (!win_start()) {
+        desk_busy(FALSE);
+        form_alert(1, "[3][There is no memory|for the windows.][ Quit ]");
+        rsrc_free();
+        shel_write(SHW_SHUTDOWN, 0, 0, "", "\0");
+        appl_exit();
+        return 1;
+    }
     wind_newdesk(G.g_screen, DROOT);
     wind_update(BEG_UPDATE);
-    desk_redraw(DROOT, &G.g_desk);
+    do_wredraw(DESKWH, &G.g_desk);
     menu_bar(G.a_menu, 1);
     wind_update(END_UPDATE);
     desk_busy(FALSE);
@@ -316,6 +323,9 @@ int main(void)
         wind_update(END_UPDATE);
     }
 
+    for (i = 0; i < NUM_WNODES; i++)
+        if (G.g_wlist[i].w_id > 0)
+            win_close(&G.g_wlist[i], TRUE);
     menu_bar(G.a_menu, 0);
     wind_newdesk(0, ROOT);
     rsrc_free();

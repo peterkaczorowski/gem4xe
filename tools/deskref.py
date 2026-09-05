@@ -5,15 +5,16 @@ src/desk/desktop.c is a program, not a script: what it asks the AES
 next depends on what the AES answered last -- the character cell from
 graf_handle sizes the icons, the desk from wind_get places them, the
 rectangle list drives the redraw, the drive map from Dsetdrv says how
-many disks there are, and evnt_multi's answer chooses the branch.  So
-the gate (tests/emu/m17_desktop.py) cannot hand the model a script the
-way the earlier gates do; it hands the model the desktop, transcribed
-here call for call, and the desktop asks the model as it goes.  What
-comes out is the same thing the gates always had: the list of records
-the desktop made (Desktop.script), the input each wait was given
-(Desktop.plan, keyed the way m7_form.drive wants it), and the model's
-screen at every ("shot",) step (AES.shots) -- to be compared with the
-target, which runs the real DESKTOP.G4A under sh_main.
+many disks there are, the directory Fsfirst/Fsnext list fills the
+window, and evnt_multi's answer chooses the branch.  So the gate
+(tests/emu/m17_desktop.py) cannot hand the model a script the way the
+earlier gates do; it hands the model the desktop, transcribed here call
+for call from desktop.c, deskobj.c and deskwin.c, and the desktop asks
+the model as it goes.  What comes out is the same thing the gates always
+had: the list of records the desktop made (Desktop.script), the input
+each wait was given (Desktop.plan, keyed the way m7_form.drive wants
+it), and the model's screen at every ("shot",) step (AES.shots) -- to be
+compared with the target, which runs the real DESKTOP.G4A under sh_main.
 
 The addresses are the target's, derived the way src/sys/app.c and
 src/aes/rsrc.c derive them from the application pool: the near region
@@ -23,9 +24,15 @@ the first even address after the near region.  The desktop's G4A header
 gives the link addresses; build/desktop.sym gives G.  Nothing here is a
 number read off a probe.
 
-The screen tree is built as deskobj.c and desktop.c build it, object by
-object, and Desktop.globes() packs G as the target lays it out (desk.h),
-so the gate can read G back from the target and compare every byte.
+The screen tree is built as deskobj.c builds it, object by object; the
+windows' WNODEs as deskwin.c fills them, a FNODE per directory entry
+from the model's GEMDOS (aesref.AES.gemdos, over the listing the gate
+read off the disk); and Desktop.globes() packs G as the target lays it
+out (desk.h), so the gate can read G back from the target and compare
+every byte.  The strings the program writes in place -- a window's
+search spec, title and info line, an icon's label -- are CharArrays
+registered at their G addresses, so the model's Fsfirst, wind_set and
+icon drawer read what the target's would.
 """
 import os
 import sys
@@ -35,23 +42,37 @@ import aesref                               # noqa: E402
 import vdiref                               # noqa: E402
 import deskrsc                              # noqa: E402
 from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
-                    G_BOX, G_IBOX, G_ICON, NONE, NORMAL, SELECTED,
-                    NIL, ROOT, MAX_DEPTH, ARROW, HOURGLASS,
+                    G_BOX, G_IBOX, G_ICON, NONE, NORMAL, SELECTED, WHITEBAK,
+                    NIL, ROOT, MAX_DEPTH, ARROW, HOURGLASS, M_OFF, M_ON,
                     BEG_UPDATE, END_UPDATE, MU_KEYBD, MU_BUTTON, MU_MESAG,
-                    MU_TIMER, FMD_START, FMD_FINISH, WF_WXYWH,
-                    WF_FIRSTXYWH, WF_NEXTXYWH, WF_NEWDESK, MN_SELECTED,
+                    MU_TIMER, FMD_START, FMD_FINISH,
+                    NAME, CLOSER, FULLER, MOVER, INFO, SIZER, UPARROW,
+                    DNARROW, VSLIDE, LFARROW, RTARROW, HSLIDE,
+                    WF_NAME, WF_INFO, WF_WXYWH, WF_CXYWH, WF_PXYWH, WF_FXYWH,
+                    WF_VSLIDE, WF_TOP, WF_FIRSTXYWH, WF_NEXTXYWH, WF_NEWDESK,
+                    WF_HSLSIZ, WF_VSLSIZ,
+                    WM_REDRAW, WM_TOPPED, WM_CLOSED, WM_FULLED, WM_ARROWED,
+                    WM_VSLID, WM_SIZED, WM_MOVED, WM_NEWTOP,
+                    WA_UPPAGE, WA_DNPAGE, WA_UPLINE, WA_DNLINE, MN_SELECTED,
                     APPL_INIT, APPL_EXIT, EVNT_MULTI, MENU_BAR,
                     MENU_IENABLE, MENU_TNORMAL, OBJC_DRAW, OBJC_FIND,
-                    OBJC_CHANGE, FORM_DO, FORM_DIAL, FORM_CENTER,
-                    GRAF_HANDLE, WIND_GET, WIND_SET, WIND_FIND, WIND_UPDATE,
+                    OBJC_OFFSET, FORM_DO, FORM_DIAL, FORM_CENTER, FORM_ALERT,
+                    GRAF_HANDLE, GRAF_GROWBOX, GRAF_SHRINKBOX,
+                    WIND_CREATE, WIND_OPEN, WIND_CLOSE, WIND_DELETE,
+                    WIND_GET, WIND_SET, WIND_FIND, WIND_UPDATE,
                     RSRC_LOAD, RSRC_FREE, RSRC_GADDR, SHEL_WRITE,
-                    DSETDRV, DGETDRV)
+                    DSETDRV, DGETDRV, FSETDTA, MALLOC, FSFIRST, FSNEXT,
+                    FA_SUBDIR)
 from rsc import R_TREE, R_ICONBLK, R_STRING, ICONBLK_SIZE  # noqa: E402
 from deskrsc import (ADMENU, ADDINFO, DESKMENU, FILEMENU, ABOUITEM,  # noqa: E402
-                     QUITITEM, DEVERSN, DEOK, STDISK, STTRASH,
-                     IB_HARD, IB_FLOPPY, IB_TRASH, NOT_YET)
+                     OPENITEM, CLOSITEM, CLSWITEM, QUITITEM, DEVERSN, DEOK,
+                     STDISK, STTRASH, IB_HARD, IB_FLOPPY, IB_TRASH,
+                     IB_FOLDER, IB_APPL, IB_DOCU, NOT_YET)
 
+# the two AES calls aesref numbers only in its dispatcher
+OBJC_ORDER = 1045
 GRAF_MOUSE = 1078
+E_OK = 0
 
 # -- desk.h ----------------------------------------------------------------
 DESKWH, DROOT, NUM_WNODES = 0, 1, 4
@@ -62,19 +83,40 @@ MAX_DRIVES = 8
 MAX_ICONTEXT_WIDTH = 12
 LABEL_LEN = MAX_ICONTEXT_WIDTH + 1
 DESK_SPEC = 0x00001143
+WINDOW_SPEC = 0x00001100
 MIN_WINT, MIN_HINT = 4, 2
+WINDOW_STYLE = (NAME | CLOSER | FULLER | MOVER | INFO | SIZER | UPARROW
+                | DNARROW | VSLIDE | LFARROW | RTARROW | HSLIDE)
+LEN_ZPATH, LEN_ZFNAME, LEN_ZINFO = 48, 14, 36
+LEN_WNAME = LEN_ZPATH + 2
+NUM_FNODES = 64
+DISPATTR = FA_SUBDIR
+F_SELECTED = 0x0001
 SHW_SHUTDOWN = 4                            # gem.h
 AES_VERSION = 0x0140                        # abi.c: global[0]
 SCREENINFO_SIZE = ICONBLK_SIZE + LABEL_LEN
 OBJ_SIZE = aesref.OBJ_SIZE
 RESULT_INTOUT = vdiref.RESULT_INTOUT
+# the structs deskwin.c keeps, sized as cc65816 lays them out (no padding)
+DTA_SIZE, FNODE_SIZE = 44, 28
+PNODE_SIZE = 2 + 4 + LEN_ZPATH + 4
+WNODE_SIZE = 12 + PNODE_SIZE + LEN_WNAME + LEN_ZINFO
+# where a WNODE's in-place strings are
+WN_SPEC, WN_NAME, WN_INFO = 12 + 6, 12 + PNODE_SIZE, 12 + PNODE_SIZE + LEN_WNAME
+
+# -- deskwin.c -------------------------------------------------------------
+ARENA_SIZE = DTA_SIZE + NUM_WNODES * NUM_FNODES * FNODE_SIZE
+WIN_XCELL, WIN_WCELL, WIN_HCELL = 2, 38, 12
+WIN_YCELL = (6, 8, 10, 13)
 
 # GLOBES, field by field in the order desk.h declares them; sizes as
-# cc65816 lays them out (WORD 2, a near pointer 2, GRECT 8, no padding).
+# cc65816 lays them out (WORD 2, a near pointer 2, a far pointer 4,
+# GRECT 8, no padding).
 GLOBES = [("a_menu", 2), ("a_info", 2), ("a_iblist", 2), ("g_handle", 2),
           ("g_wchar", 2), ("g_hchar", 2), ("g_wbox", 2), ("g_hbox", 2),
           ("g_desk", 8), ("g_wicon", 2), ("g_hicon", 2), ("g_icw", 2),
           ("g_ich", 2), ("g_screenfree", 2), ("g_rmsg", 16),
+          ("g_wcnt", 2), ("g_dta", 4), ("g_wlist", NUM_WNODES * WNODE_SIZE),
           ("g_screen", NUM_SOBS * OBJ_SIZE),
           ("g_screeninfo", NUM_ITEMS * SCREENINFO_SIZE)]
 GLOBES_SIZE = sum(n for _, n in GLOBES)
@@ -94,16 +136,116 @@ def w(x):
     return (x & 0xFFFF).to_bytes(2, "little")
 
 
+def dw(x):
+    """A LONG."""
+    return (x & 0xFFFFFFFF).to_bytes(4, "little")
+
+
+def signed(x):
+    """A WORD the model returned through a result record, as the
+    program's WORD sees it."""
+    x &= 0xFFFF
+    return x - 0x10000 if x & 0x8000 else x
+
+
+def mul_div(m1, m2, d1):
+    return (m1 * m2) // d1                  # never negative here
+
+
+def rc_intersect(p1, p2):
+    """p2 becomes the part of it inside p1; True if any is."""
+    tw = min(p2.x + p2.w, p1.x + p1.w)
+    th = min(p2.y + p2.h, p1.y + p1.h)
+    tx = max(p2.x, p1.x)
+    ty = max(p2.y, p1.y)
+    p2.x, p2.y, p2.w, p2.h = tx, ty, tw - tx, th - ty
+    return tw > tx and th > ty
+
+
+def far_strcmp(a, b):
+    i = 0
+    while i < len(a) and i < len(b) and a[i] == b[i]:
+        i += 1
+    ca = ord(a[i]) if i < len(a) else 0
+    cb = ord(b[i]) if i < len(b) else 0
+    return ca - cb
+
+
+class CharArray:
+    """A char[size] the program writes into in place with put_str: the
+    bytes past the NUL stay what they were, as the target's do, and the
+    model reads the string through .s the way it reads a Text."""
+
+    def __init__(self, size):
+        self.size = size
+        self.raw = bytearray(size)
+
+    @property
+    def s(self):
+        n = self.raw.find(0)
+        return bytes(self.raw if n < 0 else self.raw[:n]).decode("latin-1")
+
+    def put(self, s, at=0):
+        """The chars and a NUL from `at`; returns where the NUL went."""
+        b = s.encode("latin-1")
+        assert at + len(b) < self.size, (s, at, self.size)
+        self.raw[at:at + len(b)] = b
+        self.raw[at + len(b)] = 0
+        return at + len(b)
+
+    def pack(self):
+        return bytes(self.raw)
+
+
+class Fnode:
+    """A directory entry in a window's listing (far memory: not in G)."""
+    __slots__ = ("obid", "flags", "attr", "time", "date", "size", "name")
+
+    def __init__(self, attr, time, date, size, name):
+        self.obid = self.flags = 0
+        self.attr, self.time, self.date, self.size, self.name = (
+            attr, time, date, size, name)
+
+
+class Pnode:
+    def __init__(self, spec_addr):
+        self.count, self.size = 0, 0
+        self.spec_addr = spec_addr
+        self.spec = CharArray(LEN_ZPATH)
+        self.flist = 0
+        self.fnodes = []
+
+    def pack(self):
+        return (w(self.count) + dw(self.size) + self.spec.pack()
+                + dw(self.flist))
+
+
+class Wnode:
+    def __init__(self, addr):
+        self.addr = addr
+        self.id = self.root = 0
+        self.cvrow = self.pncol = self.pnrow = self.vnrow = 0
+        self.path = Pnode(addr + WN_SPEC)
+        self.name = CharArray(LEN_WNAME)
+        self.info = CharArray(LEN_ZINFO)
+
+    def pack(self):
+        return (b"".join(w(x) for x in (self.id, self.root, self.cvrow,
+                                        self.pncol, self.pnrow, self.vnrow))
+                + self.path.pack() + self.name.pack() + self.info.pack())
+
+
 class NeedsInput(Exception):
     """The desktop is in a wait the gate gave no input for."""
 
 
 class Desktop:
     """desktop.c against the model.  `inputs` is a list of step producers,
-    one per wait that blocks for input (evnt_multi with MU_BUTTON, form_do)
-    in the order the desktop enters them; each is called with the Desktop
-    just before the wait and returns the plan steps for it -- so it can
-    ask the model where things are at that moment."""
+    one per wait that blocks for input (evnt_multi with MU_BUTTON with
+    nothing queued, form_do, form_alert) in the order the desktop enters
+    them; each is called with the Desktop just before the wait and
+    returns the plan steps for it -- so it can ask the model where things
+    are at that moment."""
 
     def __init__(self, v, a, mark, link_near, near_size, g_link, drvmap, inputs):
         self.v, self.a = v, a
@@ -124,8 +266,20 @@ class Desktop:
         self.wicon = self.hicon = self.icw = self.ich = 0
         self.screenfree = 0
         self.rmsg = [0] * 8
+        self.wcnt, self.dta = 0, 0
+        wlist = self.G + g_offset("g_wlist")
+        self.wlist = [Wnode(wlist + i * WNODE_SIZE) for i in range(NUM_WNODES)]
+        for pw in self.wlist:
+            a.mem[pw.path.spec_addr] = pw.path.spec
+            a.mem[pw.addr + WN_NAME] = pw.name
+            a.mem[pw.addr + WN_INFO] = pw.info
         self.screen = [Obj(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) for _ in range(NUM_SOBS)]
-        self.info = [None] * NUM_ITEMS      # (Iconblk, Text) per item
+        # SCREENINFO per item: the ICONBLK (None until the slot is first
+        # used; it keeps its last one after) and the label, in place
+        self.info = [None] * NUM_ITEMS
+        self.labels = [CharArray(LABEL_LEN) for _ in range(NUM_ITEMS)]
+        for i, label in enumerate(self.labels):
+            a.mem[self.info_addr(WOBS_START + i) + ICONBLK_SIZE] = label
         self.rsc = None
 
     # -- the ABI -----------------------------------------------------------
@@ -143,23 +297,45 @@ class Desktop:
                             {0: list(steps)} if steps else None)[0]
         return list(res[2:2 + RESULT_INTOUT]), list(res[2 + RESULT_INTOUT:])
 
+    def take_input(self, what):
+        """The next producer's steps for the call about to be made."""
+        if not self.inputs:
+            raise NeedsInput(f"call {len(self.script)}: {what} with no input left")
+        self.waits.append(len(self.script))
+        return self.inputs.pop(0)(self)
+
     def wait(self, flags, clicks, mask, state, ms, blocking):
         """evnt_multi as desktop.c calls it: no mouse rectangles, the
-        message into G.g_rmsg.  Returns (which, mx, my, button, kstate,
-        kret, bret)."""
+        message into G.g_rmsg.  A blocking wait needs input only when
+        nothing is queued for the program -- with a message waiting it
+        returns at once, on the target as here.  Returns (which, mx, my,
+        button, kstate, kret, bret)."""
         steps = None
-        if blocking:
-            if not self.inputs:
-                raise NeedsInput(f"call {len(self.script)}: evnt_multi "
-                                 f"{flags:#x} with no input left")
-            self.waits.append(len(self.script))
-            steps = self.inputs.pop(0)(self)
+        if blocking and not self.a.gl_queue:
+            steps = self.take_input(f"evnt_multi {flags:#x}")
         io, _ = self.call(EVNT_MULTI,
                           (flags, clicks, mask, state) + (0,) * 10
                           + (ms & 0xFFFF, ms >> 16), steps=steps)
         if io[0] & MU_MESAG:
             self.rmsg = list(io[7:15])
         return io[0:7]
+
+    def form_alert(self, defbut, text):
+        """form_alert: the string is the record's address slot, the way
+        the harness stages one (aesref.run(..., buffers=))."""
+        self.a.fs_strings[text] = text
+        io, _ = self.call(FORM_ALERT, (defbut,), tree=text,
+                          steps=self.take_input("form_alert"))
+        return io[0]
+
+    # -- GEMDOS (src/app/gemlib.c: a LONG is two words, low first) ---------
+    def gemdos(self, fn, ints=()):
+        io, _ = self.call(fn, ints)
+        ret = io[0] | (io[1] << 16)
+        return ret - (1 << 32) if ret & 0x80000000 else ret
+
+    def gemdos_long(self, fn, n, *rest):
+        return self.gemdos(fn, (n & 0xFFFF, (n >> 16) & 0xFFFF) + rest)
 
     # -- dialogs -------------------------------------------------------------
     def start_dialog(self, tree):
@@ -206,6 +382,17 @@ class Desktop:
         s[3] = "0123456789ABCDEF"[g & 15]
         self.a.mem[spec] = Text("".join(s), old.size)
 
+    # -- the window manager, as deskwin.c wraps it -------------------------
+    def wind_get_rect(self, wh, field):
+        io, _ = self.call(WIND_GET, (wh, field))
+        return Rect(*io[1:5])
+
+    def wind_set_rect(self, wh, field, r):
+        self.call(WIND_SET, (wh, field, r.x, r.y, r.w, r.h))
+
+    def wind_set(self, wh, field, a=0, b=0, c=0, d=0):
+        self.call(WIND_SET, (wh, field, a, b, c, d))
+
     # -- the screen tree (deskobj.c) ---------------------------------------
     def r_set(self, obj, x, y, w_, h):
         o = self.screen[obj]
@@ -233,9 +420,17 @@ class Desktop:
         self.r_set(ROOT, 0, 0, self.desk.x + self.desk.w, self.desk.y + self.desk.h)
         for i in range(NUM_WNODES + 1):
             self.screen[DROOT + i] = Obj(NIL, NIL, NIL, G_BOX, NONE, NORMAL,
-                                         DESK_SPEC, 0, 0, 0, 0)
+                                         WINDOW_SPEC, 0, 0, 0, 0)
             self.obj_add(ROOT, DROOT + i)
         self.a.trees[self.g_screen_addr] = self.screen
+
+    def obj_walloc(self, x, y, w_, h):
+        for i in range(DROOT + 1, WOBS_START):
+            o = self.screen[i]
+            if not (o.ob_width and o.ob_height):
+                self.r_set(i, x, y, w_, h)
+                return i
+        return 0
 
     def obj_wfree(self, obj, x, y, w_, h):
         win = self.screen[obj]
@@ -266,21 +461,11 @@ class Desktop:
     def info_addr(self, obj):
         return self.g_screeninfo_addr + (obj - WOBS_START) * SCREENINFO_SIZE
 
-    # -- the desk (desktop.c) ------------------------------------------------
-    def snap_icon(self, gx, gy):
-        columns = self.desk.w // self.icw
-        rows = self.desk.h // self.ich
-        cx = min(gx, columns - 1)
-        cy = min(gy, rows - 1)
-        spare = self.desk.w - columns * self.icw
-        px = cx * self.icw + spare // columns
-        spare = self.desk.h - rows * self.ich
-        py = cy * self.ich + spare // rows + self.desk.y
-        return px, py
+    def obj_info(self, obj):
+        return self.info[obj - WOBS_START]
 
-    def desk_icon(self, gx, gy, which, label, letter):
-        x, y = self.snap_icon(gx, gy)
-        obid = self.obj_ialloc(DROOT, x, y, self.wicon, self.hicon)
+    def obj_icon(self, wparent, x, y, which, label, letter):
+        obid = self.obj_ialloc(wparent, x, y, self.wicon, self.hicon)
         if not obid:
             return 0
         o = self.screen[obid]
@@ -296,12 +481,27 @@ class Desktop:
         ib.text.w = MAX_ICONTEXT_WIDTH * self.wchar
         ib.text.h = self.hchar + 2
         ib.char = (ib.char & 0xFF00) | letter
-        text = Text(label[:LABEL_LEN - 1], LABEL_LEN)
+        self.labels[obid - WOBS_START].put(label[:LABEL_LEN - 1])
         ib.ptext = addr + ICONBLK_SIZE
-        self.info[obid - WOBS_START] = (ib, text)
+        self.info[obid - WOBS_START] = ib
         self.a.mem[addr] = ib
-        self.a.mem[addr + ICONBLK_SIZE] = text
         return obid
+
+    # -- the desk (desktop.c) ------------------------------------------------
+    def snap_icon(self, gx, gy):
+        columns = self.desk.w // self.icw
+        rows = self.desk.h // self.ich
+        cx = min(gx, columns - 1)
+        cy = min(gy, rows - 1)
+        spare = self.desk.w - columns * self.icw
+        px = cx * self.icw + spare // columns
+        spare = self.desk.h - rows * self.ich
+        py = cy * self.ich + spare // rows + self.desk.y
+        return px, py
+
+    def desk_icon(self, gx, gy, which, label, letter):
+        x, y = self.snap_icon(gx, gy)
+        return self.obj_icon(DROOT, x, y, which, label, letter)
 
     def desk_build(self):
         a = self.a
@@ -334,46 +534,415 @@ class Desktop:
             gx = xcnt - 1
         self.desk_icon(gx, gy, IB_TRASH, trash, 0)
 
-    def desk_redraw(self, obj, pc):
-        io, _ = self.call(WIND_GET, (DESKWH, WF_FIRSTXYWH))
-        r = Rect(*io[1:5])
-        while r.w and r.h:
-            x0, y0 = max(r.x, pc.x), max(r.y, pc.y)
-            x1 = min(r.x + r.w, pc.x + pc.w)
-            y1 = min(r.y + r.h, pc.y + pc.h)
-            if x0 < x1 and y0 < y1:
-                self.call(OBJC_DRAW, (obj, MAX_DEPTH), (x0, y0, x1 - x0, y1 - y0),
-                          tree=self.g_screen_addr)
-            io, _ = self.call(WIND_GET, (DESKWH, WF_NEXTXYWH))
-            r = Rect(*io[1:5])
-
-    def desk_select(self, obj):
-        d = self.desk
-        i = self.screen[DROOT].ob_head
+    def sel_item(self, root):
+        i = self.screen[root].ob_head
         while i >= WOBS_START:
-            state = self.screen[i].ob_state & 0xFFFF
-            want = (state | SELECTED) if i == obj else (state & ~SELECTED)
-            if want != state:
-                self.call(OBJC_CHANGE, (i, want, 1), (d.x, d.y, d.w, d.h),
-                          tree=self.g_screen_addr)
+            if self.screen[i].ob_state & SELECTED:
+                return i
             i = self.screen[i].ob_next
+        return 0
+
+    # -- the windows (deskwin.c) -------------------------------------------
+    def win_start(self):
+        self.wcnt = 0
+        arena = self.gemdos_long(MALLOC, ARENA_SIZE)
+        if arena <= 0:
+            return False
+        self.dta = arena
+        self.gemdos_long(FSETDTA, arena)
+        for i, pw in enumerate(self.wlist):
+            pw.id = 0
+            pw.root = DROOT + 1 + i
+            pw.path.flist = arena + DTA_SIZE + i * NUM_FNODES * FNODE_SIZE
+        return True
+
+    def win_find(self, wh):
+        for pw in self.wlist:
+            if pw.id == wh:
+                return pw
+        return None
+
+    def win_ontop(self):
+        wob = self.screen[ROOT].ob_tail
+        o = self.screen[wob]
+        if o.ob_width and o.ob_height:
+            return self.wlist[wob - (DROOT + 1)]
+        return None
+
+    def win_top(self, pw):
+        self.call(OBJC_ORDER, (pw.root, NIL), tree=self.g_screen_addr)
+
+    def win_free(self, pw):
+        if pw.id != -1:
+            self.call(WIND_DELETE, (pw.id,))
+        self.wcnt -= 1
+        pw.id = 0
+        self.call(OBJC_ORDER, (pw.root, 1), tree=self.g_screen_addr)
+        self.obj_wfree(pw.root, 0, 0, 0, 0)
+
+    def win_alloc(self):
+        if self.wcnt == NUM_WNODES:
+            return None
+        r = Rect(WIN_XCELL * self.wchar, WIN_YCELL[self.wcnt] * self.hchar,
+                 WIN_WCELL * self.wchar, WIN_HCELL * self.hchar)
+        wob = self.obj_walloc(r.x, r.y, r.w, r.h)
+        if not wob:
+            return None
+        self.wcnt += 1
+        pw = self.wlist[wob - (DROOT + 1)]
+        pw.root = wob
+        pw.cvrow = 0
+        pw.pncol = (r.w - self.wchar) // (self.wicon + MIN_WINT)
+        pw.pnrow = (r.h - self.hchar) // (self.hicon + MIN_HINT)
+        pw.vnrow = 0
+        d = self.desk
+        io, _ = self.call(WIND_CREATE, (WINDOW_STYLE, d.x, d.y, d.w, d.h))
+        pw.id = signed(io[0])
+        if pw.id != -1:
+            return pw
+        self.win_free(pw)
+        return None
+
+    # -- the listing ---------------------------------------------------------
+    @staticmethod
+    def win_fnode(pw, obj):
+        for pf in pw.path.fnodes[:pw.path.count]:
+            if pf.obid == obj:
+                return pf
+        return None
+
+    @staticmethod
+    def pn_comp(a, b):
+        if (a.attr ^ b.attr) & FA_SUBDIR:
+            return -1 if a.attr & FA_SUBDIR else 1
+        return far_strcmp(a.name, b.name)
+
+    @staticmethod
+    def pn_open(pn, spec):
+        if len(spec) >= LEN_ZPATH:
+            return False
+        pn.spec.put(spec)
+        pn.count = pn.size = 0
+        pn.fnodes = []
+        return True
+
+    def pn_active(self, pn):
+        ret = self.gemdos(FSFIRST, (pn.spec_addr & 0xFFFF, pn.spec_addr >> 16,
+                                    DISPATTR))
+        count = 0
+        while ret == E_OK and count < NUM_FNODES:
+            name, attr, time, date, size = self.a.dos_dta_data
+            if name[:1] != ".":
+                fn = Fnode(attr & 0xFF, time, date, size, name[:LEN_ZFNAME - 1])
+                i = count                   # insertion: slide the ones after it up
+                while i > 0 and self.pn_comp(fn, pn.fnodes[i - 1]) < 0:
+                    i -= 1
+                pn.fnodes.insert(i, fn)
+                count += 1
+                pn.size += fn.size
+            ret = self.gemdos(FSNEXT)
+        pn.count = count
+
+    @staticmethod
+    def win_sname(pw):
+        d = pw.name.put(" ")
+        d = pw.name.put(pw.path.spec.s, d)
+        pw.name.put(" ", d)
+
+    def win_sinfo(self, pw):
+        pw.info.put(f" {pw.path.size} bytes used in {pw.path.count} items.")
+        self.wind_set(pw.id, WF_INFO, 0, pw.addr + WN_INFO)
+
+    @staticmethod
+    def win_which(pf):
+        if pf.attr & FA_SUBDIR:
+            return IB_FOLDER
+        k = pf.name.find(".")
+        if k >= 0 and pf.name[k:] == ".G4A":
+            return IB_APPL
+        return IB_DOCU
+
+    def win_bldview(self, pw, r):
+        iwspc, ihspc = self.wicon + MIN_WINT, self.hicon + MIN_HINT
+        pn = pw.path
+        self.obj_wfree(pw.root, r.x, r.y, r.w, r.h)
+        wfit = max(r.w // iwspc, 1)
+        hfit = max(r.h // ihspc, 1)
+        for pf in pn.fnodes[:pn.count]:
+            pf.obid = 0
+        pw.vnrow = max((pn.count + wfit - 1) // wfit, 1)
+        pw.pncol = wfit
+        pw.pnrow = min(hfit, pw.vnrow)
+        while pw.vnrow - pw.cvrow < pw.pnrow:
+            pw.cvrow -= 1
+        first = pw.cvrow * pw.pncol
+        n = pn.count - first
+        hfit = min(pw.vnrow - pw.cvrow, pw.pnrow + 1)     # a row may show in part
+        i = row = 0
+        while row < hfit and i < n:
+            col = 0
+            while col < pw.pncol and i < n:
+                pf = pn.fnodes[first + i]
+                obid = self.obj_icon(pw.root, col * iwspc + MIN_WINT,
+                                     row * ihspc + MIN_HINT, self.win_which(pf),
+                                     pf.name, 0)
+                if not obid:
+                    row = hfit                  # no items left: stop
+                    break
+                pf.obid = obid
+                o = self.screen[obid]
+                o.ob_state = WHITEBAK | (SELECTED if pf.flags & F_SELECTED else 0)
+                o.ob_flags = NONE
+                col += 1
+                i += 1
+            row += 1
+        self.wind_set(pw.id, WF_HSLSIZ, 1000)
+        self.wind_set(pw.id, WF_VSLSIZ, mul_div(pw.pnrow, 1000, pw.vnrow))
+        self.wind_set(pw.id, WF_VSLIDE,
+                      mul_div(pw.cvrow, 1000, pw.vnrow - pw.pnrow)
+                      if pw.vnrow > pw.pnrow else 0)
+
+    def desk_verify(self, wh):
+        pw = self.win_find(wh)
+        if pw:
+            self.win_bldview(pw, self.wind_get_rect(wh, WF_WXYWH))
+
+    def do_wredraw(self, wh, pc):
+        root = DROOT
+        if wh != DESKWH:
+            pw = self.win_find(wh)
+            if pw is None:
+                return
+            root = pw.root
+        self.call(GRAF_MOUSE, (M_OFF,))
+        t = self.wind_get_rect(wh, WF_FIRSTXYWH)
+        while t.w and t.h:
+            if rc_intersect(pc, t):
+                self.call(OBJC_DRAW, (root, MAX_DEPTH), t.tuple(),
+                          tree=self.g_screen_addr)
+            t = self.wind_get_rect(wh, WF_NEXTXYWH)
+        self.call(GRAF_MOUSE, (M_ON,))
+
+    def win_scroll(self, pw, newcv):
+        newcv = max(min(newcv, pw.vnrow - pw.pnrow), 0)
+        if newcv == pw.cvrow:
+            return
+        pw.cvrow = newcv
+        t = self.wind_get_rect(pw.id, WF_WXYWH)
+        self.win_bldview(pw, t)
+        self.do_wredraw(pw.id, t)
+
+    def win_arrow(self, pw, arrow):
+        if arrow == WA_UPPAGE:
+            self.win_scroll(pw, pw.cvrow - pw.pnrow)
+        elif arrow == WA_DNPAGE:
+            self.win_scroll(pw, pw.cvrow + pw.pnrow)
+        elif arrow == WA_UPLINE:
+            self.win_scroll(pw, pw.cvrow - 1)
+        elif arrow == WA_DNLINE:
+            self.win_scroll(pw, pw.cvrow + 1)
+
+    def win_slide(self, pw, permille):
+        self.win_scroll(pw, mul_div(permille, pw.vnrow - pw.pnrow, 1000))
+
+    # -- selection -----------------------------------------------------------
+    def act_chg(self, wh, root, obj, set_, dodraw):
+        pob = self.screen[obj]
+        state = pob.ob_state & 0xFFFF
+        state = (state | SELECTED) if set_ else (state & ~SELECTED)
+        if state == pob.ob_state & 0xFFFF:
+            return
+        pob.ob_state = state
+        if root != DROOT:
+            pf = self.win_fnode(self.wlist[root - (DROOT + 1)], obj)
+            if pf:
+                pf.flags = (pf.flags | F_SELECTED) if set_ else (pf.flags & ~F_SELECTED)
+        if dodraw:
+            io, _ = self.call(OBJC_OFFSET, (obj,), tree=self.g_screen_addr)
+            self.do_wredraw(wh, Rect(io[0], io[1], pob.ob_width, pob.ob_height))
+
+    def act_select(self, wh, root, obj):
+        i = self.screen[root].ob_head
+        while i >= WOBS_START:
+            nxt = self.screen[i].ob_next
+            self.act_chg(wh, root, i, i == obj, True)
+            i = nxt
+
+    def obj_parent(self, obj):
+        while obj >= WOBS_START:
+            obj = self.screen[obj].ob_next
+        return obj
+
+    def obj_wh(self, parent):
+        return DESKWH if parent == DROOT else self.wlist[parent - (DROOT + 1)].id
+
+    # -- opening -------------------------------------------------------------
+    def do_xyfix(self, t):
+        t.x = (t.x + 8) & 0xFFF0
+        if t.y < self.desk.y:
+            t.y = self.desk.y
+
+    def do_wopen(self, new_win, wh, curr, pt):
+        t = pt.copy()
+        self.do_xyfix(t)
+        if curr > 0:
+            croot = self.obj_parent(curr)
+            io, _ = self.call(OBJC_OFFSET, (curr,), tree=self.g_screen_addr)
+            o = self.screen[curr]
+            self.call(GRAF_GROWBOX, (io[0], io[1], o.ob_width, o.ob_height,
+                                     t.x, t.y, t.w, t.h))
+            self.act_chg(self.obj_wh(croot), croot, curr, False, new_win)
+        if new_win:
+            self.call(WIND_OPEN, (wh, t.x, t.y, t.w, t.h))
+
+    def do_wfull(self, wh):
+        curr = self.wind_get_rect(wh, WF_CXYWH)
+        prev = self.wind_get_rect(wh, WF_PXYWH)
+        full = self.wind_get_rect(wh, WF_FXYWH)
+        if curr.tuple() == full.tuple():
+            self.wind_set_rect(wh, WF_CXYWH, prev)
+            self.call(GRAF_SHRINKBOX, prev.tuple() + full.tuple())
+        else:
+            self.call(GRAF_GROWBOX, curr.tuple() + full.tuple())
+            self.wind_set_rect(wh, WF_CXYWH, full)
+
+    def do_diropen(self, pw, new_win, curr, path, pt, redraw):
+        self.busy(True)
+        if not self.pn_open(pw.path, path):
+            self.busy(False)
+            return False
+        self.pn_active(pw.path)
+        self.win_sname(pw)
+        self.win_sinfo(pw)
+        self.wind_set(pw.id, WF_NAME, 0, pw.addr + WN_NAME)
+        self.do_wopen(new_win, pw.id, curr, pt)
+        if new_win:
+            self.win_top(pw)
+        self.desk_verify(pw.id)
+        if redraw and not new_win:
+            self.do_wredraw(pw.id, self.wind_get_rect(pw.id, WF_WXYWH))
+        self.busy(False)
+        return True
+
+    def do_dopen(self, curr):
+        pw = self.win_alloc()
+        if pw is None:
+            self.form_alert(1, "[1][There are no more|windows available.][ OK ]")
+            self.act_chg(DESKWH, DROOT, curr, False, True)
+            return False
+        path = chr(self.obj_info(curr).char & 0xFF) + ":\\*.*"
+        o = self.screen[pw.root]
+        box = Rect(o.ob_x, o.ob_y, o.ob_width, o.ob_height)
+        if not self.do_diropen(pw, True, curr, path, box, True):
+            self.win_free(pw)
+            self.act_chg(DESKWH, DROOT, curr, False, True)
+            return False
+        return True
+
+    def do_fopen(self, pw, curr, name):
+        t = self.wind_get_rect(pw.id, WF_WXYWH)
+        path = pw.path.spec.s[:-3]                  # "A:\SUB\*.*" less the "*.*"
+        if len(path) + len(name) > LEN_ZPATH - 5:
+            return False
+        path += name + "\\*.*"
+        return self.do_diropen(pw, False, curr, path, t, True)
+
+    def do_open(self, wh, obj):
+        if wh == DESKWH:
+            if self.obj_info(obj).char & 0xFF:
+                return self.do_dopen(obj)
+            return False                            # the trash
+        pw = self.win_find(wh)
+        if pw is None:
+            return False
+        pf = self.win_fnode(pw, obj)
+        if pf and pf.attr & FA_SUBDIR:
+            return self.do_fopen(pw, obj, pf.name)
+        return False                                # a program: milestone 6
+
+    def win_close(self, pw, close_window):
+        spec = pw.path.spec.s
+        if not close_window:
+            last = spec.rfind("\\")                 # the '\' before the "*.*"
+            i = max(last, 0)
+            while i > 0 and spec[i - 1] != "\\":
+                i -= 1
+            if i > 0:                               # "A:\SUB\*.*" -> "A:\*.*"
+                path = spec[:i] + "*.*"
+                t = self.wind_get_rect(pw.id, WF_WXYWH)
+                self.do_diropen(pw, False, 0, path, t, True)
+                return
+        self.call(WIND_CLOSE, (pw.id,))
+        self.win_free(pw)
+
+    # -- the window manager's messages ---------------------------------------
+    def hndl_wmsg(self, msg):
+        wh = msg[3]
+        pw = self.win_find(wh)
+        kind = msg[0]
+        if kind == WM_REDRAW:
+            self.do_wredraw(wh, Rect(*msg[4:8]))
+        elif kind in (WM_TOPPED, WM_NEWTOP):
+            if kind == WM_TOPPED:
+                self.wind_set(wh, WF_TOP)
+            if pw:
+                self.win_top(pw)
+        elif kind == WM_CLOSED:             # the closer is File -> Close
+            if pw:
+                self.win_close(pw, False)
+        elif kind == WM_FULLED:
+            self.do_wfull(wh)
+            self.desk_verify(wh)
+        elif kind == WM_ARROWED:
+            if pw:
+                self.win_arrow(pw, msg[4])
+        elif kind == WM_VSLID:
+            if pw:
+                self.win_slide(pw, msg[4])
+        elif kind in (WM_SIZED, WM_MOVED):
+            if not pw:
+                return
+            t = Rect(*msg[4:8])
+            self.do_xyfix(t)
+            self.wind_set_rect(wh, WF_CXYWH, t)
+            if kind == WM_SIZED:
+                cols = pw.pncol
+                self.desk_verify(wh)
+                if pw.pncol != cols:            # the items moved: the AES
+                    t = self.wind_get_rect(wh, WF_WXYWH)  # redraws only what it uncovered
+                    self.do_wredraw(wh, t)
+            else:                               # the items keep their places
+                t = self.wind_get_rect(wh, WF_WXYWH)    # in the box: move the box
+                self.obj_wfree(pw.root, t.x, t.y, t.w, t.h)
+                self.desk_verify(wh)
 
     # -- the menu ------------------------------------------------------------
     def do_deskmenu(self, item):
         if item == ABOUITEM:
             tree = self.a_info
             self.start_dialog(tree)
-            self.waits.append(len(self.script))
-            if not self.inputs:
-                raise NeedsInput(f"call {len(self.script)}: form_do with no input left")
-            steps = self.inputs.pop(0)(self)
-            self.call(FORM_DO, (ROOT,), tree=tree, steps=steps)
+            self.call(FORM_DO, (ROOT,), tree=tree, steps=self.take_input("form_do"))
             self.a.trees[tree][DEOK].ob_state = NORMAL
             self.end_dialog()
         return False
 
     def do_filemenu(self, item):
-        if item == QUITITEM:
+        pw = self.win_ontop()
+        if item == OPENITEM:                    # the top window's selection,
+            obj = self.sel_item(pw.root) if pw else 0     # else the desk's
+            if obj:
+                self.do_open(pw.id, obj)
+            else:
+                obj = self.sel_item(DROOT)
+                if obj:
+                    self.do_open(DESKWH, obj)
+        elif item == CLOSITEM:
+            if pw:
+                self.win_close(pw, False)
+        elif item == CLSWITEM:
+            if pw:
+                self.win_close(pw, True)
+        elif item == QUITITEM:
             self.call(SHEL_WRITE, (SHW_SHUTDOWN, 0, 0))
             return True
         return False
@@ -390,27 +959,37 @@ class Desktop:
     # -- events --------------------------------------------------------------
     def hndl_button(self, clicks, mx, my):
         io, _ = self.call(WIND_FIND, (mx, my))
-        if io[0] != DESKWH:
-            return False
-        io, _ = self.call(OBJC_FIND, (DROOT, MAX_DEPTH), (mx, my),
+        wh = signed(io[0])
+        if wh == DESKWH:
+            root = DROOT
+        else:
+            pw = self.win_find(wh)
+            if pw is None:
+                return False
+            root = pw.root
+        io, _ = self.call(OBJC_FIND, (root, MAX_DEPTH), (mx, my),
                           tree=self.g_screen_addr)
-        obj = io[0]
-        self.desk_select(obj if obj >= WOBS_START else 0)
+        obj = signed(io[0])
+        if obj < WOBS_START:
+            obj = 0
+        self.act_select(wh, root, obj)
+        if obj and clicks == 2:
+            self.do_open(wh, obj)
         return False
 
     def hndl_msg(self):
         msg = self.rmsg
         if msg[0] == MN_SELECTED:
             return self.hndl_menu(msg[3], msg[4])
+        if WM_REDRAW <= msg[0] <= WM_NEWTOP:
+            self.hndl_wmsg(msg)
         return False
 
     def main(self):
-        a = self.a
         self.call(APPL_INIT)
         io, _ = self.call(GRAF_HANDLE)
         self.handle, self.wchar, self.hchar, self.wbox, self.hbox = io[0:5]
-        io, _ = self.call(WIND_GET, (DESKWH, WF_WXYWH))
-        self.desk = Rect(*io[1:5])
+        self.desk = self.wind_get_rect(DESKWH, WF_WXYWH)
         self.busy(True)
         self.rsrc_load()
         self.a_menu = self.rsrc_gaddr(R_TREE, ADMENU)
@@ -421,9 +1000,16 @@ class Desktop:
             self.call(MENU_IENABLE, (item, 0), tree=self.a_menu)
         self.obj_init()
         self.desk_build()
+        if not self.win_start():
+            self.busy(False)
+            self.form_alert(1, "[3][There is no memory|for the windows.][ Quit ]")
+            self.call(RSRC_FREE)
+            self.call(SHEL_WRITE, (SHW_SHUTDOWN, 0, 0))
+            self.call(APPL_EXIT)
+            return 1
         self.call(WIND_SET, (DESKWH, WF_NEWDESK, 0, self.g_screen_addr, DROOT, 0))
         self.call(WIND_UPDATE, (BEG_UPDATE,))
-        self.desk_redraw(DROOT, self.desk)
+        self.do_wredraw(DESKWH, self.desk)
         self.call(MENU_BAR, (1,), tree=self.a_menu)
         self.call(WIND_UPDATE, (END_UPDATE,))
         self.busy(False)
@@ -443,6 +1029,9 @@ class Desktop:
                     MU_MESAG | MU_TIMER, 2, 1, 1, 0, False)
             self.call(WIND_UPDATE, (END_UPDATE,))
 
+        for pw in self.wlist:
+            if pw.id > 0:
+                self.win_close(pw, True)
         self.call(MENU_BAR, (0,), tree=self.a_menu)
         self.call(WIND_SET, (DESKWH, WF_NEWDESK, 0, 0, ROOT, 0))
         self.call(RSRC_FREE)
@@ -459,14 +1048,12 @@ class Desktop:
             self.wchar, self.hchar, self.wbox, self.hbox,
             d.x, d.y, d.w, d.h, self.wicon, self.hicon, self.icw, self.ich,
             self.screenfree)) + b"".join(w(x) for x in self.rmsg)
+        out += w(self.wcnt) + dw(self.dta)
+        out += b"".join(pw.pack() for pw in self.wlist)
         assert len(out) == g_offset("g_screen"), len(out)
         out += b"".join(o.pack() for o in self.screen)
-        for entry in self.info:
-            if entry is None:
-                out += bytes(SCREENINFO_SIZE)
-            else:
-                ib, text = entry
-                out += ib.pack() + text.pack()
+        for ib, label in zip(self.info, self.labels):
+            out += (ib.pack() if ib else bytes(ICONBLK_SIZE)) + label.pack()
         assert len(out) == GLOBES_SIZE, len(out)
         return out
 
@@ -477,6 +1064,22 @@ class Desktop:
         r = a.ob_actxywh(obj)
         return (r.x + r.w // 2, r.y + r.h // 2)
 
+    def gadget(self, wh, obj):
+        """The middle of window wh's gadget obj (aesref's W_* index), as
+        the AES lays the frame out now."""
+        a = self.a
+        a.tree = a.W_ACTIVE
+        a.w_bldactive(wh)
+        r = a.ob_actxywh(obj)
+        return (r.x + r.w // 2, r.y + r.h // 2)
+
+    def item(self, pw, name):
+        """The middle of the icon window pw shows for entry `name`."""
+        for pf in pw.path.fnodes[:pw.path.count]:
+            if pf.name == name and pf.obid:
+                return self.centre(self.g_screen_addr, pf.obid)
+        raise KeyError(f"{name} is not shown in {pw.path.spec.s}")
+
     def pointer(self):
         return (self.v.ptr_x, self.v.ptr_y)
 
@@ -485,4 +1088,7 @@ def describe(d):
     """One line per record, for a log."""
     for i, rec in enumerate(d.script):
         mark = "*" if i in d.plan else " "
-        print(f"{mark}{i:3d} {rec[0]} {rec[2]}{' @' + hex(rec[3]) if len(rec) > 3 else ''}")
+        at = ""
+        if len(rec) > 3:
+            at = " @" + (hex(rec[3]) if isinstance(rec[3], int) else repr(rec[3]))
+        print(f"{mark}{i:3d} {rec[0]} {rec[2]}{at}")

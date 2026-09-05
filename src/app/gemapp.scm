@@ -22,7 +22,10 @@
 ;;; bytes; the desktop asks for more, and the loader never sees the
 ;;; difference -- it reads the extent from the file's header, rounded up
 ;;; to whole pages (tools/mkg4a.py), since the loader relocates by pages;
-;;; page multiples here waste none of it.
+;;; page multiples here waste none of it.  The stack's share of `bss` is
+;;; the link's --stack-size (the Makefile's g4a macro), over the 256
+;;; bytes below: the desktop's calls nest deeper than the gate
+;;; application's and ran that out (phase 14, milestone 5).
 
 (define (app-layout near far bss bits)
   (list

@@ -75,9 +75,10 @@ NOBS_INFO = 14
 STDISK, STTRASH = 0, 1
 
 # ICONBLKs, in the order of the table; IG_* name them
-IB_HARD, IB_FLOPPY, IB_TRASH = 0, 1, 2
+IB_HARD, IB_FLOPPY, IB_TRASH, IB_FOLDER, IB_APPL, IB_DOCU = 0, 1, 2, 3, 4, 5
 IB_TABLE = ((IB_HARD, deskicons.IG_HARD), (IB_FLOPPY, deskicons.IG_FLOPPY),
-            (IB_TRASH, deskicons.IG_TRASH))
+            (IB_TRASH, deskicons.IG_TRASH), (IB_FOLDER, deskicons.IG_FOLDER),
+            (IB_APPL, deskicons.IG_APPLICATION), (IB_DOCU, deskicons.IG_DOCUMENT))
 
 INDICES = [
     ("ADMENU", ADMENU), ("ADDINFO", ADDINFO),
@@ -93,11 +94,12 @@ INDICES = [
     ("DEVERSN", DEVERSN), ("DEOK", DEOK),
     ("STDISK", STDISK), ("STTRASH", STTRASH),
     ("IB_HARD", IB_HARD), ("IB_FLOPPY", IB_FLOPPY), ("IB_TRASH", IB_TRASH),
+    ("IB_FOLDER", IB_FOLDER), ("IB_APPL", IB_APPL), ("IB_DOCU", IB_DOCU),
 ]
 
 # The items the desktop does not do yet: disabled at start (menu_ienable),
 # not in the file, so the file stays RCS-shaped.
-NOT_YET = (OPENITEM, SHOWITEM, NFOLITEM, CLOSITEM, CLSWITEM, DELTITEM,
+NOT_YET = (SHOWITEM, NFOLITEM, DELTITEM,
            FORMITEM, TEXTITEM, NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM,
            NSRTITEM, FITITEM, IICNITEM, IAPPITEM, PREFITEM, READITEM,
            SAVEITEM)
