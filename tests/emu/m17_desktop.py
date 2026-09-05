@@ -127,6 +127,20 @@ def listing(disk):
     return dirs
 
 
+def menu(d, title, item, shots):
+    """The steps that choose `item` from the `title` menu of the desktop
+    `d` at a wait: a screenshot with the menu dropped and another with
+    the item under the pointer when `shots`."""
+    t = d.centre(d.a_menu, title)
+    # straight down from the title into its drop-down: a slant would
+    # cross into the next title first and drop that menu instead
+    i = (t[0], d.centre(d.a_menu, item)[1])
+    # the wait asks for two clicks, so the press is held through the
+    # double-click delay before the menu sees it (m7_form.CLICK)
+    return [F(3), *path(d.pointer(), t), F(8), *([SHOT] if shots else []),
+            *path(t, i, speed=4), F(8), *([SHOT] if shots else []), B(1), F(14)]
+
+
 def inputs(memo):
     """The step producers, one per wait the desktop blocks in.  `memo`
     collects what the gate reads back from the model at each: G as it
@@ -134,16 +148,6 @@ def inputs(memo):
     def probe(d):
         memo.setdefault("globes", []).append(d.globes())
         return PROBE
-
-    def menu(d, title, item, shots):
-        t = d.centre(d.a_menu, title)
-        # straight down from the title into its drop-down: a slant would
-        # cross into the next title first and drop that menu instead
-        i = (t[0], d.centre(d.a_menu, item)[1])
-        # the wait asks for two clicks, so the press is held through the
-        # double-click delay before the menu sees it (m7_form.CLICK)
-        return [F(3), *path(d.pointer(), t), F(8), *([SHOT] if shots else []),
-                *path(t, i, speed=4), F(8), *([SHOT] if shots else []), B(1), F(14)]
 
     def icon_click(d):
         # the first evnt_multi: the desk is up, G is complete

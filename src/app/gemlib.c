@@ -492,6 +492,20 @@ WORD shel_write(WORD doex, WORD isgr, WORD iscr, const char *cmd, const char *ta
     return aes(121, 3, 1, 2, 0);
 }
 
+WORD shel_get(void __far *buffer, WORD len)
+{
+    int_in[0] = len;
+    addr_in[0] = (LONG)(uint32_t)buffer;
+    return aes(122, 1, 1, 1, 0);
+}
+
+WORD shel_put(const void __far *data, WORD len)
+{
+    int_in[0] = len;
+    addr_in[0] = (LONG)(uint32_t)data;
+    return aes(123, 1, 1, 1, 0);
+}
+
 /* -- GEMDOS ---------------------------------------------------------- */
 
 static GDPB dpb;

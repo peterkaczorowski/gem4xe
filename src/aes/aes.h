@@ -628,8 +628,8 @@ void sh_init(void);
 void sh_read(char *pcmd, char *ptail);
 WORD sh_write(WORD doex, WORD isgem, WORD isover, const char *pcmd,
               const char *ptail);
-void sh_get(void *pbuffer, WORD len);
-void sh_put(const void *pdata, WORD len);
+void sh_get(uint32_t pbuffer, WORD len);     /* far addresses */
+void sh_put(uint32_t pdata, WORD len);
 void sh_envrn(const char **ppath, const char *psrch);
 WORD sh_find(char *pspec);
 void sh_cioname(const char *gem, char *cio);

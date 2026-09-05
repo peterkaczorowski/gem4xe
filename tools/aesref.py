@@ -605,8 +605,11 @@ class AES:
         self.dos_dta_data = None
         self.dos_dirs = {}
         self.dos_search = None
-        # shel_write's request, kept for the shell loop
+        # shel_write's request, kept for the shell loop, and the shell
+        # buffer shel_put/shel_get keep between programs (src/aes/shel.c
+        # sh_init clears it)
         self.sh_doex = self.sh_isgr = 0
+        self.sh_buf = bytearray(SIZE_SHELBUF)
         # What the last level-triggered button quick-out found (ev_wait):
         # the button's level and the screen, and how many turns in a row
         # the caller has taken on one held press.
@@ -4078,6 +4081,18 @@ class AES:
             self.sh_doex, self.sh_isgr = ints[0], ints[1]
             io[0] = 1
             c4 = 1
+        elif n in (122, 123):
+            # shel_get / shel_put: the caller's buffer is the record's
+            # address slot, a CharArray in self.mem; the copy is clamped
+            # to the shell buffer as sh_get/sh_put clamp it
+            buf = self.mem[self.rec_addr]
+            k = min(ints[0], SIZE_SHELBUF)
+            if n == 122:
+                buf.raw[:k] = self.sh_buf[:k]
+            else:
+                self.sh_buf[:k] = buf.raw[:k]
+            io[0] = 1
+            c4 = 1
         elif op >= GEMDOS_OP:
             # GEMDOS through the same entry as the AES (src/sys/abi.c
             # gem_entry counts it too), so a script that mirrors a
@@ -4109,6 +4124,16 @@ class AES:
 
         if fn == 0x1A:                  # Fsetdta
             self.dos_dta = long_(0)
+            return 0
+        if fn == 0x3B:                  # Dsetpath: the root, or a
+            # directory the listing knows (gemdos.c gd_setpath opens
+            # X:\DIR\*.* to be sure of it)
+            path = self.mem[long_(0)].s
+            if len(path) > 3:
+                if path[-1] != "\\":
+                    path += "\\"
+                if path not in self.dos_dirs:
+                    return GD_EPTHNF & 0xFFFFFFFF
             return 0
         if fn == 0x2F:                  # Fgetdta
             return self.dos_dta
@@ -4168,17 +4193,18 @@ FSEL_INPUT, FSEL_EXINPUT = 1090, 1091
 (WIND_CREATE, WIND_OPEN, WIND_CLOSE, WIND_DELETE, WIND_GET, WIND_SET,
  WIND_FIND, WIND_UPDATE, WIND_CALC) = range(1100, 1109)
 RSRC_LOAD, RSRC_FREE, RSRC_GADDR = 1110, 1111, 1112
-SHEL_WRITE = 1121
+SHEL_WRITE, SHEL_GET, SHEL_PUT = 1121, 1122, 1123
+SIZE_SHELBUF = 4192                     # src/app/gem.h
 # GEMDOS, as a script sees it: the function number over this base
 # (src/app/gemlib.c has the numbers)
 GEMDOS_OP = 2000
-DSETDRV, DGETDRV = GEMDOS_OP + 0x0E, GEMDOS_OP + 0x19
+DSETDRV, DGETDRV, DSETPATH = GEMDOS_OP + 0x0E, GEMDOS_OP + 0x19, GEMDOS_OP + 0x3B
 FSETDTA, FGETDTA, MALLOC = GEMDOS_OP + 0x1A, GEMDOS_OP + 0x2F, GEMDOS_OP + 0x48
 FSFIRST, FSNEXT = GEMDOS_OP + 0x4E, GEMDOS_OP + 0x4F
 # src/sys/gemdos.h: the attributes and the error the searches answer
 FA_RDONLY, FA_HIDDEN, FA_SYSTEM, FA_VOLUME, FA_SUBDIR, FA_ARCHIVE = (
     0x01, 0x02, 0x04, 0x08, 0x10, 0x20)
-GD_ENMFIL = -49
+GD_EPTHNF, GD_ENMFIL = -34, -49
 
 
 def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None,
@@ -4242,7 +4268,7 @@ def resume(v, a, script, plan=None, base=0):
             if op in (FSEL_INPUT, FSEL_EXINPUT):
                 a.fs_path_addr = rec[3]
                 a.tree = tree
-            elif op == FORM_ALERT or op >= GEMDOS_OP:
+            elif op in (FORM_ALERT, SHEL_GET, SHEL_PUT) or op >= GEMDOS_OP:
                 a.tree = tree
             else:
                 a.tree = trees[rec[3]] if len(rec) > 3 else tree

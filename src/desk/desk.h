@@ -43,6 +43,11 @@
                       UPARROW | DNARROW | VSLIDE | LFARROW | RTARROW | HSLIDE)
 
 #define LEN_ZPATH   48                  /* "A:\DIR\*.*" and its NUL */
+#define CPDATA_LEN  128                 /* the shell buffer's first bytes: the
+                                         * donor keeps copy/paste data there,
+                                         * and the INF text follows them */
+#define INF_REV_LEVEL 2                 /* "#R 02": the donor's DESKTOP.INF */
+#define SH_TAILLEN  128                 /* a command tail, as shel_write copies it */
 #define LEN_ZFNAME  14                  /* "FILENAME.EXT" and its NUL */
 #define LEN_ZINFO   36                  /* " 1234567 bytes used in 12 items." */
 #define NUM_FNODES  64                  /* a window lists this many at most */
@@ -83,6 +88,20 @@ typedef struct {
     char  w_info[LEN_ZINFO];
 } WNODE;
 
+/* A window's place, kept between programs (the donor's WSAVE): the
+ * desktop writes them into the shell buffer as "#W" lines of
+ * DESKTOP.INF when it exits to run a program, and opens the windows
+ * again from them when the shell loads it back.  In far memory. */
+typedef struct {
+    WORD x_save, y_save, w_save, h_save;
+    WORD hsl_save, vsl_save;            /* the view: the row shown first */
+    char pth_save[LEN_ZPATH];           /* "" for a free slot */
+} WSAVE;
+
+typedef struct {
+    WSAVE cs_wnode[NUM_WNODES];
+} CSAVE;
+
 /* What an item object's ob_spec points at: its own ICONBLK, a copy of
  * the resource's with the label and the letter filled in. */
 typedef struct {
@@ -103,6 +122,8 @@ typedef struct {
     WORD     g_rmsg[8];                 /* evnt_multi's message */
     WORD     g_wcnt;                    /* windows open */
     DTA __far *g_dta;                   /* the listing's DTA, then the FNODEs */
+    CSAVE __far *g_cnxsave;             /* the windows' places between programs */
+    char __far *g_shelbuf;              /* the desktop's copy of the shell buffer */
     WNODE    g_wlist[NUM_WNODES];       /* by w_root - (DROOT + 1) */
     OBJECT     g_screen[NUM_SOBS];
     SCREENINFO g_screeninfo[NUM_ITEMS]; /* by obid - WOBS_START */
@@ -132,6 +153,11 @@ void do_wredraw(WORD wh, const GRECT *pc);
 void act_chg(WORD wh, WORD root, WORD obj, WORD set, WORD dodraw);
 void act_select(WORD wh, WORD root, WORD obj);
 WORD do_open(WORD wh, WORD obj);
+WORD do_aopen(WNODE *pw, WORD curr, const char __far *name);
 void hndl_wmsg(const WORD *msg);
+void app_start(void);
+void app_save(void);
+void cnx_get(void);
+void cnx_put(void);
 
 #endif /* GEM4XE_DESK_H */

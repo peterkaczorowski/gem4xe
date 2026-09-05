@@ -51,6 +51,8 @@ void     far_write8(uint32_t addr, uint8_t v);
 uint8_t  far_read8(uint32_t addr);
 void     far_put(uint32_t dst, const uint8_t *src, uint16_t len);
 void     far_get(uint8_t *dst, uint32_t src, uint16_t len);
+void     far_copy(uint32_t dst, uint32_t src, uint16_t len);
+void     far_fill(uint32_t dst, uint8_t v, uint16_t len);
 void     far_strget(char *dst, uint32_t src, uint16_t max);   /* bounded strcpy, */
 void     far_strput(uint32_t dst, const char *src, uint16_t max); /* NUL always */
 

@@ -393,13 +393,16 @@ build/m3-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt b
 # The product disks: GEM.COM with the desktop beside it, one per DOS.  Its
 # own disks because GEM.COM and M3.COM are 95 KB each and neither DOS's
 # 1040 sectors hold both.  The DOS II+/D disk holds GEM.COM and the
-# desktop alone: with the folder windows the three are 1,000 of its 1,010
-# sectors, so the gate fixtures and M11.G4A are on the SpartaDOS disk only
-# (tools/atr.py knows no double density, which is where DOS II+/D would go).
+# desktop alone, and the fixture's demonstration programs come off it to
+# make the room: with the folder windows the three were 1,000 of its 1,010
+# sectors, and running a program from the desktop took it past them.  The
+# gate fixtures and M11.G4A are on the SpartaDOS disk only (tools/atr.py
+# knows no double density, which is where DOS II+/D would go).
 build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ GEM.COM $(DISK_DENSITY) \
+	    --remove XMST.COM --remove XMST.TXT --remove MEMTEST.COM --remove MEMTEST.DOC \
 	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC
 
 build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
@@ -453,7 +456,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18
 
 # The cc65816 code generation bugs gem4xe works around, run in the vendor's
 # own simulator: fails only if a workaround shape has stopped compiling
@@ -579,6 +582,12 @@ test-m16: build/m14-boot.atr
 test-m17: build/m17-boot.atr build/desktop.g4a build/desktop.sym
 	python3 tests/emu/m17_desktop.py
 
+# A program run from the desktop and the desktop's windows back after it
+# (phase 14, milestone 6): two runs of the desktop against the model, with
+# M11.G4A between them.
+test-m18: build/m17-boot.atr build/desktop.g4a build/desktop.sym
+	python3 tests/emu/m18_launch.py
+
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.
 demo: build/m3-boot.atr
@@ -611,4 +620,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m17 demo movie bench emu-stop clean
+.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 demo movie bench emu-stop clean

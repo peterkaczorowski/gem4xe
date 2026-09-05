@@ -315,6 +315,12 @@ WORD rsrc_gaddr(WORD type, WORD index, void **addr);
 #define SHW_EXEC     1          /* run cmd, then the desktop again */
 #define SHW_SHUTDOWN 4          /* leave GEM (the desktop's Quit) */
 WORD shel_write(WORD doex, WORD isgr, WORD iscr, const char *cmd, const char *tail);
+/* The shell buffer: 4192 bytes the AES keeps between programs (the ST's
+ * SIZE_SHELBUF), where the desktop leaves its DESKTOP.INF text.  The
+ * application's copy may be far -- only bytes cross. */
+#define SIZE_SHELBUF 4192
+WORD shel_get(void __far *buffer, WORD len);
+WORD shel_put(const void __far *data, WORD len);
 
 /* -- GEMDOS, the ST's osbind names.  Pointers are far so that a buffer
  * Malloc gave out -- which is far memory -- can be read into directly;

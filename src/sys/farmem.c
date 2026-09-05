@@ -67,6 +67,24 @@ void far_get(uint8_t *dst, uint32_t src, uint16_t len)
         *dst++ = *p++;
 }
 
+/* Far to far, ascending: the AES's shell buffer and an application's
+ * copy of it both live above bank $00 (shel_get, shel_put). */
+void far_copy(uint32_t dst, uint32_t src, uint16_t len)
+{
+    uint8_t __far *d = (uint8_t __far *)dst;
+    const uint8_t __far *s = (const uint8_t __far *)src;
+    while (len--)
+        *d++ = *s++;
+}
+
+/* Far fill (the shell buffer's clearing). */
+void far_fill(uint32_t dst, uint8_t v, uint16_t len)
+{
+    uint8_t __far *d = (uint8_t __far *)dst;
+    while (len--)
+        *d++ = v;
+}
+
 /* Bounded strcpy across the bank boundary, both ways: a string an
  * application hands the AES lives in far memory and the AES's own
  * buffers are sized, so neither copy may run past `max` with its NUL. */

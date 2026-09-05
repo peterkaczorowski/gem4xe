@@ -18,8 +18,10 @@
 #include "desk.h"
 
 /* The far arena, Malloc'd once: the DTA the listing reads into, then
- * every window's FNODEs. */
-#define ARENA_SIZE  (sizeof(DTA) + (LONG)NUM_WNODES * NUM_FNODES * sizeof(FNODE))
+ * every window's FNODEs, then the windows' saved places (CSAVE) and
+ * the desktop's copy of the shell buffer. */
+#define ARENA_SIZE  (sizeof(DTA) + (LONG)NUM_WNODES * NUM_FNODES * sizeof(FNODE) \
+                     + sizeof(CSAVE) + SIZE_SHELBUF)
 
 /* The INF file's default windows (the donor's desk_inf_data1, "#W"):
  * in character cells, x 2 wide 38 high 12, each one lower. */
@@ -115,6 +117,15 @@ WORD win_start(void)
         pw->w_path.p_flist =
             (FNODE __far *)(arena + (LONG)sizeof(DTA) + (LONG)i * (NUM_FNODES * sizeof(FNODE)));
     }
+    G.g_cnxsave = (CSAVE __far *)(arena + (LONG)sizeof(DTA)
+                                  + (LONG)NUM_WNODES * (NUM_FNODES * sizeof(FNODE)));
+    G.g_shelbuf = (char __far *)G.g_cnxsave + sizeof(CSAVE);
+    {                                           /* the donor's is zeroed */
+        char __far *p = (char __far *)G.g_cnxsave;
+        WORD n;
+        for (n = 0; n < sizeof(CSAVE); n++)
+            *p++ = 0;
+    }
     return TRUE;
 }
 
@@ -155,20 +166,24 @@ static void win_free(WNODE *pw)
     obj_wfree(pw->w_root, 0, 0, 0, 0);
 }
 
-/* A window in the next default place, its box sized to it, created
- * but not yet open; NULL when all NUM_WNODES are out. */
+/* A window in the place the next saved slot has (the INF file's
+ * defaults, or where a window was when the desktop last exited), its
+ * box sized to it, created but not yet open; NULL when all NUM_WNODES
+ * are out. */
 static WNODE *win_alloc(void)
 {
+    WSAVE __far *pws;
     WNODE *pw;
     WORD wob;
     GRECT r;
 
     if (G.g_wcnt == NUM_WNODES)
         return NULL;
-    r.g_x = (WORD)(WIN_XCELL * G.g_wchar);
-    r.g_y = (WORD)(win_ycell[G.g_wcnt] * G.g_hchar);
-    r.g_w = (WORD)(WIN_WCELL * G.g_wchar);
-    r.g_h = (WORD)(WIN_HCELL * G.g_hchar);
+    pws = &G.g_cnxsave->cs_wnode[G.g_wcnt];
+    r.g_x = pws->x_save;
+    r.g_y = pws->y_save;
+    r.g_w = pws->w_save;
+    r.g_h = pws->h_save;
     wob = obj_walloc(r.g_x, r.g_y, r.g_w, r.g_h);
     if (!wob)
         return NULL;
@@ -631,8 +646,61 @@ static WORD do_fopen(WNODE *pw, WORD curr, const char __far *name)
     return do_diropen(pw, FALSE, curr, path, &t, TRUE);
 }
 
+/* A program in a window: its folder becomes the default directory and
+ * the program the shell's next command (the donor's do_aopen, pro_run
+ * and pro_exec).  TRUE when the shell took it -- the desktop's main
+ * loop is then done, and the shell runs the program once the desktop
+ * has exited.  The icon shrinks to the desk on the way out, deselected
+ * but not redrawn, as the donor has it.
+ *
+ * Not static: the compiler inlines a static function with one call
+ * site, and this one's path and tail (176 bytes) would then sit in
+ * do_open's frame under every window it opens -- the desktop's deepest
+ * stack, 164 bytes deeper (milestone 6).  External, it keeps its own
+ * frame, paid only on the way out to a program. */
+WORD do_aopen(WNODE *pw, WORD curr, const char __far *name)
+{
+    char app_path[LEN_ZPATH];
+    char tail[SH_TAILLEN];
+    const char *spec = pw->w_path.p_spec;
+    WORD n = 0, k = 0, i, ret;
+
+    while (spec[n])                             /* "A:\SUB\*.*" less the "*.*" */
+        n++;
+    n -= 3;
+    while (name[k])
+        k++;
+    if (n + k >= LEN_ZPATH)                     /* the full path must fit */
+        return FALSE;
+    for (i = 0; i < n; i++)
+        app_path[i] = spec[i];
+    app_path[i] = 0;
+    desk_busy(TRUE);                            /* set_default_path: disk i/o */
+    Dsetdrv((WORD)(app_path[0] - 'A'));
+    if (Dsetpath(app_path) < 0) {
+        desk_busy(FALSE);
+        form_alert(1, "[1][Failed to set default|directory.][ OK ]");
+        return FALSE;
+    }
+    desk_busy(FALSE);
+    for (k = 0; name[k]; k++)                   /* the full path */
+        app_path[i++] = name[k];
+    app_path[i] = 0;
+    for (i = 0; i < SH_TAILLEN; i++)            /* pro_run: no arguments, */
+        tail[i] = 0;                            /* the CR after the NUL */
+    tail[2] = 0x0D;
+    desk_busy(TRUE);                            /* pro_exec */
+    ret = shel_write(SHW_EXEC, 1, 1, app_path, tail);
+    if (!ret)
+        desk_busy(FALSE);
+    do_wopen(FALSE, pw->w_id, curr, &G.g_desk);
+    return ret;
+}
+
 /* Open item obj of window wh (DESKWH: the desk): a drive icon in a new
- * window, a folder in its own.  FALSE for anything else. */
+ * window, a folder in its own, a program through the shell.  TRUE only
+ * when a program ran, as the donor's do_open answers: the desktop is
+ * done then. */
 WORD do_open(WORD wh, WORD obj)
 {
     WNODE *pw;
@@ -640,16 +708,22 @@ WORD do_open(WORD wh, WORD obj)
 
     if (wh == DESKWH) {
         if (obj_info(obj)->icon.ib_char & 0xFF)
-            return do_dopen(obj);
-        return FALSE;                           /* the trash */
+            do_dopen(obj);
+        return FALSE;                           /* else the trash */
     }
     pw = win_find(wh);
     if (!pw)
         return FALSE;
     pf = win_fnode(pw, obj);
-    if (pf && (pf->f_attr & FA_SUBDIR))
-        return do_fopen(pw, obj, pf->f_name);
-    return FALSE;                               /* a program: milestone 6 */
+    if (!pf)
+        return FALSE;
+    if (pf->f_attr & FA_SUBDIR) {
+        do_fopen(pw, obj, pf->f_name);
+        return FALSE;
+    }
+    if (win_which(pf) == IB_APPL)
+        return do_aopen(pw, obj, pf->f_name);
+    return FALSE;                               /* a document */
 }
 
 /* Close the window, or -- close_window FALSE -- the folder it shows,
@@ -683,6 +757,233 @@ void win_close(WNODE *pw, WORD close_window)
     }
     wind_close(pw->w_id);
     win_free(pw);
+}
+
+/* -- the windows between programs -------------------------------------- */
+
+/* The desktop's DESKTOP.INF lives in the AES's shell buffer, after
+ * CPDATA_LEN bytes: "#R 02" and a "#W" line per window slot -- the
+ * view, the place in character cells, and the path, "@" ending it
+ * (the donor's deskapp.c; the lines for the icons and the preferences
+ * are later milestones).  app_save writes it from the slots when the
+ * desktop exits to run a program, app_start reads it back into them
+ * when the shell loads the desktop again, and cnx_put/cnx_get carry
+ * the windows themselves to and from the slots (the donor's
+ * deskmain.c).  The slots also give a new window its place. */
+
+static WORD hex_dig(char c)
+{
+    if (c >= 'A')
+        c = (char)(c + 9);
+    return (WORD)(c & 0x0F);
+}
+
+/* The donor's scan_2: past the spaces, two hex digits (0xFF is -1) or
+ * nothing at a CR. */
+static WORD scan_2(const char __far **pp)
+{
+    const char __far *p = *pp;
+    WORD v = 0;
+
+    while (*p == ' ')
+        p++;
+    if (*p != '\r') {
+        v = (WORD)(hex_dig(*p++) << 4);
+        v |= hex_dig(*p++);
+        if (v == 0xFF)
+            v = -1;
+    }
+    *pp = p;
+    return v;
+}
+
+static char __far *put_hex2(char __far *d, WORD v)
+{
+    static const char hex[] = "0123456789ABCDEF";
+
+    *d++ = ' ';
+    *d++ = hex[(v >> 4) & 0x0F];
+    *d++ = hex[v & 0x0F];
+    return d;
+}
+
+static char __far *put_far(char __far *d, const char __far *s)
+{
+    while (*s)
+        *d++ = *s++;
+    return d;
+}
+
+/* The INF text from the slots; its length with the NUL. */
+static WORD inf_write(void)
+{
+    char __far *p = G.g_shelbuf + CPDATA_LEN;
+    WSAVE __far *pws = G.g_cnxsave->cs_wnode;
+    WORD i;
+
+    p = put_far(p, "#R");
+    p = put_hex2(p, INF_REV_LEVEL);
+    p = put_far(p, "\r\n");
+    for (i = 0; i < NUM_WNODES; i++, pws++) {
+        p = put_far(p, "#W");
+        p = put_hex2(p, pws->hsl_save);
+        p = put_hex2(p, pws->vsl_save);
+        p = put_hex2(p, (WORD)(pws->x_save / G.g_wchar));
+        p = put_hex2(p, (WORD)(pws->y_save / G.g_hchar));
+        p = put_hex2(p, (WORD)(pws->w_save / G.g_wchar));
+        p = put_hex2(p, (WORD)(pws->h_save / G.g_hchar));
+        p = put_hex2(p, 0);
+        *p++ = ' ';
+        p = put_far(p, pws->pth_save);
+        p = put_far(p, "@\r\n");
+    }
+    *p = 0;
+    return (WORD)((uint32_t)p - (uint32_t)G.g_shelbuf + 1);
+}
+
+/* No INF text yet: the donor's desk_inf_data1 windows, each lower
+ * than the one before, as text for app_start to read like any other. */
+static void build_inf(void)
+{
+    WSAVE __far *pws = G.g_cnxsave->cs_wnode;
+    WORD i;
+
+    for (i = 0; i < NUM_WNODES; i++, pws++) {
+        pws->x_save = (WORD)(WIN_XCELL * G.g_wchar);
+        pws->y_save = (WORD)(win_ycell[i] * G.g_hchar);
+        pws->w_save = (WORD)(WIN_WCELL * G.g_wchar);
+        pws->h_save = (WORD)(WIN_HCELL * G.g_hchar);
+        pws->hsl_save = 0;
+        pws->vsl_save = 0;
+        pws->pth_save[0] = 0;
+    }
+    inf_write();
+}
+
+/* The shell buffer, and the slots from its "#W" lines. */
+void app_start(void)
+{
+    const char __far *pcurr;
+    WSAVE __far *pws;
+    WORD wincnt = 0, rev, i;
+
+    shel_get(G.g_shelbuf, SIZE_SHELBUF);
+    pcurr = G.g_shelbuf + CPDATA_LEN;
+    if (*pcurr != '#')
+        build_inf();
+    while (*pcurr) {
+        if (*pcurr++ != '#')
+            continue;
+        switch (*pcurr) {
+        case 'R':
+            pcurr++;
+            rev = scan_2(&pcurr);
+            (void)rev;
+            break;
+        case 'W':
+            pcurr++;
+            if (wincnt < NUM_WNODES) {
+                pws = &G.g_cnxsave->cs_wnode[wincnt];
+                pws->hsl_save = scan_2(&pcurr);
+                pws->vsl_save = scan_2(&pcurr);
+                pws->x_save = (WORD)(scan_2(&pcurr) * G.g_wchar);
+                pws->y_save = (WORD)(scan_2(&pcurr) * G.g_hchar);
+                pws->w_save = (WORD)(scan_2(&pcurr) * G.g_wchar);
+                pws->h_save = (WORD)(scan_2(&pcurr) * G.g_hchar);
+                pcurr += 4;                     /* " 00 ", then the path */
+                for (i = 0; *pcurr != '@' && i < LEN_ZPATH - 1; i++)
+                    pws->pth_save[i] = *pcurr++;
+                pws->pth_save[i] = 0;
+                wincnt++;
+            }
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+/* The slots into the shell buffer, for the next desktop. */
+void app_save(void)
+{
+    WORD len = inf_write();
+
+    shel_put(G.g_shelbuf, len);
+}
+
+/* The open windows into the slots, bottom-most first (ROOT's children
+ * are in stacking order), the rest cleared: the order cnx_get opens
+ * them in puts them back as they were. */
+void cnx_put(void)
+{
+    WSAVE __far *pws = G.g_cnxsave->cs_wnode;
+    WORD wob, n = 0, i;
+    GRECT r;
+
+    for (wob = G.g_screen[ROOT].ob_head; wob > ROOT; wob = G.g_screen[wob].ob_next) {
+        WNODE *pw;
+        if (wob == DROOT)
+            continue;
+        pw = &G.g_wlist[wob - (DROOT + 1)];
+        if (pw->w_id <= 0)
+            continue;
+        wind_get_grect(pw->w_id, WF_CURRXYWH, &r);
+        do_xyfix(&r.g_x, &r.g_y);
+        pws->x_save = r.g_x;
+        pws->y_save = r.g_y;
+        pws->w_save = r.g_w;
+        pws->h_save = r.g_h;
+        pws->hsl_save = 0;
+        pws->vsl_save = pw->w_cvrow;
+        for (i = 0; pw->w_path.p_spec[i]; i++)
+            pws->pth_save[i] = pw->w_path.p_spec[i];
+        pws->pth_save[i] = 0;
+        pws++;
+        n++;
+    }
+    for (; n < NUM_WNODES; n++, pws++)
+        pws->pth_save[0] = 0;
+}
+
+/* The windows back from the slots, each in its place -- on the desk,
+ * at least -- and its view, growing from its drive's icon. */
+void cnx_get(void)
+{
+    WSAVE __far *pws = G.g_cnxsave->cs_wnode;
+    WNODE *pw;
+    WORD nw, obid, i;
+    char path[LEN_ZPATH];
+    GRECT r;
+
+    for (nw = 0; nw < NUM_WNODES; nw++, pws++) {
+        if (pws->x_save >= G.g_desk.g_w)
+            pws->x_save = (WORD)(G.g_desk.g_w / 2);
+        if (pws->y_save >= G.g_desk.g_h)
+            pws->y_save = (WORD)(G.g_desk.g_h / 2);
+        if (pws->w_save <= 0 || pws->w_save > G.g_desk.g_w)
+            pws->w_save = G.g_desk.g_w;
+        if (pws->h_save <= 0 || pws->h_save > G.g_desk.g_h)
+            pws->h_save = G.g_desk.g_h;
+        if (!pws->pth_save[0])
+            continue;
+        obid = obj_get_obid(pws->pth_save[0]);
+        pw = win_alloc();
+        if (!pw)
+            continue;
+        pw->w_cvrow = pws->vsl_save;
+        r.g_x = pws->x_save;
+        r.g_y = pws->y_save;
+        do_xyfix(&r.g_x, &r.g_y);
+        pws->x_save = r.g_x;
+        pws->y_save = r.g_y;
+        r.g_w = pws->w_save;
+        r.g_h = pws->h_save;
+        for (i = 0; pws->pth_save[i]; i++)
+            path[i] = pws->pth_save[i];
+        path[i] = 0;
+        if (!do_diropen(pw, TRUE, obid, path, &r, TRUE))
+            win_free(pw);
+    }
 }
 
 /* -- the window manager's messages ------------------------------------- */

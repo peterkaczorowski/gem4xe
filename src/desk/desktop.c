@@ -8,10 +8,13 @@
  * up, and answer evnt_multi until Quit.
  *
  * Milestone 4 of docs/phase14.md was the bar, the icons, the About
- * dialog, Quit, and an icon that selects when clicked; milestone 5 is
- * the folder windows (deskwin.c) a double-click on a drive icon opens.
- * The items that act on files are in the menu, disabled, until the
- * milestones that bring them (NOT_YET_ITEMS, build/deskrsc.h).
+ * dialog, Quit, and an icon that selects when clicked; milestone 5 the
+ * folder windows (deskwin.c) a double-click on a drive icon opens;
+ * milestone 6 a program run from its icon -- the desktop exits with
+ * its windows' places in the shell buffer, and opens them again when
+ * the shell loads it back.  The items that act on files are in the
+ * menu, disabled, until the milestones that bring them (NOT_YET_ITEMS,
+ * build/deskrsc.h).
  */
 #include "desk.h"
 
@@ -158,9 +161,9 @@ static WORD do_filemenu(WORD item)
                                                  * else the desk's */
         obj = pw ? sel_item(pw->w_root) : 0;
         if (obj)
-            do_open(pw->w_id, obj);
-        else if ((obj = sel_item(DROOT)) != 0)
-            do_open(DESKWH, obj);
+            return do_open(pw->w_id, obj);
+        if ((obj = sel_item(DROOT)) != 0)
+            return do_open(DESKWH, obj);
         break;
     case CLOSITEM:
         if (pw)
@@ -201,7 +204,8 @@ static WORD hndl_menu(WORD title, WORD item)
 
 /* A press on the desk or in a window's work area (the control manager
  * keeps the gadgets and the windows under the top one): select the
- * item under it and no other there; two clicks open it. */
+ * item under it and no other there; two clicks open it, and opening
+ * a program is what ends the desktop's loop. */
 static WORD hndl_button(WORD clicks, WORD mx, WORD my)
 {
     WORD wh, root, obj;
@@ -220,7 +224,7 @@ static WORD hndl_button(WORD clicks, WORD mx, WORD my)
         obj = 0;
     act_select(wh, root, obj);
     if (obj && clicks == 2)
-        do_open(wh, obj);
+        return do_open(wh, obj);
     return FALSE;
 }
 
@@ -297,9 +301,11 @@ int main(void)
         appl_exit();
         return 1;
     }
+    app_start();
     wind_newdesk(G.g_screen, DROOT);
     wind_update(BEG_UPDATE);
     do_wredraw(DESKWH, &G.g_desk);
+    cnx_get();
     menu_bar(G.a_menu, 1);
     wind_update(END_UPDATE);
     desk_busy(FALSE);
@@ -323,9 +329,11 @@ int main(void)
         wind_update(END_UPDATE);
     }
 
-    for (i = 0; i < NUM_WNODES; i++)
-        if (G.g_wlist[i].w_id > 0)
-            win_close(&G.g_wlist[i], TRUE);
+    /* The windows stay open, as the donor leaves them: the shell's
+     * reinitialisation takes the screen back, and their places are in
+     * the shell buffer for the next desktop. */
+    cnx_put();
+    app_save();
     menu_bar(G.a_menu, 0);
     wind_newdesk(0, ROOT);
     rsrc_free();

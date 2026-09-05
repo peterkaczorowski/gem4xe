@@ -213,6 +213,24 @@ class Dos2:
             sec = ((raw[125] & 0x03) << 8) | raw[126]
         return bytes(out)
 
+    def delete(self, filename):
+        """Free the file's sectors and mark its entry deleted, as the DOS
+        does: the entry's name stays, flagged $80."""
+        e = self.find(filename)
+        if not e:
+            raise ATRError(f"{filename}: not found")
+        vtoc, bits = self._bitmap()
+        sec = e.start
+        for _ in range(e.count + 1):
+            if sec == 0:
+                break
+            raw = self.img.read_sector(sec)
+            self._set(bits, sec)
+            sec = ((raw[125] & 0x03) << 8) | raw[126]
+        self._write_bitmap(vtoc, bits)
+        e.flag = 0x80
+        self._write_entry(e)
+
     # -- VTOC / allocation -------------------------------------------------
     # The bitmap is kept as one bit per sector from 0 up, MSB first, as in
     # the VTOC.  A DOS 2 VTOC holds 90 bytes of it (sectors 0-719); DOS 2.5
@@ -234,6 +252,10 @@ class Dos2:
     @staticmethod
     def _clear(bits, s):
         bits[s // 8] &= ~(1 << (7 - s % 8)) & 0xFF
+
+    @staticmethod
+    def _set(bits, s):
+        bits[s // 8] |= 1 << (7 - s % 8)
 
     def _count_free(self, bits, lo, hi):
         return sum(self._bit(bits, s) for s in range(lo, hi))

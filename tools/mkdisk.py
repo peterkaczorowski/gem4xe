@@ -13,6 +13,7 @@ switch, not before it.
 
   python3 tools/mkdisk.py <source.atr> <program.xex> <out.atr> [NAME]
                           [--enhanced] [--high] [--add FILE NAME]...
+                          [--remove NAME]...
 
 The default name is HELLO.COM: the fixture DOS is DOS II+/D 6.4, which boots to
 a `D1:` command prompt rather than running AUTORUN.SYS, so the harness types the
@@ -20,7 +21,10 @@ name to launch it.  That is an advantage here -- it means the program is started
 *after* the CPU switch, on the 65C816.
 
 --add puts further files on the disk under the names given -- what the file
-layer's gate reads back through CIO (tests/emu/m12_file.py).
+layer's gate reads back through CIO (tests/emu/m12_file.py).  --remove
+deletes a file the source image carries first: the fixture DOS disk has
+the DOS's demonstration programs on it, and the product disk has no room
+for them beside GEM.
 
 --enhanced makes the disk DOS 2.5 enhanced density (1040 sectors) before
 anything is written: the runner outgrew a single-density disk's 620 free
@@ -36,12 +40,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from atr import ATRImage, Dos2, enhance  # noqa: E402
 
 
-def build(src_atr, xex, out_atr, name="HELLO.COM", extra=(), enhanced=False, high=False):
+def build(src_atr, xex, out_atr, name="HELLO.COM", extra=(), enhanced=False, high=False,
+          remove=()):
     os.makedirs(os.path.dirname(os.path.abspath(out_atr)), exist_ok=True)
     img = ATRImage.load(src_atr)
     if enhanced:
         img = enhance(img)
     dos = Dos2(img)
+    for dname in remove:
+        dos.delete(dname)
+        print(f"{out_atr}: {dname} removed")
     for path, dname in ((xex, name),) + tuple(extra):
         if dos.find(dname):
             raise SystemExit(f"{out_atr}: {dname} already present in the image")
@@ -57,12 +65,15 @@ def build(src_atr, xex, out_atr, name="HELLO.COM", extra=(), enhanced=False, hig
 
 
 def main(argv):
-    args, extra, flags = [], [], set()
+    args, extra, flags, remove = [], [], set(), []
     i = 0
     while i < len(argv):
         if argv[i] == "--add":
             extra.append((argv[i + 1], argv[i + 2]))
             i += 3
+        elif argv[i] == "--remove":
+            remove.append(argv[i + 1])
+            i += 2
         elif argv[i] in ("--enhanced", "--high"):
             flags.add(argv[i])
             i += 1
@@ -71,7 +82,8 @@ def main(argv):
             i += 1
     if len(args) < 3:
         raise SystemExit(__doc__.strip().splitlines()[-1])
-    build(*args[:4], extra=extra, enhanced="--enhanced" in flags, high="--high" in flags)
+    build(*args[:4], extra=extra, enhanced="--enhanced" in flags, high="--high" in flags,
+          remove=remove)
 
 
 if __name__ == "__main__":

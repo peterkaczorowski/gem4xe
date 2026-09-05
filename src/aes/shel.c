@@ -62,6 +62,9 @@ void sh_init(void)
     if (sh_cmd_far && sh_tail_far && sh_buf_far) {
         far_write8(sh_cmd_far, 0);
         far_write8(sh_tail_far, 0);
+        far_fill(sh_buf_far, 0, SH_BUFLEN);   /* the donor's is zeroed BSS:
+                                               * the desktop tests its first
+                                               * byte for '#' */
     }
     sh_doexec = -1;
     sh_isgem = 0;
@@ -109,22 +112,24 @@ WORD sh_write(WORD doex, WORD isgem, WORD isover, const char *pcmd,
     return 1;
 }
 
-void sh_get(void *pbuffer, WORD len)
+/* The buffer the application names is a full 24-bit address, as the ST's
+ * is a 32-bit one: the desktop keeps its copy in far memory. */
+void sh_get(uint32_t pbuffer, WORD len)
 {
     if (!sh_buf_far || len <= 0)
         return;
     if (len > SH_BUFLEN)
         len = SH_BUFLEN;
-    far_get(pbuffer, sh_buf_far, (uint16_t)len);
+    far_copy(pbuffer, sh_buf_far, (uint16_t)len);
 }
 
-void sh_put(const void *pdata, WORD len)
+void sh_put(uint32_t pdata, WORD len)
 {
     if (!sh_buf_far || len <= 0)
         return;
     if (len > SH_BUFLEN)
         len = SH_BUFLEN;
-    far_put(sh_buf_far, pdata, (uint16_t)len);
+    far_copy(sh_buf_far, pdata, (uint16_t)len);
 }
 
 /* The donor's, on the constant: the value after the name, or NULL. */

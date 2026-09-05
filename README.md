@@ -43,7 +43,8 @@ full-screen repaints.
 | `make test-m14x` | PASS | the same on SpartaDOS X 4.50, the cartridge -- with the application pool and the test stage moved out of its way, into the banked window it services calls from |
 | `make test-m15` | PASS | GEMDOS: the ST's trap #1 as gem4xe's third `COP` face, answered from CIO and the DOS seam -- directory searches, paths, files, far memory, attributes and errors, every answer against the disk image; `test-m15x` on SpartaDOS X, `test-m15d` on DOS 2 |
 | `make test-m16` | PASS | the shell loop: DESKTOP.G4A loaded and run, a program run from it and the desktop back, a missing program's alert, shutdown -- the screen against the reference at each stop, the pool and the far heap back where they were, the stack's low-water mark (1199 of 2048 bytes); the VDI's virtual workstations (one per program) under it. GEM.COM, the product, does the same from the DOS prompt and returns to it |
-| `make test-m17` | PASS | the GEM Desktop: DESKTOP.G4A's menu bar, drive icons and trash, an icon clicked, Desk -> About and its dialog, a drive opened into a folder window, a folder opened in it and closed back out, the fuller, the arrows, the closer, File -> Quit -- driven at the mouse and checked against `tools/deskref.py`, the desktop itself transcribed against the AES model, its directory listings answered from the disk image: thirteen screens, the desktop's 1960 bytes of globals byte for byte at nine of them, 250 calls on both sides, the pool and far heap back, the runner's and the desktop's stack low-water marks (1223 of 2048, 347 of 640) |
+| `make test-m17` | PASS | the GEM Desktop: DESKTOP.G4A's menu bar, drive icons and trash, an icon clicked, Desk -> About and its dialog, a drive opened into a folder window, a folder opened in it and closed back out, the fuller, the arrows, the closer, File -> Quit -- driven at the mouse and checked against `tools/deskref.py`, the desktop itself transcribed against the AES model, its directory listings answered from the disk image: thirteen screens, the desktop's 1968 bytes of globals byte for byte at nine of them, 252 calls on both sides, the pool and far heap back, the runner's and the desktop's stack low-water marks (1223 of 2048, 333 of 640) |
+| `make test-m18` | PASS | a program run from the desktop: drive A opened, the window full, M11.G4A double-clicked -- the desktop puts its window's place in the shell buffer as DESKTOP.INF text and exits, the shell runs the program, the desktop comes back and opens the window where it was, File -> Quit -- the desktop transcribed twice against one AES model with the program's calls counted between: six screens, `G` at four waits, 275 calls over the three programs, the pool and far heap back, each run's stack low-water mark (425 and 310 of 640) |
 | `make test-m14u` `test-m15u` | PASS | the same two on SpartaDOS X 4.49b booted from a real Ultimate 1MB flash image, U1MB switched on -- needs the patched emulator in `tools/altirra/`, so not in `make test` |
 | `make check-cc` | PASS | the ten compiler bugs worked around, in the vendor's simulator |
 | `make movie` | PASS | a session with the AES itself, filmed frame by frame and checked as a gate: `build/movie/gem4xe.mp4` |
@@ -180,17 +181,20 @@ the SDL emulator could not switch on headlessly, now can be: the same
 patches add the switches, and the two `*u` gates boot SpartaDOS X from
 the machine's own flash.
 
-**The desktop** (`docs/phase14.md`, milestones 3 to 5). The AES's shell
+**The desktop** (`docs/phase14.md`, milestones 3 to 6). The AES's shell
 loop runs `DESKTOP.G4A`, then whatever it asks for, then the desktop
 again; `GEM.COM` is that loop from the DOS prompt, back to it at
 shutdown. The desktop is the donor's deskmain.c, deskobj.c and
 deskwin.c cut to what shows so far -- the bar, an icon for each drive
-GEMDOS reports and the trash, About, Quit, and folder windows: a
-drive or a folder double-clicked lists through `Fsfirst`/`Fsnext`
-into a window, folders first, with an icon per entry, the name and
-information lines, the fuller, the arrows and the closer -- loading
-its resource from the disk beside it, its icons EmuTOS's, checked in
-like the font. Its gate is a new kind: the desktop is a program, not a
+GEMDOS reports and the trash, About, Quit, folder windows, and a
+program run from its icon: a drive or a folder double-clicked lists
+through `Fsfirst`/`Fsnext` into a window, folders first, with an icon
+per entry, the name and information lines, the fuller, the arrows and
+the closer; a program double-clicked goes to `shel_write`, and the
+desktop leaves its windows' places in the shell buffer as the text of
+DESKTOP.INF and opens them again when the shell brings it back --
+loading its resource from the disk beside it, its icons EmuTOS's,
+checked in like the font. Its gate is a new kind: the desktop is a program, not a
 script, and which calls it makes depends on what the AES answers, so
 `tools/deskref.py` is the desktop transcribed against the model, and
 the harness syncs to the ABI's own call counter rather than a record
@@ -201,7 +205,9 @@ an internal error) is copied around byte by byte. The first window
 open ran the application's 256-byte stack out, and a `.G4A`'s stack
 is sized per link now; and the hourglass that stayed over an opened
 folder was the donor's `gsx_mfset` hide-and-show, missing on both
-sides of the gate.
+sides of the gate. The transcription found the next one on the host
+before the emulator ran: the desktop's loop ends on `do_open`'s
+answer, and a drive's window opening had been answering TRUE.
 
 ## Verification
 

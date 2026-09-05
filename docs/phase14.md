@@ -729,3 +729,127 @@ density, and the three fill a single-density disk.  The gate fixtures
 and M11.G4A are on the SpartaDOS disk only, which is where milestone 6
 -- a program run from an icon, and the desktop back -- will find a
 program to run; what the DOS 2 disk runs is a question for then.
+
+## Milestone 6: a program from the desktop
+
+`make test-m18` PASS.  A double-click on a program's icon runs it, and
+the desktop comes back afterwards with its windows where they were.
+The mechanism is the donor's, in `src/desk/deskwin.c`: `do_aopen`
+makes the window's directory the default (`Dsetdrv`, `Dsetpath` --
+GEMDOS verifies the directory by opening `X:\DIR\*.*` through CIO, and
+a failure is the donor's alert), hands the program's name to
+`shel_write(SHW_EXEC)`, and answers TRUE; `do_open` passes that answer
+up through `hndl_button` and the menu's Open, and the desktop's loop
+ends on it.  Before it returns, the desktop records every open window
+(`cnx_put`: the current rectangle from `wind_get(WF_CXYWH)` snapped as
+`do_xyfix` snaps it, the row shown first, the search spec) in a table
+of slots (the donor's WSAVE, one per WNODE) and writes them to the
+shell buffer as the text of DESKTOP.INF (`app_save`): `#R 02`, then a
+`#W` line per slot with the sliders and the place in character cells
+as two hex digits each and the path ending in `@`, after the 128 bytes
+the donor reserves at the front for copy and paste data.  It does not
+close its windows: the donor leaves them to the AES, and the shell's
+reinitialisation takes the screen back.  The shell runs the program,
+and when that returns, the desktop again, which reads the buffer back
+(`app_start`, from `shel_get`, or a default of one slot per window at
+`WIN_XCELL`/`WIN_YCELL` when no `#` is there, the donor's
+`app_blddesk`), parses the lines (`scan_2`, two hex digits after the
+spaces, and `-1` at the end), and opens each slot's window on its
+path (`cnx_get`: a place off the desk is pulled back to it, the drive's
+icon found for the path by its letter, `do_diropen` with the saved
+rectangle and row).  The round trip is in cells, as on the ST: a
+window filling the desk at (0, 11, 640, 229) comes back at (0, 11,
+640, 224).
+
+The slots and the desktop's copy of the shell buffer are in its far
+arena, which grows from 7212 bytes to 11644 (the DTA, the FNODEs, the
+CSAVE, 4192 for the buffer); `G` gains the two far pointers and is
+1968 bytes.  `shel_get` and `shel_put` therefore take a full 24-bit
+address in `addr_in[0]`, as the ST's take a 32-bit one -- the AES
+only moves bytes -- and the shell's buffer, which is far already, is
+cleared at `sh_init` (the donor's is zeroed BSS, and the desktop tests
+its first byte for `#`) and copied far to far (`far_copy`, `far_fill`
+in `src/sys/farmem.c`), clamped to its 4192 bytes.  The bindings
+(`src/app/gemlib.c`) take `void __far *`.  `src/desk/deskwin.c` is
+1058 lines now (757), `DESKTOP.G4A` 19844 bytes (near 3584, far
+14510, and 859 fixups).
+
+### What was wrong on the way
+
+`do_open`'s answer.  Once the loop ended on it, `do_dopen`'s TRUE --
+a drive's window opened -- ended the desktop after the first window.
+The model said so before the emulator did: `test-m17`'s dry run
+stopped at 110 calls where it had made 252, at the wait after the
+window came up.  The donor's `do_open` (desksupp.c) calls `do_dopen`
+and `do_fopen` for their effect and answers FALSE for a disk and a
+folder; only `do_aopen`'s answer comes back.  Both the desktop and
+the transcription had it wrong the same way, and the transcription
+was the one that showed it, because its script is what the gate
+already knew to be right.
+
+The gate's stack measurement.  `test-m17` paints the desktop's stack
+when the desktop first waits and reads the low-water mark at the end;
+here the loader zeroes the near region for the program and again for
+the second desktop, so the end shows a stack that reads as used to
+its last byte -- "640 of 640" -- which is the zeroing, not an
+overflow.  `test-m18` paints each run's stack while the desktop sits
+in its `rsrc_load`, whose read from disk keeps it inside the ABI for
+frames, so the S the ABI saved is exact and everything the run does
+after the resource is measured -- including, for the second run, the
+window opened from the slot before the first wait -- and reads each
+run's mark at its `appl_exit`, the last call the counter sees before
+the shell loads the next program over the region.
+
+The compiler's inlining.  The first run's mark came back 511 of 640,
+164 deeper than milestone 5 had measured, and `test-m17` -- which
+runs no program -- now said 511 too.  The linker map had no
+`do_aopen`: Calypsi inlines a static function with a single call
+site, so `do_aopen`'s path and tail (48 + 128 bytes) had become part
+of `do_open`'s frame and sat under every window the desktop opens,
+which is where its deepest stack is (`do_dopen`, `do_diropen`,
+`do_wopen`, `graf_growbox`).  `__attribute__((noinline))` is not an
+attribute cc65816 knows ("unknown attribute 'noinline' ignored"), and
+its inlining switches are per compilation, so `do_aopen` is external
+instead: with a caller elsewhere possible the compiler leaves it a
+function, and the 176 bytes are paid only on the way out to a
+program.  It costs 61 bytes of code.  The first run's mark is then
+425 of 640, in `do_aopen` (the buffers, the GEMDOS frames,
+`shel_write`); the second's 310, and `test-m17`'s window path 333.
+The margin is 215 bytes; the milestones that bring
+dialogs over file operations will want it, and the near budget is
+the tight one (milestone 5).
+
+### The gate
+
+`tests/emu/m18_launch.py` is the desktop transcribed twice against one
+AES model: the first desktop's `shel_put` leaves the record in the
+model's shell buffer and the second's `shel_get` finds it there, as
+the target's does in the AES's.  M11.G4A between them is counted, not
+replayed: the shell's restart resets everything of the AES it touches
+(`m16_shell`'s model of it), so its 18 AES and VDI calls and 7 + n
+GEMDOS calls -- n the root entries its `Fsfirst`/`Fsnext` walk finds,
+made on the model's listing as M11.G4A makes it -- are what the ABI's
+counter counts between the two desktops, and the second desktop's
+plans key on the first's 148 calls plus M11.G4A's 34.  The far heap
+is the same address on both runs because the shell winds it back to
+the desktop's blob after every program, so the second run's `Malloc`
+lands where the first's did; the model's brk is reset to the same
+derivation.  Checked: six screens (the desk, the window on A:, full,
+the window back on A: after M11.G4A, the File menu, Quit); `G` at the
+four waits; M11.G4A's return of 18 through `sh_lastret` while the
+second desktop loads; 275 calls on both sides (148 + 34 + 93), none
+refused, three programs run and `sh_main` returning 3; the pool back
+at `$4800` with 8192 free and the far heap higher by the desktop's
+file exactly; the runner's stack low-water mark, 1223 of 2048, and the
+desktop's per run.  The first desktop is in its `rsrc_load` 638 frames
+after GO and up 150 later; M11.G4A loads, runs and returns and the
+second desktop is loading 210 frames after the double-click, in its
+`rsrc_load` the next frame, and up 185 frames later.
+
+The DOS II+/D product disk lost the fixture DOS's demonstration
+programs (XMST, MEMTEST) to make the room: `tools/mkdisk.py --remove`,
+through `tools/atr.py`'s `delete`, frees the file's sectors in the
+VTOC and flags the entry deleted as the DOS does.  It holds GEM.COM,
+DESKTOP.G4A and DESKTOP.RSC with 41 sectors free; M11.G4A and the gate
+fixtures are on the SpartaDOS disk only, and what the DOS 2 disk runs
+is still the open question.

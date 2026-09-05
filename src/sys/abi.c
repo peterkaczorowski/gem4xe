@@ -469,8 +469,9 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
             ret = sh_write(int_in[0], int_in[1], int_in[2], cmd, tail);
         break;
     }
-    case 122: {                     /* shel_get: buffer, len */
-        void *buf = near_of(addr_in[0]);
+    case 122: {                     /* shel_get: buffer, len -- the buffer
+                                     * may be far: the AES only copies bytes */
+        uint32_t buf = (uint32_t)addr_in[0];
         if (buf)
             sh_get(buf, int_in[0]);
         else
@@ -478,7 +479,7 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
         break;
     }
     case 123: {                     /* shel_put: data, len */
-        const void *buf = near_of(addr_in[0]);
+        uint32_t buf = (uint32_t)addr_in[0];
         if (buf)
             sh_put(buf, int_in[0]);
         else

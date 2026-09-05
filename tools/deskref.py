@@ -61,8 +61,9 @@ from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
                     WIND_CREATE, WIND_OPEN, WIND_CLOSE, WIND_DELETE,
                     WIND_GET, WIND_SET, WIND_FIND, WIND_UPDATE,
                     RSRC_LOAD, RSRC_FREE, RSRC_GADDR, SHEL_WRITE,
-                    DSETDRV, DGETDRV, FSETDTA, MALLOC, FSFIRST, FSNEXT,
-                    FA_SUBDIR)
+                    SHEL_GET, SHEL_PUT, SIZE_SHELBUF,
+                    DSETDRV, DGETDRV, DSETPATH, FSETDTA, MALLOC, FSFIRST,
+                    FSNEXT, FA_SUBDIR)
 from rsc import R_TREE, R_ICONBLK, R_STRING, ICONBLK_SIZE  # noqa: E402
 from deskrsc import (ADMENU, ADDINFO, DESKMENU, FILEMENU, ABOUITEM,  # noqa: E402
                      OPENITEM, CLOSITEM, CLSWITEM, QUITITEM, DEVERSN, DEOK,
@@ -92,7 +93,8 @@ LEN_WNAME = LEN_ZPATH + 2
 NUM_FNODES = 64
 DISPATTR = FA_SUBDIR
 F_SELECTED = 0x0001
-SHW_SHUTDOWN = 4                            # gem.h
+SHW_EXEC, SHW_SHUTDOWN = 1, 4               # gem.h
+CPDATA_LEN, INF_REV_LEVEL, SH_TAILLEN = 128, 2, 128
 AES_VERSION = 0x0140                        # abi.c: global[0]
 SCREENINFO_SIZE = ICONBLK_SIZE + LABEL_LEN
 OBJ_SIZE = aesref.OBJ_SIZE
@@ -103,10 +105,16 @@ PNODE_SIZE = 2 + 4 + LEN_ZPATH + 4
 WNODE_SIZE = 12 + PNODE_SIZE + LEN_WNAME + LEN_ZINFO
 # where a WNODE's in-place strings are
 WN_SPEC, WN_NAME, WN_INFO = 12 + 6, 12 + PNODE_SIZE, 12 + PNODE_SIZE + LEN_WNAME
+WSAVE_SIZE = 6 * 2 + LEN_ZPATH
+CSAVE_SIZE = NUM_WNODES * WSAVE_SIZE
 
 # -- deskwin.c -------------------------------------------------------------
-ARENA_SIZE = DTA_SIZE + NUM_WNODES * NUM_FNODES * FNODE_SIZE
+ARENA_SIZE = (DTA_SIZE + NUM_WNODES * NUM_FNODES * FNODE_SIZE + CSAVE_SIZE
+              + SIZE_SHELBUF)
 WIN_XCELL, WIN_WCELL, WIN_HCELL = 2, 38, 12
+# where the model keeps a string the desktop passes from its stack (the
+# target's address is the compiler's; the gate compares G, not records)
+STACK_STRING = 0x00FFFE00
 WIN_YCELL = (6, 8, 10, 13)
 
 # GLOBES, field by field in the order desk.h declares them; sizes as
@@ -116,7 +124,8 @@ GLOBES = [("a_menu", 2), ("a_info", 2), ("a_iblist", 2), ("g_handle", 2),
           ("g_wchar", 2), ("g_hchar", 2), ("g_wbox", 2), ("g_hbox", 2),
           ("g_desk", 8), ("g_wicon", 2), ("g_hicon", 2), ("g_icw", 2),
           ("g_ich", 2), ("g_screenfree", 2), ("g_rmsg", 16),
-          ("g_wcnt", 2), ("g_dta", 4), ("g_wlist", NUM_WNODES * WNODE_SIZE),
+          ("g_wcnt", 2), ("g_dta", 4), ("g_cnxsave", 4), ("g_shelbuf", 4),
+          ("g_wlist", NUM_WNODES * WNODE_SIZE),
           ("g_screen", NUM_SOBS * OBJ_SIZE),
           ("g_screeninfo", NUM_ITEMS * SCREENINFO_SIZE)]
 GLOBES_SIZE = sum(n for _, n in GLOBES)
@@ -235,6 +244,16 @@ class Wnode:
                 + self.path.pack() + self.name.pack() + self.info.pack())
 
 
+class Wsave:
+    """A window's place between programs: a slot of CSAVE (far memory,
+    in the arena after the FNODEs)."""
+    __slots__ = ("x", "y", "w", "h", "hsl", "vsl", "path")
+
+    def __init__(self):
+        self.x = self.y = self.w = self.h = self.hsl = self.vsl = 0
+        self.path = ""
+
+
 class NeedsInput(Exception):
     """The desktop is in a wait the gate gave no input for."""
 
@@ -267,6 +286,11 @@ class Desktop:
         self.screenfree = 0
         self.rmsg = [0] * 8
         self.wcnt, self.dta = 0, 0
+        self.cnxsave = self.shelbuf = 0
+        self.wsave = [Wsave() for _ in range(NUM_WNODES)]
+        # the desktop's copy of the shell buffer, a far CharArray the
+        # model's shel_get/shel_put copy into and out of
+        self.shelbuf_data = CharArray(SIZE_SHELBUF)
         wlist = self.G + g_offset("g_wlist")
         self.wlist = [Wnode(wlist + i * WNODE_SIZE) for i in range(NUM_WNODES)]
         for pw in self.wlist:
@@ -554,6 +578,12 @@ class Desktop:
             pw.id = 0
             pw.root = DROOT + 1 + i
             pw.path.flist = arena + DTA_SIZE + i * NUM_FNODES * FNODE_SIZE
+        self.cnxsave = arena + DTA_SIZE + NUM_WNODES * NUM_FNODES * FNODE_SIZE
+        self.shelbuf = self.cnxsave + CSAVE_SIZE
+        self.a.mem[self.shelbuf] = self.shelbuf_data
+        for ws in self.wsave:
+            ws.x = ws.y = ws.w = ws.h = ws.hsl = ws.vsl = 0
+            ws.path = ""
         return True
 
     def win_find(self, wh):
@@ -583,8 +613,8 @@ class Desktop:
     def win_alloc(self):
         if self.wcnt == NUM_WNODES:
             return None
-        r = Rect(WIN_XCELL * self.wchar, WIN_YCELL[self.wcnt] * self.hchar,
-                 WIN_WCELL * self.wchar, WIN_HCELL * self.hchar)
+        ws = self.wsave[self.wcnt]
+        r = Rect(ws.x, ws.y, ws.w, ws.h)
         wob = self.obj_walloc(r.x, r.y, r.w, r.h)
         if not wob:
             return None
@@ -778,7 +808,7 @@ class Desktop:
 
     # -- opening -------------------------------------------------------------
     def do_xyfix(self, t):
-        t.x = (t.x + 8) & 0xFFF0
+        t.x = signed((t.x + 8) & 0xFFF0)
         if t.y < self.desk.y:
             t.y = self.desk.y
 
@@ -847,18 +877,51 @@ class Desktop:
         path += name + "\\*.*"
         return self.do_diropen(pw, False, curr, path, t, True)
 
+    def do_aopen(self, pw, curr, name):
+        """The donor's do_aopen + pro_run + pro_exec: the program's
+        directory made the default, then shel_write(SHW_EXEC) with the
+        full path and an empty tail; the icon deselected either way.
+        The path strings are the desktop's stack, so the records carry
+        no address for them."""
+        app_path = pw.path.spec.s[:-3]              # "A:\SUB\*.*" less the "*.*"
+        if len(app_path) + len(name) >= LEN_ZPATH:
+            return False
+        self.busy(True)
+        self.call(DSETDRV, (ord(app_path[0]) - ord("A"),))
+        self.a.mem[STACK_STRING] = Text(app_path)
+        if self.gemdos_long(DSETPATH, STACK_STRING) < 0:
+            self.busy(False)
+            self.form_alert(1, "[1][Failed to set default|directory.][ OK ]")
+            return False
+        self.busy(False)
+        app_path += name
+        self.busy(True)
+        io, _ = self.call(SHEL_WRITE, (SHW_EXEC, 1, 1))
+        ret = io[0]
+        if not ret:
+            self.busy(False)
+        self.do_wopen(False, pw.id, curr, self.desk)
+        return ret
+
     def do_open(self, wh, obj):
+        """True only when a program ran (the donor's do_open): the
+        desktop is done then."""
         if wh == DESKWH:
             if self.obj_info(obj).char & 0xFF:
-                return self.do_dopen(obj)
-            return False                            # the trash
+                self.do_dopen(obj)
+            return False                            # else the trash
         pw = self.win_find(wh)
         if pw is None:
             return False
         pf = self.win_fnode(pw, obj)
-        if pf and pf.attr & FA_SUBDIR:
-            return self.do_fopen(pw, obj, pf.name)
-        return False                                # a program: milestone 6
+        if pf is None:
+            return False
+        if pf.attr & FA_SUBDIR:
+            self.do_fopen(pw, obj, pf.name)
+            return False
+        if self.win_which(pf) == IB_APPL:
+            return self.do_aopen(pw, obj, pf.name)
+        return False
 
     def win_close(self, pw, close_window):
         spec = pw.path.spec.s
@@ -874,6 +937,145 @@ class Desktop:
                 return
         self.call(WIND_CLOSE, (pw.id,))
         self.win_free(pw)
+
+    # -- the windows between programs ----------------------------------------
+    @staticmethod
+    def scan_2(text, i):
+        """The donor's scan_2 over text from i: past the spaces, two hex
+        digits (0xFF is -1) or nothing at a CR.  Returns (value, i)."""
+        def hex_dig(c):
+            n = ord(c)
+            if n >= ord("A"):
+                n += 9
+            return n & 0x0F
+
+        while text[i] == " ":
+            i += 1
+        v = 0
+        if text[i] != "\r":
+            v = hex_dig(text[i]) << 4
+            v |= hex_dig(text[i + 1])
+            i += 2
+            if v == 0xFF:
+                v = -1
+        return v, i
+
+    def inf_write(self):
+        """The INF text from the slots into the shell buffer copy; its
+        length with the NUL, from the buffer's start."""
+        def hex2(v):
+            return f" {v & 0xFF:02X}"
+
+        text = f"#R{hex2(INF_REV_LEVEL)}\r\n"
+        for ws in self.wsave:
+            text += ("#W" + hex2(ws.hsl) + hex2(ws.vsl)
+                     + hex2(ws.x // self.wchar) + hex2(ws.y // self.hchar)
+                     + hex2(ws.w // self.wchar) + hex2(ws.h // self.hchar)
+                     + hex2(0) + " " + ws.path + "@\r\n")
+        end = self.shelbuf_data.put(text, CPDATA_LEN)
+        return end + 1
+
+    def build_inf(self):
+        for i, ws in enumerate(self.wsave):
+            ws.x, ws.y = WIN_XCELL * self.wchar, WIN_YCELL[i] * self.hchar
+            ws.w, ws.h = WIN_WCELL * self.wchar, WIN_HCELL * self.hchar
+            ws.hsl = ws.vsl = 0
+            ws.path = ""
+        self.inf_write()
+
+    def app_start(self):
+        self.call(SHEL_GET, (SIZE_SHELBUF,), tree=self.shelbuf)
+        raw = self.shelbuf_data.raw
+        if raw[CPDATA_LEN] != ord("#"):
+            self.build_inf()
+        n = raw.find(0, CPDATA_LEN)
+        text = bytes(raw[CPDATA_LEN:n]).decode("latin-1")
+        i, wincnt = 0, 0
+        while i < len(text):
+            c = text[i]
+            i += 1
+            if c != "#":
+                continue
+            if text[i] == "R":
+                _, i = self.scan_2(text, i + 1)
+            elif text[i] == "W":
+                i += 1
+                if wincnt < NUM_WNODES:
+                    ws = self.wsave[wincnt]
+                    ws.hsl, i = self.scan_2(text, i)
+                    ws.vsl, i = self.scan_2(text, i)
+                    v, i = self.scan_2(text, i)
+                    ws.x = v * self.wchar
+                    v, i = self.scan_2(text, i)
+                    ws.y = v * self.hchar
+                    v, i = self.scan_2(text, i)
+                    ws.w = v * self.wchar
+                    v, i = self.scan_2(text, i)
+                    ws.h = v * self.hchar
+                    i += 4                          # " 00 ", then the path
+                    k = text.find("@", i)
+                    ws.path = text[i:min(k, i + LEN_ZPATH - 1)]
+                    i = k if k - i < LEN_ZPATH - 1 else i + LEN_ZPATH - 1
+                    wincnt += 1
+
+    def app_save(self):
+        n = self.inf_write()
+        self.call(SHEL_PUT, (n,), tree=self.shelbuf)
+
+    def obj_get_obid(self, drive):
+        objnum = self.screen[DROOT].ob_head
+        while objnum >= WOBS_START:
+            o = self.screen[objnum]
+            if o.ob_type == G_ICON and (self.obj_info(objnum).char & 0xFF) == drive:
+                return objnum
+            objnum = o.ob_next
+        return 0
+
+    def cnx_put(self):
+        """The open windows into the slots, bottom-most first, the rest
+        cleared."""
+        n = 0
+        wob = self.screen[ROOT].ob_head
+        while wob > ROOT:
+            if wob != DROOT:
+                pw = self.wlist[wob - (DROOT + 1)]
+                if pw.id > 0:
+                    r = self.wind_get_rect(pw.id, WF_CXYWH)
+                    self.do_xyfix(r)
+                    ws = self.wsave[n]
+                    ws.x, ws.y, ws.w, ws.h = r.x, r.y, r.w, r.h
+                    ws.hsl, ws.vsl = 0, pw.cvrow
+                    ws.path = pw.path.spec.s
+                    n += 1
+            wob = self.screen[wob].ob_next
+        for ws in self.wsave[n:]:
+            ws.path = ""
+
+    def cnx_get(self):
+        """The windows back from the slots, growing from their drive
+        icons."""
+        d = self.desk
+        for ws in self.wsave:
+            if ws.x >= d.w:
+                ws.x = d.w // 2
+            if ws.y >= d.h:
+                ws.y = d.h // 2
+            if ws.w <= 0 or ws.w > d.w:
+                ws.w = d.w
+            if ws.h <= 0 or ws.h > d.h:
+                ws.h = d.h
+            if not ws.path:
+                continue
+            obid = self.obj_get_obid(ord(ws.path[0]))
+            pw = self.win_alloc()
+            if pw is None:
+                continue
+            pw.cvrow = ws.vsl
+            r = Rect(ws.x, ws.y, ws.w, ws.h)
+            self.do_xyfix(r)
+            ws.x, ws.y = r.x, r.y
+            if not self.do_diropen(pw, True, obid, ws.path, r, True):
+                self.win_free(pw)
 
     # -- the window manager's messages ---------------------------------------
     def hndl_wmsg(self, msg):
@@ -931,11 +1133,10 @@ class Desktop:
         if item == OPENITEM:                    # the top window's selection,
             obj = self.sel_item(pw.root) if pw else 0     # else the desk's
             if obj:
-                self.do_open(pw.id, obj)
-            else:
-                obj = self.sel_item(DROOT)
-                if obj:
-                    self.do_open(DESKWH, obj)
+                return self.do_open(pw.id, obj)
+            obj = self.sel_item(DROOT)
+            if obj:
+                return self.do_open(DESKWH, obj)
         elif item == CLOSITEM:
             if pw:
                 self.win_close(pw, False)
@@ -974,7 +1175,7 @@ class Desktop:
             obj = 0
         self.act_select(wh, root, obj)
         if obj and clicks == 2:
-            self.do_open(wh, obj)
+            return self.do_open(wh, obj)
         return False
 
     def hndl_msg(self):
@@ -1007,9 +1208,11 @@ class Desktop:
             self.call(SHEL_WRITE, (SHW_SHUTDOWN, 0, 0))
             self.call(APPL_EXIT)
             return 1
+        self.app_start()
         self.call(WIND_SET, (DESKWH, WF_NEWDESK, 0, self.g_screen_addr, DROOT, 0))
         self.call(WIND_UPDATE, (BEG_UPDATE,))
         self.do_wredraw(DESKWH, self.desk)
+        self.cnx_get()
         self.call(MENU_BAR, (1,), tree=self.a_menu)
         self.call(WIND_UPDATE, (END_UPDATE,))
         self.busy(False)
@@ -1029,9 +1232,11 @@ class Desktop:
                     MU_MESAG | MU_TIMER, 2, 1, 1, 0, False)
             self.call(WIND_UPDATE, (END_UPDATE,))
 
-        for pw in self.wlist:
-            if pw.id > 0:
-                self.win_close(pw, True)
+        # the windows stay open: their places go to the shell buffer for
+        # the next desktop, and the shell's reinitialisation takes the
+        # screen back
+        self.cnx_put()
+        self.app_save()
         self.call(MENU_BAR, (0,), tree=self.a_menu)
         self.call(WIND_SET, (DESKWH, WF_NEWDESK, 0, 0, ROOT, 0))
         self.call(RSRC_FREE)
@@ -1048,7 +1253,7 @@ class Desktop:
             self.wchar, self.hchar, self.wbox, self.hbox,
             d.x, d.y, d.w, d.h, self.wicon, self.hicon, self.icw, self.ich,
             self.screenfree)) + b"".join(w(x) for x in self.rmsg)
-        out += w(self.wcnt) + dw(self.dta)
+        out += w(self.wcnt) + dw(self.dta) + dw(self.cnxsave) + dw(self.shelbuf)
         out += b"".join(pw.pack() for pw in self.wlist)
         assert len(out) == g_offset("g_screen"), len(out)
         out += b"".join(o.pack() for o in self.screen)

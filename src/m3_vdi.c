@@ -785,12 +785,12 @@ static void run_script(void)
                 c4 = 3;
                 break;
             case 122:                       /* shel_get: buf, len */
-                sh_get((void *)(uint16_t)contrl[7], intin[0]);
+                sh_get((uint32_t)(uint16_t)contrl[7], intin[0]);
                 intout[0] = 1;
                 c4 = 1;
                 break;
             case 123:                       /* shel_put: buf, len */
-                sh_put((const void *)(uint16_t)contrl[7], intin[0]);
+                sh_put((uint32_t)(uint16_t)contrl[7], intin[0]);
                 intout[0] = 1;
                 c4 = 1;
                 break;
