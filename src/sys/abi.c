@@ -283,6 +283,16 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
         ret = form_dial(int_in[0], &pi, &pt);
         break;
     }
+    case 52: {                      /* form_alert: defbut, string */
+        const char *s = (const char *)near_of(addr_in[0]);
+        if (!s)
+            return -1;
+        ret = fm_alert(int_in[0], s);
+        break;
+    }
+    case 53:                        /* form_error: number */
+        ret = fm_error(int_in[0]);
+        break;
     case 54:                        /* form_center */
         ob_center(tree, &clip);
         int_out[1] = clip.g_x; int_out[2] = clip.g_y;
@@ -340,6 +350,16 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
         int_out[4] = gl_hbox;
         ret = gl_handle;
         break;
+    case 78: {                      /* graf_mouse: mode, form */
+        const WORD *form = 0;
+        if (int_in[0] == USER_DEF) {
+            form = (const WORD *)near_of(addr_in[0]);
+            if (!form)
+                return -1;
+        }
+        gr_mouse(int_in[0], form);
+        break;
+    }
     case 79:                        /* graf_mkstate */
         gr_mkstate(&int_out[1], &int_out[2], &int_out[3], &int_out[4]);
         break;

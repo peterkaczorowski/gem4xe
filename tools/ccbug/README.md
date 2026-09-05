@@ -1,6 +1,6 @@
 # tools/ccbug — the cc65816 bugs gem4xe works around
 
-Nine defects in Calypsi cc65816 **5.18** — seven in code generation, one
+Ten defects in Calypsi cc65816 **5.18** — eight in code generation, one
 crash and one in the front end's arithmetic — each reproduced from a shape
 lifted out of gem4xe, each with the shape the sources use instead. `make check-cc` builds `bugs.c` with the
 vendor's minimal linker script and C library, runs it under `db65816`, and
@@ -12,7 +12,7 @@ compiled on its own and the outcome read from the compiler:
       B1 through a scalar                        want   476 got   476   ok
       ...
       B6 indexed direct-page array                       compiles   still present
-    check-cc: PASSED -- every workaround shape is right; 12 of 12 bug shapes still present
+    check-cc: PASSED -- every workaround shape is right; 13 of 13 bug shapes still present
 
 The run **fails only if a workaround shape stops compiling right**, because
 that is what would break gem4xe. A bug that has gone away is reported as
@@ -54,6 +54,8 @@ What the sources do, in one line each. The reasons follow.
 9. **Never `got = c ? a : b` on a local whose address another path passes
    to a call.** Test the condition, `break` or return on it, then assign
    plainly.
+10. **Never clamp a parameter back into itself in a `static` function.**
+    `WORD cx = gx > n ? n : gx;` into a fresh local, then use `cx`.
 
 ## B1 — stack-array element plus operand compiles to a load
 
@@ -265,3 +267,30 @@ is whatever was there — 770 on the target, 259 in the simulator for a
 20-byte write.  Sibling of B3 (the conditional store into a dead slot), on
 a local rather than through a pointer.  -O2.  `gd_xfer` tests the status,
 breaks on failure, and assigns `got = m` on the line after.
+
+## B10 — parameters clamped in place are read from an unwritten slot
+
+    static void snap_icon(WORD gx, WORD gy, WORD *px, WORD *py)
+    {
+        ...
+        if (gx > columns - 1) gx = columns - 1;
+        if (gy > rows - 1)    gy = rows - 1;
+        *px = gx * icw + spare / columns;                /* src/desk/desktop.c */
+        *py = gy * ich + spare / rows + desk.y;
+    }
+
+Inlined into its caller at `-O2`, the two parameters are parked at `1,s`
+and `3,s` and the clamps store there — the second one to `1,s`, which is
+the wrong parameter, though that is the smaller error — and then every
+product that follows loads *both* parameters from `5,s`, a slot nothing in
+the function ever wrote (`lda 5,s; ldx icw; jsl _Mul16`).  The result is
+whatever the last call left on the stack: the first desk icon landed at
+(0, 11) because that slot was zero, the second at (31744, 3595) and the
+trash at (21844, -8027), off the screen.  Sibling of B3 and B9: a value
+assigned on one path of a conditional, then fetched from the wrong slot at
+the join.  Clamping into fresh locals (`cx`, `cy`) and leaving the
+parameters alone compiles right.
+
+Found by hand-running the desktop (milestone 4, `docs/phase14.md`) and
+dumping its screen tree: two of three icons at impossible coordinates, the
+first one right.

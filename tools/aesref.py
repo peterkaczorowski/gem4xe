@@ -591,6 +591,11 @@ class AES:
         # The screen at each ("shot",) step of a plan, in order: what the
         # harness screenshots inside an op, where a drop-down is showing.
         self.shots = []
+        # GEMDOS's drive: the current one and the map Dsetdrv reports,
+        # what the harness read from the DOS seam (src/sys/gemdos.c)
+        self.dos_drive, self.dos_drvmap = 0, 1
+        # shel_write's request, kept for the shell loop
+        self.sh_doex = self.sh_isgr = 0
         # What the last level-triggered button quick-out found (ev_wait):
         # the button's level and the screen, and how many turns in a row
         # the caller has taken on one held press.
@@ -685,6 +690,12 @@ class AES:
         if old:
             self.gsx_moff()
             self.gl_moff = old
+
+    def ratinit(self):
+        """The pointer on whatever the count, unconditionally: what the
+        shell does before each program (src/aes/shel.c sh_main)."""
+        self.vcall(V_SHOW_C, (), (0,))
+        self.gl_moff = 0
 
     def gsx_attr(self, text, mode, color):
         if mode != self.gl_mode:
@@ -4024,6 +4035,40 @@ class AES:
             io[0] = 1
             io[1:5] = self.wm_calc(ints[0], ints[1] & 0xFFFF, *ints[2:6])
             c4 = 5
+        elif n == 110:
+            # rsrc_load: the file is the harness's to stage where the
+            # target's rsrc_load puts it (tools/rsc.py Rsc.expect), and
+            # the trees in it are in self.trees by address
+            io[0] = 1
+            c4 = 1
+        elif n == 111:
+            io[0] = 1                   # rsrc_free
+            c4 = 1
+        elif n == 112:
+            # rsrc_gaddr: where the thing is in the file is the file's
+            # business (tools/rsc.py Rsc.addr); a record that uses the
+            # address names it in its fourth slot
+            io[0] = 1
+            c4 = 1
+        elif n == 121:
+            # shel_write: the request is the shell loop's, remembered
+            self.sh_doex, self.sh_isgr = ints[0], ints[1]
+            io[0] = 1
+            c4 = 1
+        elif op >= GEMDOS_OP:
+            # GEMDOS through the same entry as the AES (src/sys/abi.c
+            # gem_entry counts it too), so a script that mirrors a
+            # program's calls keeps the target's gem_calls as its index.
+            # The drive calls only, from the DOS seam the harness read.
+            fn = op - GEMDOS_OP
+            if fn == 0x19:              # Dgetdrv
+                io[0] = self.dos_drive
+            elif fn == 0x0E:            # Dsetdrv: the map of drives
+                self.dos_drive = ints[0]
+                io[0] = self.dos_drvmap
+            else:
+                raise ValueError(f"unknown GEMDOS function {fn:#x}")
+            c4 = 1
         else:
             raise ValueError(f"unknown AES op {op}")
         return vdiref.record(c2, c4, io, po)
@@ -4046,6 +4091,12 @@ FSEL_INPUT, FSEL_EXINPUT = 1090, 1091
  MENU_REGISTER) = range(1030, 1036)
 (WIND_CREATE, WIND_OPEN, WIND_CLOSE, WIND_DELETE, WIND_GET, WIND_SET,
  WIND_FIND, WIND_UPDATE, WIND_CALC) = range(1100, 1109)
+RSRC_LOAD, RSRC_FREE, RSRC_GADDR = 1110, 1111, 1112
+SHEL_WRITE = 1121
+# GEMDOS, as a script sees it: the function number over this base
+# (src/app/gemlib.c has the numbers)
+GEMDOS_OP = 2000
+DSETDRV, DGETDRV = GEMDOS_OP + 0x0E, GEMDOS_OP + 0x19
 
 
 def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None,

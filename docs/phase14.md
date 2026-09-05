@@ -395,7 +395,7 @@ was at `$0032`.  Nothing in that chain was the bug; the chain was
 program running under the shell under the runner costs.  Measured, the
 low-water mark on the R path is 1191 bytes -- and the gate now measures
 it every run: the stack section is painted at the DOS prompt before `M3`
-is typed (the `.xex` writes nothing between `$2100` and `$367F`, and the
+is typed (the `.xex` writes nothing between `$2100` and `$357F`, and the
 startup zeroes `zdata`, not the stack), read back after `sh_main`
 returns, and the run fails if the first touched byte is within 256 of
 the bottom.  1199 bytes of the 2048 at the last run.
@@ -486,9 +486,118 @@ The bank-`$00` map, as it stands (the one in `src/gem4xe.scm` is the
 authority):
 
     $2000-$20FF  direct page
-    $2100-$367F  zdata, the 2 KB stack, data          90%
-    $3680-$3FFD  near code and constants              98%
+    $2100-$357F  zdata, the 2 KB stack, data          95%
+    $3580-$3FFD  near code and constants              90%
     $4000-$47FF  zwin: bss the handlers never touch   86%
     $4800-$67FF  the application pool (to $7FFF under GEM.COM)
     $6800-$7FFF  the runner's host-poked buffers
     $8000-$9BFF  MEMAC A; farload's staging at load time
+
+## Milestone 4: the desktop
+
+`make test-m17` PASS.  `DESKTOP.G4A` is the GEM Desktop now, or the
+first of it: `src/desk/desktop.c` and `deskobj.c` are the donor's
+deskmain.c and deskobj.c cut down to what this milestone shows -- the
+menu bar, a drive icon for each drive GEMDOS reports and the trash, an
+icon that selects when clicked, Desk -> About and its dialog, File ->
+Quit -- and `src/m16_desk.c` is the milestone-3 stand-in, kept as what
+`test-m16` drives the shell loop with.  The desktop is an application
+like any other: what it knows of the machine it asks the AES and
+GEMDOS for, and the ninety lines of `src/app/gemlib.c` it needed --
+`rsrc_load` and `rsrc_gaddr`, `menu_bar` and `menu_ienable`,
+`graf_mouse`, `form_center`, `shel_write`, `Dgetdrv` and `Dsetdrv`
+through the ABI's GEMDOS face -- are the bindings a program would use.
+Its resource, `DESKTOP.RSC`, is built by `tools/deskrsc.py` (48 objects
+of menu, 14 of the About dialog, two strings, three ICONBLKs; 3278
+bytes) and loaded through `rsrc_load` into the pool behind the
+program's near region, where `rsrc_gaddr` hands the trees back; the
+icons are EmuTOS's, extracted from desk/icons.c by `tools/iconconv.py`
+into `tools/deskicons.py` and checked in the way the font and the fill
+patterns are, with `tests/host/test_deskicons.py` re-parsing the donor
+so the copy cannot drift.
+
+The screen tree is the donor's: one OBJECT array of twenty-two, the
+desk under ROOT, four window boxes after it, and sixteen items on a
+free chain through `ob_next`, each with a SCREENINFO beside it holding
+the ICONBLK copied from the resource with its own label ("DISK A",
+"TRASH") and the drive letter written into the icon.  The drives come
+from GEMDOS's map -- SpartaDOS answers D1: and D2: and DOS 2 whatever
+DRVBYT says -- and the icons snap to a grid the desk's size and the
+icon's cell decide between them, floppies down the left, the trash in
+the bottom corner.  All of it is bank-`$00` data, 1330 bytes of it in
+one structure `G`, which is what the gate reads back.
+
+### What was wrong on the way
+
+The first run put the second icon at (31744, 3595) and the trash at
+(21844, -8027).  The first icon was right, which is what made it look
+like arithmetic rather than the compiler: it was the compiler.
+`snap_icon` clamps its two grid parameters in place and cc65816 5.18,
+inlining it at `-O2`, then loads both from a stack slot the function
+never wrote -- zero for the first call, the previous call's leavings
+after that.  Bug B10 in `tools/ccbug/`, a sibling of B3 and B9 (a value
+assigned on one path and fetched from the wrong slot at the join), with
+the workaround the others have: clamp into fresh locals and leave the
+parameters alone.  Found by dumping the screen tree, not the screen.
+
+The pointer never appeared.  The VDI opens with it hidden and the AES's
+hide count at zero, and nothing before the first program's first
+`graf_mouse` showed it; `graf_mouse(ARROW)` sets a shape, not the
+visibility.  The donor's `sh_main` calls `ratinit()` before every
+program -- the pointer on, the count zero, so that a program that
+returned with it hidden does not hide it for the next -- and ours does
+now (`src/aes/graf.c`).
+
+`form_error`'s five alert texts are half a kilobyte, and the near
+region was 98% full: they live in far memory now and the one wanted is
+copied into the pool for the length of the call, and the LoRAM/Near
+boundary moved down a page all the same (`$357F`/`$3580`), the stack
+and `zdata` having the room the near code did not.
+
+### The gate is the desktop, transcribed
+
+The earlier gates walk a script through the runner, one record at a
+time, and compare each record's result.  The desktop is not a script:
+which calls it makes and with what depends on what the AES answered --
+`graf_handle`'s cell size decides the icon grid, `wind_get`'s desk
+rectangle the tree, `form_center`'s position where the dialog goes and
+where the pointer has to click.  So `tools/deskref.py` is the desktop
+itself, transcribed against the AES model: `Desktop.main()` makes the
+same calls in the same order, taking its answers from `aesref`, and
+what comes out is the script the target must have made (69 calls) with
+a plan for each of the four waits it blocks in -- the model consumed
+the plan too, so a plan that leaves an input unused or asks for one the
+model does not need fails on the host before the emulator starts.  The
+harness has no count of records to sync to, since the desktop is a
+program, so `m7_form.drive` learned to take its position from the ABI's
+own call counter, which the sys op zeroes before `sh_main` and
+`gem_entry` bumps on every VDI, AES and GEMDOS call: inside the
+desktop's k-th call the counter reads k+1, and the plan for a wait is
+fed while the target is in that call.
+
+Checked, in order: the screen at six stops (the desk with DISK A
+selected, the Desk menu down, About under the pointer, the dialog with
+OK under the pointer, the File menu, Quit under the pointer) against
+the model's; `G`, all 1330 bytes, read out of the target while it waits
+for the first click and compared byte for byte with the model's
+`Desktop.globes()` -- the tree as deskobj.c and desktop.c built it, the
+ICONBLK copies, the labels, the geometry the AES answered; the shell's
+record afterwards (one run, returned 0, 69 calls, none refused); the
+pool back at `$4800` with 8192 free and the far heap higher by the
+desktop's file exactly (9220 bytes: near 3328, far 5086); and the stack's
+low-water mark, 1190 of 2048.  Every address the gate uses -- the
+program's near region, `G`, the resource -- is derived the way
+`app_load` derives it, from the `.G4A` header and the desktop's own
+symbol file, and the pointer's start from the target.  One thing the
+model settled before the emulator did: the desktop waits for two
+clicks, so a press on a menu item is held through the double-click
+delay before the menu sees it, and the plans end with the frames that
+cover it.
+
+The desktop comes up 430 frames after GO on the SpartaDOS disk (the
+stand-in took 240): the file, the resource, and the icons drawn through
+`objc_draw`.  GEM.COM does the same from the DOS prompt, driven by hand
+in Altirra with the joystick's trigger for the button.  Not in this
+milestone: the View and Options items and File's window items are in
+the menu, disabled (`NOT_YET`), until milestone 5 opens a folder window
+and 6 runs a program from an icon and brings the desktop back.

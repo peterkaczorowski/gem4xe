@@ -57,7 +57,6 @@ GEM_OBJS   = $(filter-out build/m3_vdi.o build/app_blob.o,$(M3_OBJS)) build/gem.
 # A gem4xe application: its own C startup and bindings (src/app), linked
 # against nothing of gem4xe's, on the application's own linker rules.
 APP_OBJS   = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o build/app/m11_app.o
-APP_LD     = $(LD) src/app/gemapp.scm $(APP_OBJS) $(LIB) --rtattr exit=simplified --cstartup gemapp
 # Its near budget (src/app/gemapp.scm): the stack and data, then the
 # constants.  Decimal, because a `#` in a make variable starts a comment.
 APP_BSS    = 2048
@@ -68,7 +67,7 @@ APP_BITS   = 256
 # target, otherwise boots a stale image and compares it against a fresh
 # linker map).
 all: build/hello-boot.atr build/m2-boot.atr build/m3-boot.atr build/m6split-boot.atr \
-     build/m12-d2.atr build/m14-boot.atr build/gem-boot.atr build/gem-sp.atr
+     build/m12-d2.atr build/m14-boot.atr build/m17-boot.atr build/gem-boot.atr build/gem-sp.atr
 
 build/%.o: src/%.s
 	@mkdir -p build
@@ -215,12 +214,27 @@ build/shel.o: src/aes/shel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/d
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
-# The gate application (src/m11_app.c with src/app/*), linked three times
-# -- at its placeholder addresses, with the near region up a page, with the
-# far region up a bank -- so that tools/mkg4a.py can find every byte that
-# depends on where it is loaded.  The .g4a is what a loader would read
-# from disk; the C array is the same bytes for the runner to load from
-# the image, there being no file layer yet.
+# A .G4A program (src/app/*: the startup and the bindings, plus its own
+# body) is linked three times -- at its placeholder addresses, with the
+# near region up a page, with the far region up a bank -- so that
+# tools/mkg4a.py can find every byte that depends on where it is loaded.
+# $(call g4a,name,objects,near bss,near bits,more mkg4a args,more targets)
+G4A_LIB = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o
+define g4a
+build/$(1).elf: $(2) src/app/gemapp.scm
+	$$(LD) src/app/gemapp.scm $(2) $$(LIB) --rtattr exit=simplified --cstartup gemapp -o $$@ \
+	    --list-file build/$(1).map --memories-expression "(app-layout #x1000 #x020000 $(3) $(4))"
+build/$(1)-near.elf: $(2) src/app/gemapp.scm
+	$$(LD) src/app/gemapp.scm $(2) $$(LIB) --rtattr exit=simplified --cstartup gemapp -o $$@ \
+	    --memories-expression "(app-layout #x1100 #x020000 $(3) $(4))"
+build/$(1)-far.elf: $(2) src/app/gemapp.scm
+	$$(LD) src/app/gemapp.scm $(2) $$(LIB) --rtattr exit=simplified --cstartup gemapp -o $$@ \
+	    --memories-expression "(app-layout #x1000 #x030000 $(3) $(4))"
+build/$(1).g4a build/$(1).sym $(6): build/$(1).elf build/$(1)-near.elf build/$(1)-far.elf tools/mkg4a.py
+	python3 tools/mkg4a.py build/$(1).elf build/$(1)-near.elf build/$(1)-far.elf \
+	        build/$(1).g4a --syms build/$(1).sym $(5)
+endef
+
 build/app/%.o: src/app/%.s
 	@mkdir -p build/app
 	$(AS) -o $@ $<
@@ -229,53 +243,42 @@ build/app/%.o: src/app/%.c src/app/gem.h
 	@mkdir -p build/app
 	$(CC) $(CFLAGS) -I src/app -o $@ $<
 
-build/app/m11_app.o: src/m11_app.c src/app/gem.h
+build/app/%.o: src/%.c src/app/gem.h
 	@mkdir -p build/app
 	$(CC) $(CFLAGS) -I src/app -o $@ $<
 
-# The desktop (src/desk): the same startup and bindings, its own body, on
-# the same three-link relocation.  A bigger near region than the gate
-# application's, for the object trees a desktop keeps in bank $00.
-DESK_LIB   = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o
-DESK_OBJS  = $(DESK_LIB) build/desk/desktop.o
-DESK_LD    = $(LD) src/app/gemapp.scm $(DESK_OBJS) $(LIB) --rtattr exit=simplified --cstartup gemapp
-DESK_BSS   = 4608
-DESK_BITS  = 512
-
-build/desk/%.o: src/desk/%.c src/app/gem.h
-	@mkdir -p build/desk
-	$(CC) $(CFLAGS) -I src/app -o $@ $<
-
-build/desktop.elf: $(DESK_OBJS) src/app/gemapp.scm
-	$(DESK_LD) -o $@ --list-file build/desktop.map \
-	    --memories-expression "(app-layout #x1000 #x020000 $(DESK_BSS) $(DESK_BITS))"
-
-build/desktop-near.elf: $(DESK_OBJS) src/app/gemapp.scm
-	$(DESK_LD) -o $@ --memories-expression "(app-layout #x1100 #x020000 $(DESK_BSS) $(DESK_BITS))"
-
-build/desktop-far.elf: $(DESK_OBJS) src/app/gemapp.scm
-	$(DESK_LD) -o $@ --memories-expression "(app-layout #x1000 #x030000 $(DESK_BSS) $(DESK_BITS))"
-
-build/desktop.g4a build/desktop.sym: build/desktop.elf build/desktop-near.elf build/desktop-far.elf tools/mkg4a.py
-	python3 tools/mkg4a.py build/desktop.elf build/desktop-near.elf build/desktop-far.elf \
-	        build/desktop.g4a --syms build/desktop.sym
-
-build/m11_app.elf: $(APP_OBJS) src/app/gemapp.scm
-	$(APP_LD) -o $@ --list-file build/m11_app.map \
-	    --memories-expression "(app-layout #x1000 #x020000 $(APP_BSS) $(APP_BITS))"
-
-build/m11_app-near.elf: $(APP_OBJS) src/app/gemapp.scm
-	$(APP_LD) -o $@ --memories-expression "(app-layout #x1100 #x020000 $(APP_BSS) $(APP_BITS))"
-
-build/m11_app-far.elf: $(APP_OBJS) src/app/gemapp.scm
-	$(APP_LD) -o $@ --memories-expression "(app-layout #x1000 #x030000 $(APP_BSS) $(APP_BITS))"
-
-build/m11_app.g4a build/m11_app.sym build/app_blob.c: build/m11_app.elf build/m11_app-near.elf build/m11_app-far.elf tools/mkg4a.py
-	python3 tools/mkg4a.py build/m11_app.elf build/m11_app-near.elf build/m11_app-far.elf \
-	        build/m11_app.g4a --syms build/m11_app.sym --c-array build/app_blob.c app_blob
+# The gate application (src/m11_app.c).  The .g4a is what a loader reads
+# from disk; the C array is the same bytes for the runner to load from
+# the image, there being no file layer yet.
+$(eval $(call g4a,m11_app,$(APP_OBJS),$(APP_BSS),$(APP_BITS),--c-array build/app_blob.c app_blob,build/app_blob.c))
 
 build/app_blob.o: build/app_blob.c
 	$(CC) $(CFLAGS) -o $@ $<
+
+# The desktop (src/desk): a bigger near region than the gate application's,
+# for the object trees a desktop keeps in bank $00, and DESKTOP.RSC beside
+# it on the disk (tools/deskrsc.py; the icons from EmuTOS desk/icons.c
+# through tools/iconconv.py, checked in like the font).  The milestone-3
+# desktop (src/m16_desk.c: a line of help, R/X/Q) stays as the stand-in
+# test-m16 drives the shell loop with.
+DESK_OBJS  = $(G4A_LIB) build/desk/desktop.o build/desk/deskobj.o
+DESK_BSS   = 2560
+DESK_BITS  = 512
+DESK_H     = src/app/gem.h src/desk/desk.h build/deskrsc.h
+
+build/desk/%.o: src/desk/%.c $(DESK_H)
+	@mkdir -p build/desk
+	$(CC) $(CFLAGS) -I src/app -I build -o $@ $<
+
+$(eval $(call g4a,desktop,$(DESK_OBJS),$(DESK_BSS),$(DESK_BITS)))
+$(eval $(call g4a,m16_desk,$(G4A_LIB) build/app/m16_desk.o,$(APP_BSS),$(APP_BITS)))
+
+tools/deskicons.py: tools/iconconv.py
+	python3 tools/iconconv.py $(EMUTOS)/desk/icons.c $@
+
+build/desktop.rsc build/deskrsc.h: tools/deskrsc.py tools/rsc.py tools/aesref.py tools/deskicons.py
+	@mkdir -p build
+	python3 tools/deskrsc.py build/desktop.rsc build/deskrsc.h
 
 # The GEM 8x8 system font, extracted from EmuTOS (GPL v2+) by fontconv.py.
 # Checked in so the host reference reads the same bytes the target links.
@@ -347,8 +350,11 @@ DISK_FILES = --add tests/fixtures/test.txt TEST.TXT --add build/test.rsc TEST.RS
 # desktop, and the gate application as the program the desktop launches.
 # On the runner's disks for test-m16, on the product's because that is the
 # product.
-SHELL_FILES = --add build/desktop.g4a DESKTOP.G4A --add build/m11_app.g4a M11.G4A
-SHELL_DEPS  = build/desktop.g4a build/m11_app.g4a
+SHELL_FILES = --add build/m16_desk.g4a DESKTOP.G4A --add build/m11_app.g4a M11.G4A
+SHELL_DEPS  = build/m16_desk.g4a build/m11_app.g4a
+DESK_FILES  = --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
+              --add build/m11_app.g4a M11.G4A
+DESK_DEPS   = build/desktop.g4a build/desktop.rsc build/m11_app.g4a
 
 build/test.rsc: tools/mkrsc.py tools/rsc.py tools/aesref.py
 	@mkdir -p build
@@ -373,15 +379,15 @@ build/m3-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt b
 # The product disks: GEM.COM with the desktop beside it, one per DOS.  Its
 # own disks because GEM.COM and M3.COM are 95 KB each and neither DOS's
 # 1040 sectors hold both.
-build/gem-boot.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(SHELL_DEPS)
+build/gem-boot.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS)
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ GEM.COM $(DISK_DENSITY) $(DISK_FILES) $(SHELL_FILES)
+	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ GEM.COM $(DISK_DENSITY) $(DISK_FILES) $(DESK_FILES)
 
-build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(SHELL_DEPS) tools/mkspdisk.py tools/atr.py
+build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --name GEM.COM $(DISK_FILES) $(SHELL_FILES)
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --name GEM.COM $(DISK_FILES) $(DESK_FILES)
 
 # The SpartaDOS disk: a fresh SDFS volume booting the 3.2 fixture's DOS,
 # the same files as the DOS 2 disk, the shell's applications and a
@@ -394,6 +400,13 @@ build/m14-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt 
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(DISK_FILES) $(SHELL_FILES)
+
+# The desktop gate's disk (test-m17): the runner again, with the real
+# desktop and its resource where test-m16's stand-in was.
+build/m17-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(DISK_FILES) $(DESK_FILES)
 
 # The same program linked with bank $01 cut down to its top 16 KB, so that
 # the far image is forced to spill into bank $02 today rather than on the day
@@ -422,7 +435,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17
 
 # The cc65816 code generation bugs gem4xe works around, run in the vendor's
 # own simulator: fails only if a workaround shape has stopped compiling
@@ -542,6 +555,12 @@ test-m15d: build/m3-boot.atr build/m12-d2.atr
 test-m16: build/m14-boot.atr
 	python3 tests/emu/m16_shell.py
 
+# The desktop: DESKTOP.G4A under the shell, driven at the mouse and checked
+# against tools/deskref.py -- the desktop itself transcribed against the AES
+# model (phase 14, milestone 4).
+test-m17: build/m17-boot.atr build/desktop.g4a build/desktop.sym
+	python3 tests/emu/m17_desktop.py
+
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.
 demo: build/m3-boot.atr
@@ -574,4 +593,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d demo movie bench emu-stop clean
+.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m17 demo movie bench emu-stop clean

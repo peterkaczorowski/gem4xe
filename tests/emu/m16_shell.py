@@ -43,8 +43,8 @@ from m11_abi import app_calls               # noqa: E402
 
 SHELL = 3016                                # sys op 16: sh_main
 APP_E_FILE = -6                             # src/sys/app.h
-DESKTOP = os.path.join(ROOT, "build", "desktop.g4a")
-# what the desktop draws (src/desk/desktop.c), and what the shell says
+DESKTOP = os.path.join(ROOT, "build", "m16_desk.g4a")
+# what the desktop draws (src/m16_desk.c), and what the shell says
 # when a program cannot be found (src/aes/shel.c)
 HELP = "gem4xe desktop  --  R runs M11.G4A, X a missing one, Q quits"
 NOT_FOUND = "[1][This application|cannot be found.][ OK ]"
@@ -150,6 +150,7 @@ def main(argv):
             ref_v.close_virtuals()      # the program before ended: app_free
             ref_a.wm_init()
             ref_a.mn_init()
+            ref_a.ratinit()
             ref_a.tree = ref_a.W_TREE
             ref_a.draw(0, 0, (0, 0, ref_a.gl_width, ref_a.gl_height))
 

@@ -181,6 +181,48 @@ WORD wind_delete(WORD handle)
     return aes(103, 1, 1, 0, 0);
 }
 
+WORD wind_set(WORD handle, WORD field, WORD w1, WORD w2, WORD w3, WORD w4)
+{
+    int_in[0] = handle;
+    int_in[1] = field;
+    int_in[2] = w1;
+    int_in[3] = w2;
+    int_in[4] = w3;
+    int_in[5] = w4;
+    return aes(105, 6, 1, 0, 0);
+}
+
+WORD wind_find(WORD x, WORD y)
+{
+    int_in[0] = x;
+    int_in[1] = y;
+    return aes(106, 2, 1, 0, 0);
+}
+
+WORD wind_update(WORD code)
+{
+    int_in[0] = code;
+    return aes(107, 1, 1, 0, 0);
+}
+
+WORD wind_calc(WORD type, WORD kind, WORD x, WORD y, WORD w, WORD h,
+               WORD *ox, WORD *oy, WORD *ow, WORD *oh)
+{
+    WORD r;
+    int_in[0] = type;
+    int_in[1] = kind;
+    int_in[2] = x;
+    int_in[3] = y;
+    int_in[4] = w;
+    int_in[5] = h;
+    r = aes(108, 6, 5, 0, 0);
+    *ox = int_out[1];
+    *oy = int_out[2];
+    *ow = int_out[3];
+    *oh = int_out[4];
+    return r;
+}
+
 WORD evnt_timer(UWORD lo, UWORD hi)
 {
     int_in[0] = (WORD)lo;
@@ -191,6 +233,221 @@ WORD evnt_timer(UWORD lo, UWORD hi)
 WORD evnt_keybd(void)
 {
     return aes(20, 0, 1, 0, 0);
+}
+
+WORD evnt_button(WORD clicks, UWORD mask, UWORD state,
+                 WORD *mx, WORD *my, WORD *mb, WORD *ks)
+{
+    WORD r;
+    int_in[0] = clicks;
+    int_in[1] = (WORD)mask;
+    int_in[2] = (WORD)state;
+    r = aes(21, 3, 5, 0, 0);
+    *mx = int_out[1];
+    *my = int_out[2];
+    *mb = int_out[3];
+    *ks = int_out[4];
+    return r;
+}
+
+WORD evnt_mesag(WORD *msg)
+{
+    addr_in[0] = (LONG)(uint32_t)(WORD __far *)msg;
+    return aes(23, 0, 1, 1, 0);
+}
+
+/* The ST's int_in: flags, the button's clicks/mask/state, the two mouse
+ * rectangles as five words each, the timer's two words -- 16 words. */
+WORD evnt_multi(UWORD flags, WORD bclk, UWORD bmsk, UWORD bst,
+                const MOBLK *m1, const MOBLK *m2, WORD *msg,
+                UWORD tlo, UWORD thi,
+                WORD *mx, WORD *my, WORD *mb, WORD *ks, WORD *kr, WORD *br)
+{
+    static const MOBLK none = { 0, 0, 0, 0, 0 };
+    const WORD *p;
+    WORD r, i;
+
+    int_in[0] = (WORD)flags;
+    int_in[1] = bclk;
+    int_in[2] = (WORD)bmsk;
+    int_in[3] = (WORD)bst;
+    p = (const WORD *)((flags & MU_M1) && m1 ? m1 : &none);
+    for (i = 0; i < 5; i++)
+        int_in[4 + i] = p[i];
+    p = (const WORD *)((flags & MU_M2) && m2 ? m2 : &none);
+    for (i = 0; i < 5; i++)
+        int_in[9 + i] = p[i];
+    int_in[14] = (WORD)tlo;
+    int_in[15] = (WORD)thi;
+    addr_in[0] = (LONG)(uint32_t)(WORD __far *)msg;
+    r = aes(25, 16, 7, 1, 0);
+    *mx = int_out[1];
+    *my = int_out[2];
+    *mb = int_out[3];
+    *ks = int_out[4];
+    *kr = int_out[5];
+    *br = int_out[6];
+    return r;
+}
+
+/* -- the menu, object, form, graphics and resource libraries: a tree in
+ * addr_in[0] and words after it. */
+
+static LONG tree_addr(OBJECT *tree)
+{
+    return (LONG)(uint32_t)(OBJECT __far *)tree;
+}
+
+WORD menu_bar(OBJECT *tree, WORD showit)
+{
+    int_in[0] = showit;
+    addr_in[0] = tree_addr(tree);
+    return aes(30, 1, 1, 1, 0);
+}
+
+WORD menu_icheck(OBJECT *tree, WORD item, WORD check)
+{
+    int_in[0] = item;
+    int_in[1] = check;
+    addr_in[0] = tree_addr(tree);
+    return aes(31, 2, 1, 1, 0);
+}
+
+WORD menu_ienable(OBJECT *tree, WORD item, WORD enable)
+{
+    int_in[0] = item;
+    int_in[1] = enable;
+    addr_in[0] = tree_addr(tree);
+    return aes(32, 2, 1, 1, 0);
+}
+
+WORD menu_tnormal(OBJECT *tree, WORD title, WORD normal)
+{
+    int_in[0] = title;
+    int_in[1] = normal;
+    addr_in[0] = tree_addr(tree);
+    return aes(33, 2, 1, 1, 0);
+}
+
+WORD objc_find(OBJECT *tree, WORD start, WORD depth, WORD mx, WORD my)
+{
+    int_in[0] = start;
+    int_in[1] = depth;
+    int_in[2] = mx;
+    int_in[3] = my;
+    addr_in[0] = tree_addr(tree);
+    return aes(43, 4, 1, 1, 0);
+}
+
+WORD objc_offset(OBJECT *tree, WORD obj, WORD *x, WORD *y)
+{
+    WORD r;
+    int_in[0] = obj;
+    addr_in[0] = tree_addr(tree);
+    r = aes(44, 1, 3, 1, 0);
+    *x = int_out[1];
+    *y = int_out[2];
+    return r;
+}
+
+WORD objc_change(OBJECT *tree, WORD obj, WORD resvd, WORD x, WORD y, WORD w, WORD h,
+                 WORD state, WORD redraw)
+{
+    int_in[0] = obj;
+    int_in[1] = resvd;
+    int_in[2] = x;
+    int_in[3] = y;
+    int_in[4] = w;
+    int_in[5] = h;
+    int_in[6] = state;
+    int_in[7] = redraw;
+    addr_in[0] = tree_addr(tree);
+    return aes(47, 8, 1, 1, 0);
+}
+
+WORD form_do(OBJECT *tree, WORD start)
+{
+    int_in[0] = start;
+    addr_in[0] = tree_addr(tree);
+    return aes(50, 1, 1, 1, 0);
+}
+
+WORD form_dial(WORD type, WORD x1, WORD y1, WORD w1, WORD h1,
+               WORD x2, WORD y2, WORD w2, WORD h2)
+{
+    int_in[0] = type;
+    int_in[1] = x1;
+    int_in[2] = y1;
+    int_in[3] = w1;
+    int_in[4] = h1;
+    int_in[5] = x2;
+    int_in[6] = y2;
+    int_in[7] = w2;
+    int_in[8] = h2;
+    return aes(51, 9, 1, 0, 0);
+}
+
+WORD form_alert(WORD defbut, const char *s)
+{
+    int_in[0] = defbut;
+    addr_in[0] = (LONG)(uint32_t)(const char __far *)s;
+    return aes(52, 1, 1, 1, 0);
+}
+
+WORD form_error(WORD n)
+{
+    int_in[0] = n;
+    return aes(53, 1, 1, 0, 0);
+}
+
+WORD form_center(OBJECT *tree, WORD *x, WORD *y, WORD *w, WORD *h)
+{
+    WORD r;
+    addr_in[0] = tree_addr(tree);
+    r = aes(54, 0, 5, 1, 0);
+    *x = int_out[1];
+    *y = int_out[2];
+    *w = int_out[3];
+    *h = int_out[4];
+    return r;
+}
+
+WORD graf_mouse(WORD mode, const WORD *form)
+{
+    int_in[0] = mode;
+    addr_in[0] = (LONG)(uint32_t)(const WORD __far *)form;
+    return aes(78, 1, 1, 1, 0);
+}
+
+WORD graf_mkstate(WORD *mx, WORD *my, WORD *mb, WORD *ks)
+{
+    WORD r = aes(79, 0, 5, 0, 0);
+    *mx = int_out[1];
+    *my = int_out[2];
+    *mb = int_out[3];
+    *ks = int_out[4];
+    return r;
+}
+
+WORD rsrc_load(const char *name)
+{
+    addr_in[0] = (LONG)(uint32_t)(const char __far *)name;
+    return aes(110, 0, 1, 1, 0);
+}
+
+WORD rsrc_free(void)
+{
+    return aes(111, 0, 1, 0, 0);
+}
+
+WORD rsrc_gaddr(WORD type, WORD index, void **addr)
+{
+    WORD r;
+    int_in[0] = type;
+    int_in[1] = index;
+    r = aes(112, 2, 1, 0, 1);
+    *addr = (void *)(uint16_t)addr_out[0];
+    return r;
 }
 
 WORD shel_write(WORD doex, WORD isgr, WORD iscr, const char *cmd, const char *tail)

@@ -327,6 +327,17 @@ void gsx_munforce(WORD old)
     }
 }
 
+/* The pointer on, whatever the count -- the donor's ratinit, which its
+ * sh_main calls before each program so that one that returned with the
+ * pointer hidden does not hide it for the next.  Unconditional, unlike
+ * gsx_mforce: the VDI opens with the pointer hidden and the AES's count
+ * at zero, and this is what first shows it. */
+void ratinit(void)
+{
+    gsx_1code(V_SHOW_C, 0);
+    gl_moff = 0;
+}
+
 /* ---- attributes ------------------------------------------------------- */
 
 /* Set the writing mode and either the text or the line colour, sending

@@ -434,6 +434,7 @@ void gsx_moff(void);
 void gsx_mon(void);
 WORD gsx_mforce(void);           /* the pointer on whatever the count */
 void gsx_munforce(WORD old);     /* ... and the count back */
+void ratinit(void);              /* the pointer on, count zero: sh_main */
 void gsx_mfset(const WORD *pmform);   /* the pointer's shape: 37 words */
 void gsx_mfform(WORD which, WORD *out);  /* one of the AES's own, from far */
 WORD gsx_mfget(WORD which, WORD *out);   /* MF_CURR/MF_PREV/MF_SAVED, far */
@@ -547,6 +548,7 @@ WORD fm_button(OBJECT *tree, WORD new_obj, WORD clks, WORD *pnew_obj);
 WORD form_do(OBJECT *tree, WORD start);
 WORD form_dial(WORD type, const GRECT *pi, const GRECT *pt);
 WORD fm_alert(WORD defbut, const char *palstr);   /* form_alert */
+WORD fm_error(WORD n);                            /* form_error */
 WORD form_keybd(OBJECT *tree, WORD obj, WORD *pchar, WORD *pnew_obj);
 WORD form_button(OBJECT *tree, WORD new_obj, WORD clks, WORD *pnew_obj);
 

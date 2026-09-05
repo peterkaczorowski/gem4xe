@@ -25,7 +25,7 @@ the other reading of them.
 import struct
 
 import aesref
-from aesref import Obj, Text, Ted, Bitblk, G_BOX, G_IBOX, G_BOXCHAR
+from aesref import Obj, Text, Ted, Bitblk, Iconblk, Rect, G_BOX, G_IBOX, G_BOXCHAR
 
 HDR_SIZE = 36
 OBJ_SIZE, TED_SIZE, BITBLK_SIZE, ICONBLK_SIZE = 24, 28, 14, 34
@@ -290,11 +290,12 @@ class Rsc:
             out[it.off:it.off + BITBLK_SIZE] = b.pack()
             mem[base + it.off] = b
         for it in self.iconblks:
-            out[it.off:it.off + ICONBLK_SIZE] = struct.pack(
-                e + "IIIhhhhhhhhhhh", base + it.mask.off, base + it.data.off,
-                base + it.text.off, it.char, it.xchar, it.ychar, it.xicon,
-                it.yicon, it.wicon, it.hicon, it.xtext, it.ytext, it.wtext,
-                it.htext)
+            ib = Iconblk(base + it.mask.off, base + it.data.off,
+                         base + it.text.off, it.char, it.xchar, it.ychar,
+                         Rect(it.xicon, it.yicon, it.wicon, it.hicon),
+                         Rect(it.xtext, it.ytext, it.wtext, it.htext))
+            out[it.off:it.off + ICONBLK_SIZE] = ib.pack()
+            mem[base + it.off] = ib
         for it in self.teds:
             t = Ted(base + it.text.off, base + it.tmplt.off, base + it.valid.off,
                     font=it.font, just=it.just, color=it.color,

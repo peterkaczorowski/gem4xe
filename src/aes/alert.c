@@ -295,3 +295,63 @@ WORD fm_alert(WORD defbut, const char *palstr)
     pool_release(mark);
     return (WORD)(i - BUTOFF + 1);
 }
+
+/* form_error: the alert for a DOS error number (the donor's fm_error,
+ * gemfmlib.c, and its strings from gem_rsc.c).  TRUE when the user
+ * pressed anything but the first button, as the donor answers; an
+ * error past 63 shows nothing.  The number itself goes into the last
+ * alert's text by hand, there being no sprintf in an AES with no libc.
+ *
+ * The five texts are half a kilobyte, which bank $00's constant data
+ * cannot spare (src/gem4xe.scm: WHAT GOES FAR AND WHAT MUST NOT), so
+ * they live in far memory and the one wanted is copied into the pool
+ * for the length of the call -- fm_alert reads its string near. */
+static const char __far al02err[] =
+    "[2][This application cannot|find the folder or file|"
+    "you just tried to access.][  OK  ]";
+static const char __far al04err[] =
+    "[1][This application does not|have room to open another|"
+    "document.  To make room,|close any document that|"
+    "you do not need.][  OK  ]";
+static const char __far al05err[] =
+    "[1][An item with this name|already exists in the|"
+    "directory, or this item|is set to Read Only status.][  OK  ]";
+static const char __far al15err[] =
+    "[1][The drive you specified|does not exist.][Cancel]";
+static const char __far al08err[] =
+    "[1][There is not enough memory|in your computer for the|"
+    "application you just tried|to run.][  OK  ]";
+
+WORD fm_error(WORD n)
+{
+    static char xxerr[] = "[3][TOS error #00.][Cancel]";
+    const char __far *f;
+    char *s;
+    uint16_t len, mark;
+    WORD ret;
+
+    if (n > 63)
+        return FALSE;
+    switch (n) {
+    case 2: case 3: case 18:        f = al02err; break;
+    case 4:                         f = al04err; break;
+    case 5:                         f = al05err; break;
+    case 15:                        f = al15err; break;
+    case 8: case 10: case 11:       f = al08err; break;
+    default:
+        xxerr[15] = (char)('0' + n / 10);
+        xxerr[16] = (char)('0' + n % 10);
+        return fm_alert(1, xxerr) != 1;
+    }
+
+    for (len = 0; f[len]; len++)
+        ;
+    mark = pool_mark();
+    s = pool_alloc(len + 1, 1);
+    if (!s)
+        return FALSE;
+    far_get((uint8_t *)s, (uint32_t)f, len + 1);
+    ret = fm_alert(1, s) != 1;
+    pool_release(mark);
+    return ret;
+}

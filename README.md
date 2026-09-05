@@ -24,7 +24,7 @@ full-screen repaints.
 
 | Gate | | |
 |---|---|---|
-| `make test-host` | 38/38 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — and .xex far-code staging |
+| `make test-host` | 41/41 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — and .xex far-code staging |
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
@@ -43,8 +43,9 @@ full-screen repaints.
 | `make test-m14x` | PASS | the same on SpartaDOS X 4.50, the cartridge -- with the application pool and the test stage moved out of its way, into the banked window it services calls from |
 | `make test-m15` | PASS | GEMDOS: the ST's trap #1 as gem4xe's third `COP` face, answered from CIO and the DOS seam -- directory searches, paths, files, far memory, attributes and errors, every answer against the disk image; `test-m15x` on SpartaDOS X, `test-m15d` on DOS 2 |
 | `make test-m16` | PASS | the shell loop: DESKTOP.G4A loaded and run, a program run from it and the desktop back, a missing program's alert, shutdown -- the screen against the reference at each stop, the pool and the far heap back where they were, the stack's low-water mark (1199 of 2048 bytes); the VDI's virtual workstations (one per program) under it. GEM.COM, the product, does the same from the DOS prompt and returns to it |
+| `make test-m17` | PASS | the GEM Desktop: DESKTOP.G4A's menu bar, drive icons and trash, an icon clicked, Desk -> About and its dialog, File -> Quit -- driven at the mouse and checked against `tools/deskref.py`, the desktop itself transcribed against the AES model: six screens, the desktop's 1330 bytes of globals byte for byte, 69 calls on both sides, the pool and far heap back, the stack's low-water mark (1190 of 2048) |
 | `make test-m14u` `test-m15u` | PASS | the same two on SpartaDOS X 4.49b booted from a real Ultimate 1MB flash image, U1MB switched on -- needs the patched emulator in `tools/altirra/`, so not in `make test` |
-| `make check-cc` | PASS | the eight compiler bugs worked around, in the vendor's simulator |
+| `make check-cc` | PASS | the ten compiler bugs worked around, in the vendor's simulator |
 | `make movie` | PASS | a session with the AES itself, filmed frame by frame and checked as a gate: `build/movie/gem4xe.mp4` |
 | `make bench` | — | GEMBench's tests on this machine, in milliseconds, not a gate (`docs/bench.md`) |
 
@@ -179,6 +180,20 @@ the SDL emulator could not switch on headlessly, now can be: the same
 patches add the switches, and the two `*u` gates boot SpartaDOS X from
 the machine's own flash.
 
+**The desktop** (`docs/phase14.md`, milestones 3 and 4). The AES's shell
+loop runs `DESKTOP.G4A`, then whatever it asks for, then the desktop
+again; `GEM.COM` is that loop from the DOS prompt, back to it at
+shutdown. The desktop is the donor's deskmain.c and deskobj.c cut to
+what shows so far -- the bar, an icon for each drive GEMDOS reports and
+the trash, About, Quit -- loading its resource from the disk beside it,
+its icons EmuTOS's, checked in like the font. Its gate is a new kind:
+the desktop is a program, not a script, and which calls it makes
+depends on what the AES answers, so `tools/deskref.py` is the desktop
+transcribed against the model, and the harness syncs to the ABI's own
+call counter rather than a record count. A tenth compiler defect
+(parameters clamped in place, then read from a slot never written) put
+two of three icons off the screen on the first run.
+
 ## Verification
 
 Every gate compares the target against a **host reference model** —
@@ -191,7 +206,7 @@ screen and only a pixel diff caught them — and one went the other way: the fil
 selector listed a file the reference did not, every returned value agreed, and
 only the screenshots disagreed (`docs/phase11.md`).
 
-Calypsi cc65816 5.18 has eight defects this tree has met — six in code
+Calypsi cc65816 5.18 has ten defects this tree has met — eight in code
 generation, one crash and one in the front end's constant arithmetic — each
 reproduced in the vendor's own simulator (the crash, in the compiler itself)
 and worked around at the source (or, for the divide flags, with a linker

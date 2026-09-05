@@ -246,6 +246,7 @@ WORD sh_main(void)
     do {
         wm_init();
         mn_init();
+        ratinit();                          /* the pointer on, as the donor */
         gsx_sclip(&gl_rscreen);
         ob_draw(gl_wtree, ROOT, 0);         /* the desk, edge to edge */
         if (rc)

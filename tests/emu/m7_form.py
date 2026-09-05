@@ -261,13 +261,19 @@ NOT_STARTED = 0xFFFF     # what the harness leaves in vdi_result_count
 FINISH = 16              # frames an op may take to return after its last stimulus
 
 
-def drive(b, count_addr, ptr, plan):
+def drive(b, count_addr, ptr, plan, read=None):
     """Apply each op's plan while the target is inside that op.  Returns an
-    error string, or None; a non-None error leaves the target blocked."""
+    error string, or None; a non-None error leaves the target blocked.
+
+    The count is the index of the op the target is inside: the runner's
+    completed-call count, or whatever `read` derives it from -- the
+    desktop gate (m17) reads the ABI's own call counter instead, since the
+    desktop is a program, not a script the runner walks."""
+    read = read or (lambda: b.peek16(count_addr))
     # The runner zeroes the count when it picks up ST_GO; until then the
     # count is the sentinel, not the last case's total.
     for _ in range(50):
-        if b.peek16(count_addr) != NOT_STARTED:
+        if read() != NOT_STARTED:
             break
         b.frames(2)
     else:
@@ -275,7 +281,7 @@ def drive(b, count_addr, ptr, plan):
     for k in sorted(plan):
         n = None
         for _ in range(200):
-            n = b.peek16(count_addr)
+            n = read()
             if n >= k:
                 break
             b.frames(2)
@@ -284,10 +290,10 @@ def drive(b, count_addr, ptr, plan):
                 return f"op {k} completed without its plan (count {n})"
             return f"timed out waiting for op {k} (count {n})"
         for j, step in enumerate(plan[k]):
-            n = b.peek16(count_addr)
+            n = read()
             if n != k:
                 return f"op {k} completed before step {j} {step} (count {n})"
-            apply_step(b, ptr, step, lambda: b.peek16(count_addr) != k)
+            apply_step(b, ptr, step, lambda: read() != k)
         # The last step satisfies the wait; what the op does on its way out
         # -- the file selector's fm_dial(FMD_FINISH) redraws the screen it
         # covered before it returns -- can run a frame or two past it.  The
@@ -298,7 +304,7 @@ def drive(b, count_addr, ptr, plan):
         # so the count may run past k+1; running past the next planned op
         # is caught above.
         for _ in range(FINISH):
-            n = b.peek16(count_addr)
+            n = read()
             if n > k:
                 break
             b.frames(1)

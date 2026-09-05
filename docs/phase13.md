@@ -74,8 +74,8 @@ and the test stage lived there, and for twelve phases `$4000-$7FFF` was
 reserved against the U1MB's PORTB banking. Both decisions are reversed:
 
     was                                  is
-    $2100-$35FF  LoRAM                   $2100-$367F
-    $3600-$3FFF  Near                    $3680-$3FFD, the reset word at $3FFE
+    $2100-$35FF  LoRAM                   $2100-$367F (since milestone 4 of phase 14, $357F)
+    $3600-$3FFF  Near                    $3680-$3FFD, the reset word at $3FFE ($3580 since)
     $4000-$7FFF  RESERVED                $4000-$5FFF  the application pool, 8 KB
                                          $6000-$7FFF  the test stage
     $8000-$9FFF  Stage (MEMAC A)         $8000-$9BFF  -- SDX's screen is at $9C20

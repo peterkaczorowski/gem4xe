@@ -10,7 +10,9 @@
  * The shapes are lifted from where each bug was met: everyobj() in
  * src/aes/objc.c (B1), gsx_tcalc() in src/aes/graf.c (B2, B3), ob_sst()
  * in src/aes/objc.c (B4), vdi_vrt_cpyfm() in src/vdi/vdi.c (B5), the BCB
- * overlay in src/vbxe/vbxe.c (B7) and sh_cioname() in src/aes/shel.c (B8).
+ * overlay in src/vbxe/vbxe.c (B7), sh_cioname() in src/aes/shel.c (B8),
+ * gd_xfer() in src/sys/gemdos.c (B9) and snap_icon() in src/desk/desktop.c
+ * (B10).
  * Keep them recognisable rather than minimal.
  */
 #include <stdint.h>
@@ -332,6 +334,73 @@ int32_t b9_fix(int32_t count, WORD write)
     return done;
 }
 
+
+/* ---- B10: both parameters clamped in place, then read from nowhere ----- */
+
+/* snap_icon (src/desk/desktop.c): a static function that clamps its two
+ * WORD parameters (`if (gx > cols - 1) gx = cols - 1;`) and then multiplies
+ * them, inlined into its caller at -O2.  The clamps store to the right
+ * slots -- and the products that follow load BOTH parameters from a slot
+ * the function never wrote, so the answer is whatever the stack held.
+ * The first desk icon landed right because that slot was zero; the second
+ * came out at (31744, 3595).  The sources clamp into fresh locals. */
+typedef struct { WORD g_x, g_y, g_w, g_h; } B10RECT;
+struct { B10RECT desk; WORD icw, ich; } b10 = { { 0, 11, 640, 229 }, 106, 45 };
+
+static void b10_bug_snap(WORD gx, WORD gy, WORD *px, WORD *py)
+{
+    WORD columns = b10.desk.g_w / b10.icw;
+    WORD rows = b10.desk.g_h / b10.ich;
+    WORD spare;
+
+    if (gx > columns - 1)
+        gx = (WORD)(columns - 1);
+    if (gy > rows - 1)
+        gy = (WORD)(rows - 1);
+    spare = (WORD)(b10.desk.g_w - columns * b10.icw);
+    *px = (WORD)(gx * b10.icw + spare / columns);
+    spare = (WORD)(b10.desk.g_h - rows * b10.ich);
+    *py = (WORD)(gy * b10.ich + spare / rows + b10.desk.g_y);
+}
+
+static void b10_fix_snap(WORD gx, WORD gy, WORD *px, WORD *py)
+{
+    WORD columns = b10.desk.g_w / b10.icw;
+    WORD rows = b10.desk.g_h / b10.ich;
+    WORD spare;
+    WORD cx = gx > columns - 1 ? (WORD)(columns - 1) : gx;
+    WORD cy = gy > rows - 1 ? (WORD)(rows - 1) : gy;
+
+    spare = (WORD)(b10.desk.g_w - columns * b10.icw);
+    *px = (WORD)(cx * b10.icw + spare / columns);
+    spare = (WORD)(b10.desk.g_h - rows * b10.ich);
+    *py = (WORD)(cy * b10.ich + spare / rows + b10.desk.g_y);
+}
+
+/* The stack under the caller's frame holds something other than zero,
+ * as it does after any earlier call. */
+void b10_dirty(void)
+{
+    volatile WORD junk[16];
+    WORD i;
+    for (i = 0; i < 16; i++)
+        junk[i] = (WORD)(0x5555 + i);
+}
+
+WORD b10_bug(WORD gx, WORD gy)
+{
+    WORD x, y;
+    b10_bug_snap(gx, gy, &x, &y);
+    return (WORD)(x + y);
+}
+
+WORD b10_fix(WORD gx, WORD gy)
+{
+    WORD x, y;
+    b10_fix_snap(gx, gy, &x, &y);
+    return (WORD)(x + y);
+}
+
 /* ---- results ------------------------------------------------------------ */
 
 volatile WORD r_b1_bug, r_b1_fix;                       /* want 476 */
@@ -343,6 +412,7 @@ volatile WORD r_b5_dec_bug, r_b5_dec_fix;               /* want 4 */
 volatile WORD r_b7_bug, r_b7_fix;                       /* want 801 */
 volatile WORD r_b8_bug, r_b8_fix;                       /* want 'T' = 84 */
 volatile WORD r_b9_bug, r_b9_fix;                       /* want 20 */
+volatile WORD r_b10_bug, r_b10_fix;                     /* want 207 */
 
 __task int main(void)
 {
@@ -389,5 +459,10 @@ __task int main(void)
     b9_st = 1;
     r_b9_bug = (WORD)b9_bug(20, 1);             /* 8 + 8 + 4 written */
     r_b9_fix = (WORD)b9_fix(20, 1);
+
+    b10_dirty();
+    r_b10_bug = b10_bug(1, 2);                  /* (106, 101): 207 */
+    b10_dirty();
+    r_b10_fix = b10_fix(1, 2);
     return 0;
 }

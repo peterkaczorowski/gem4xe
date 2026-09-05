@@ -6,8 +6,8 @@
 ;;;   $0200-$06FF  OS vars / page 6      -- not ours ($02E0/$02E2 are the .xex vectors)
 ;;;   $0700-$1FFF  DOS resident          -- not ours
 ;;;   $2000-$20FF  direct page           <- ours
-;;;   $2100-$367F  stack / data / zdata  <- ours (the stack is 2 KB; see below)
-;;;   $3680-$3FFD  near code and rodata  <- ours
+;;;   $2100-$357F  stack / data / zdata  <- ours (the stack is 2 KB; see below)
+;;;   $3580-$3FFD  near code and rodata  <- ours
 ;;;   $3FFE-$3FFF  the cstartup's reset word, inert
 ;;;   $4000-$47FF  zwin: bss no interrupt handler touches  <- ours; see BANKED
 ;;;   $4800-$67FF  the application pool             <- ours; see BANKED below
@@ -138,7 +138,7 @@
     ;; a link that does fails, loudly.  Both are tight: 7.9 KB is all of
     ;; bank $00 that gem4xe's own data and near code get, and everything an
     ;; interrupt handler touches has to be in it (the banked window above).
-    (memory LoRAM      (address (#x2100 . #x367f))
+    (memory LoRAM      (address (#x2100 . #x357f))
             (section stack data zdata heap))
 
     ;; Near code: the entry stub, farload, the C startup, the CIO
@@ -146,7 +146,7 @@
     ;; it cannot be far) and every library routine that is not compiled
     ;; far -- plus all constant data.  There is no overflow memory: a link
     ;; that outgrows this memory fails rather than spilling somewhere slow.
-    (memory Near       (address (#x3680 . #x3ffd))
+    (memory Near       (address (#x3580 . #x3ffd))
             (section code libcode cdata idata data_init_table))
 
     ;; The library cstartup always emits a `reset` section -- a word pointing

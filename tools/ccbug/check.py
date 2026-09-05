@@ -40,6 +40,8 @@ RESULTS = {
     "r_b8_fix": (84,  "fix", "B8 the character held in a WORD"),
     "r_b9_bug": (20,  "bug", "B9 got = c ? m : 0 beside a call taking &got"),
     "r_b9_fix": (20,  "fix", "B9 tested, then assigned plainly"),
+    "r_b10_bug": (207, "bug", "B10 parameters clamped in place, inlined"),
+    "r_b10_fix": (207, "fix", "B10 clamped into fresh locals"),
 }
 B2 = ("r_b2_eq", "r_b2_lt", "r_b2_mod")
 
