@@ -48,12 +48,27 @@ HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
 M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
 M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o
 
+# GEM.COM, the product (src/gem.c): the runner's objects with the runner
+# itself and its compiled-in test application taken out, linked on the
+# same rules with the application pool given the whole of $4000-$7FFF
+# (src/gem4xe.scm, `layout`).
+GEM_OBJS   = $(filter-out build/m3_vdi.o build/app_blob.o,$(M3_OBJS)) build/gem.o
+
 # A gem4xe application: its own C startup and bindings (src/app), linked
 # against nothing of gem4xe's, on the application's own linker rules.
 APP_OBJS   = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o build/app/m11_app.o
 APP_LD     = $(LD) src/app/gemapp.scm $(APP_OBJS) $(LIB) --rtattr exit=simplified --cstartup gemapp
+# Its near budget (src/app/gemapp.scm): the stack and data, then the
+# constants.  Decimal, because a `#` in a make variable starts a comment.
+APP_BSS    = 2048
+APP_BITS   = 256
 
-all: build/hello-boot.atr build/m2-boot.atr build/m3-boot.atr
+# Everything a gate boots, and the product: a plain `make` leaves no disk
+# behind its sources (a gate run by hand, rather than through its test-m*
+# target, otherwise boots a stale image and compares it against a fresh
+# linker map).
+all: build/hello-boot.atr build/m2-boot.atr build/m3-boot.atr build/m6split-boot.atr \
+     build/m12-d2.atr build/m14-boot.atr build/gem-boot.atr build/gem-sp.atr
 
 build/%.o: src/%.s
 	@mkdir -p build
@@ -147,7 +162,7 @@ build/abis.o: src/sys/abi.s
 	@mkdir -p build
 	$(AS) -o $@ $<
 
-build/app.o: src/sys/app.c src/sys/app.h src/sys/abi.h src/sys/farmem.h src/sys/gemdos.h
+build/app.o: src/sys/app.c src/sys/app.h src/sys/abi.h src/sys/cio.h src/sys/dos.h src/sys/farmem.h src/sys/gemdos.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -218,14 +233,42 @@ build/app/m11_app.o: src/m11_app.c src/app/gem.h
 	@mkdir -p build/app
 	$(CC) $(CFLAGS) -I src/app -o $@ $<
 
+# The desktop (src/desk): the same startup and bindings, its own body, on
+# the same three-link relocation.  A bigger near region than the gate
+# application's, for the object trees a desktop keeps in bank $00.
+DESK_LIB   = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o
+DESK_OBJS  = $(DESK_LIB) build/desk/desktop.o
+DESK_LD    = $(LD) src/app/gemapp.scm $(DESK_OBJS) $(LIB) --rtattr exit=simplified --cstartup gemapp
+DESK_BSS   = 4608
+DESK_BITS  = 512
+
+build/desk/%.o: src/desk/%.c src/app/gem.h
+	@mkdir -p build/desk
+	$(CC) $(CFLAGS) -I src/app -o $@ $<
+
+build/desktop.elf: $(DESK_OBJS) src/app/gemapp.scm
+	$(DESK_LD) -o $@ --list-file build/desktop.map \
+	    --memories-expression "(app-layout #x1000 #x020000 $(DESK_BSS) $(DESK_BITS))"
+
+build/desktop-near.elf: $(DESK_OBJS) src/app/gemapp.scm
+	$(DESK_LD) -o $@ --memories-expression "(app-layout #x1100 #x020000 $(DESK_BSS) $(DESK_BITS))"
+
+build/desktop-far.elf: $(DESK_OBJS) src/app/gemapp.scm
+	$(DESK_LD) -o $@ --memories-expression "(app-layout #x1000 #x030000 $(DESK_BSS) $(DESK_BITS))"
+
+build/desktop.g4a build/desktop.sym: build/desktop.elf build/desktop-near.elf build/desktop-far.elf tools/mkg4a.py
+	python3 tools/mkg4a.py build/desktop.elf build/desktop-near.elf build/desktop-far.elf \
+	        build/desktop.g4a --syms build/desktop.sym
+
 build/m11_app.elf: $(APP_OBJS) src/app/gemapp.scm
-	$(APP_LD) -o $@ --list-file build/m11_app.map
+	$(APP_LD) -o $@ --list-file build/m11_app.map \
+	    --memories-expression "(app-layout #x1000 #x020000 $(APP_BSS) $(APP_BITS))"
 
 build/m11_app-near.elf: $(APP_OBJS) src/app/gemapp.scm
-	$(APP_LD) -o $@ --memories-expression "(app-layout #x1100 #x020000)"
+	$(APP_LD) -o $@ --memories-expression "(app-layout #x1100 #x020000 $(APP_BSS) $(APP_BITS))"
 
 build/m11_app-far.elf: $(APP_OBJS) src/app/gemapp.scm
-	$(APP_LD) -o $@ --memories-expression "(app-layout #x1000 #x030000)"
+	$(APP_LD) -o $@ --memories-expression "(app-layout #x1000 #x030000 $(APP_BSS) $(APP_BITS))"
 
 build/m11_app.g4a build/m11_app.sym build/app_blob.c: build/m11_app.elf build/m11_app-near.elf build/m11_app-far.elf tools/mkg4a.py
 	python3 tools/mkg4a.py build/m11_app.elf build/m11_app-near.elf build/m11_app-far.elf \
@@ -269,6 +312,13 @@ build/m3.elf: $(M3_OBJS) src/gem4xe.scm
 build/m2.xex: build/m2.elf
 	python3 tools/mkxex.py $< $@ --entry _atari_entry
 
+build/gem.elf: $(GEM_OBJS) src/gem4xe.scm
+	$(LD) src/gem4xe.scm $(GEM_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/gem.map \
+	      --memories-expression "(layout #x010000 #x7fff)"
+
+build/gem.xex: build/gem.elf
+	python3 tools/mkxex.py $< $@ --entry _atari_entry --syms build/gem.sym
+
 # --syms lets the conformance harness find vdi_script by name instead of
 # hard-coding an address that moves on every rebuild.
 build/m3.xex: build/m3.elf
@@ -293,6 +343,13 @@ DISK_DENSITY = --enhanced --high
 DISK_FILES = --add tests/fixtures/test.txt TEST.TXT --add build/test.rsc TEST.RSC \
              --add tests/fixtures/out.txt OUT.TXT
 
+# The applications the shell loop runs (docs/phase14.md, milestone 3): the
+# desktop, and the gate application as the program the desktop launches.
+# On the runner's disks for test-m16, on the product's because that is the
+# product.
+SHELL_FILES = --add build/desktop.g4a DESKTOP.G4A --add build/m11_app.g4a M11.G4A
+SHELL_DEPS  = build/desktop.g4a build/m11_app.g4a
+
 build/test.rsc: tools/mkrsc.py tools/rsc.py tools/aesref.py
 	@mkdir -p build
 	python3 tools/mkrsc.py $@
@@ -304,19 +361,39 @@ build/m12-d2.atr: tools/mkfsdisk.py tools/atr.py
 	@rm -f $@
 	python3 tools/mkfsdisk.py "$(SRC_DOS)" $@
 
+# The runner's DOS 2 disk has no room for the shell's applications: DOS
+# II+/D's 1040 sectors hold M3.COM's 820 and the fixtures, and 35 more.
+# The shell gate (test-m16) runs on the SpartaDOS disk, whose size is
+# ours to choose (tools/mkspdisk.py --sectors).
 build/m3-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM $(DISK_DENSITY) $(DISK_FILES)
 
-# The SpartaDOS disk: a fresh SDFS volume booting the 3.2 fixture's DOS,
-# the same files as the DOS 2 disk and a directory tree for the selector
-# (tools/mkspdisk.py).  1040 sectors: SpartaDOS loads M3.COM's 91 KB from
-# anywhere, where DOS 2.5 could not go past sector 720.
-build/m14-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc tools/mkspdisk.py tools/atr.py
+# The product disks: GEM.COM with the desktop beside it, one per DOS.  Its
+# own disks because GEM.COM and M3.COM are 95 KB each and neither DOS's
+# 1040 sectors hold both.
+build/gem-boot.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(SHELL_DEPS)
+	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ GEM.COM $(DISK_DENSITY) $(DISK_FILES) $(SHELL_FILES)
+
+build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(SHELL_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(DISK_FILES)
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --name GEM.COM $(DISK_FILES) $(SHELL_FILES)
+
+# The SpartaDOS disk: a fresh SDFS volume booting the 3.2 fixture's DOS,
+# the same files as the DOS 2 disk, the shell's applications and a
+# directory tree for the selector (tools/mkspdisk.py).  2048 sectors of
+# 128: SpartaDOS loads M3.COM's 100 KB from anywhere, where DOS 2.5 could
+# not go past sector 720 -- and 1040 no longer hold it with the desktop
+# beside it.  The gates size everything from the image, not from here.
+SP_SECTORS = --sectors 2048
+build/m14-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(SHELL_DEPS) tools/mkspdisk.py tools/atr.py
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(DISK_FILES) $(SHELL_FILES)
 
 # The same program linked with bank $01 cut down to its top 16 KB, so that
 # the far image is forced to spill into bank $02 today rather than on the day
@@ -325,7 +402,7 @@ build/m14-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt 
 # start the far heap above it.  The layout function is in src/gem4xe.scm.
 build/m6split.elf: $(M3_OBJS) src/gem4xe.scm
 	$(LD) src/gem4xe.scm $(M3_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/m6split.map \
-	      --memories-expression "(layout #x01c000)"
+	      --memories-expression "(layout #x01c000 #x67ff)"
 
 build/m6split.xex: build/m6split.elf
 	python3 tools/mkxex.py $< $@ --entry _atari_entry --syms build/m6split.sym
@@ -345,7 +422,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16
 
 # The cc65816 code generation bugs gem4xe works around, run in the vendor's
 # own simulator: fails only if a workaround shape has stopped compiling
@@ -457,6 +534,13 @@ test-m15u: build/m14-boot.atr
 
 test-m15d: build/m3-boot.atr build/m12-d2.atr
 	python3 tests/emu/m15_gdos.py --dos2
+
+# The shell loop: sh_main runs DESKTOP.G4A, what it asks for, the desktop
+# again, until it asks to shut down -- with the harness at the keyboard
+# and the screen checked against the model at each stop.  On the SpartaDOS
+# disk, the only runner disk with room for the .G4A files.
+test-m16: build/m14-boot.atr
+	python3 tests/emu/m16_shell.py
 
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.

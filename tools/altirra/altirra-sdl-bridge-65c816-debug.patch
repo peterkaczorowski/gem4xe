@@ -1,0 +1,146 @@
+diff --git a/src/AltirraSDL/source/bridge/bridge_commands_debug.cpp b/src/AltirraSDL/source/bridge/bridge_commands_debug.cpp
+index 5c55333..ca794ea 100644
+--- a/src/AltirraSDL/source/bridge/bridge_commands_debug.cpp
++++ b/src/AltirraSDL/source/bridge/bridge_commands_debug.cpp
+@@ -251,6 +251,19 @@ std::string CmdHistory(ATSimulator& sim, const std::vector<std::string>& tokens)
+ 		AddField(e, "ea",       Hex16(h.mEA & 0xffff));
+ 		AddBool (e, "irq",      h.mbIRQ);
+ 		AddBool (e, "nmi",      h.mbNMI);
++		if (cpu.GetCPUMode() == kATCPUMode_65C816) {
++			// The 65C816's side of an entry: the program bank the PC is
++			// in, the data bank, the high byte of S, the emulation flag
++			// and the instruction's bytes, so a client can disassemble.
++			AddField(e, "k",    Hex8(h.mK));
++			AddField(e, "b",    Hex8(h.mB));
++			AddField(e, "sh",   Hex8(h.mExt.mSH));
++			AddU32  (e, "e",    h.mbEmulation ? 1 : 0);
++			char bytes[16];
++			std::snprintf(bytes, sizeof bytes, "\"%02x%02x%02x%02x\"",
++			              h.mOpcode[0], h.mOpcode[1], h.mOpcode[2], h.mOpcode[3]);
++			AddField(e, "bytes", bytes);
++		}
+ 		StripTrailingComma(e);
+ 		entries += e;
+ 		entries += '}';
+diff --git a/src/AltirraSDL/source/bridge/bridge_commands_state.cpp b/src/AltirraSDL/source/bridge/bridge_commands_state.cpp
+index 689181e..037bd97 100644
+--- a/src/AltirraSDL/source/bridge/bridge_commands_state.cpp
++++ b/src/AltirraSDL/source/bridge/bridge_commands_state.cpp
+@@ -127,6 +127,19 @@ std::string BuildCpuPayload(ATSimulator& sim) {
+ 	AddField(body, "Y",  Hex8(cpu.GetY()));
+ 	AddField(body, "S",  Hex8(cpu.GetS()));
+ 	AddField(body, "P",  Hex8(p));
++	if (cpu.GetCPUMode() == kATCPUMode_65C816) {
++		// The 65C816's other half: the bank registers, the direct page,
++		// the high bytes of the 16-bit registers and the emulation flag.
++		// PC is bank K; S, A, X and Y are 16 bits wide in native mode.
++		AddField(body, "K",  Hex8(cpu.GetK()));
++		AddField(body, "B",  Hex8(cpu.GetB()));
++		AddField(body, "D",  Hex16(cpu.GetD()));
++		AddField(body, "SH", Hex8(cpu.GetSH()));
++		AddField(body, "AH", Hex8(cpu.GetAH()));
++		AddField(body, "XH", Hex8(cpu.GetXH()));
++		AddField(body, "YH", Hex8(cpu.GetYH()));
++		AddU32  (body, "E",  cpu.GetEmulationFlag() ? 1 : 0);
++	}
+ 	body += "\"flags\":\"";
+ 	body += flagStr;
+ 	body += "\",";
+diff --git a/src/AltirraSDL/source/bridge/bridge_commands_write.cpp b/src/AltirraSDL/source/bridge/bridge_commands_write.cpp
+index d0eb75e..a642d69 100644
+--- a/src/AltirraSDL/source/bridge/bridge_commands_write.cpp
++++ b/src/AltirraSDL/source/bridge/bridge_commands_write.cpp
+@@ -2131,6 +2131,8 @@ std::string CmdConfig(ATSimulator& sim, const std::vector<std::string>& tokens)
+ 			return JsonOk(std::string("\"fastboot\":") + (sim.IsFastBootEnabled() ? "true" : "false"));
+ 		if (key == "u1mb" || key == "ultimate1mb")
+ 			return JsonOk(std::string("\"u1mb\":") + (sim.IsUltimate1MBEnabled() ? "true" : "false"));
++		if (key == "history")
++			return JsonOk(std::string("\"history\":") + (sim.GetCPU().IsHistoryEnabled() ? "true" : "false"));
+ 		if (key == "u1mbrom" || key == "u1mbrom_id") {
+ 			ATFirmwareManager* fwm = sim.GetFirmwareManager();
+ 			return JsonOk(std::string("\"u1mbrom_id\":") +
+@@ -2287,6 +2289,15 @@ std::string CmdConfig(ATSimulator& sim, const std::vector<std::string>& tokens)
+ 			return JsonError("CONFIG: expected boolean for fastboot");
+ 		sim.SetFastBootEnabled(v);
+ 	}
++	else if (key == "history") {
++		// The CPU's instruction history ring, which HISTORY reads: off by
++		// default because recording costs time, on for a run that wants
++		// the last 131072 instructions when something goes wrong.
++		bool v = false;
++		if (!ParseBoolLiteral(rawVal, v))
++			return JsonError("CONFIG: expected boolean for history");
++		sim.GetCPU().SetHistoryEnabled(v);
++	}
+ 	else if (key == "u1mb" || key == "ultimate1mb") {
+ 		bool v = false;
+ 		if (!ParseBoolLiteral(rawVal, v))
+diff --git a/src/AltirraSDL/source/bridge/bridge_server.cpp b/src/AltirraSDL/source/bridge/bridge_server.cpp
+index d90d1c8..5bd7658 100644
+--- a/src/AltirraSDL/source/bridge/bridge_server.cpp
++++ b/src/AltirraSDL/source/bridge/bridge_server.cpp
+@@ -580,6 +580,15 @@ void Poll(ATSimulator& sim, ATUIState& /*ui*/) {
+ 	// the second client races into TryAccept() and gets rejected by
+ 	// the "we already have a client" branch.
+ 	if (g_state.transport.HasClient()) {
++		// A reply that did not fit the kernel buffer goes out first:
++		// the client is waiting for the rest of it, not typing.
++		if (g_state.transport.HasPendingSend()) {
++			if (g_state.transport.FlushPending() == IoResult::Error) {
++				g_state.transport.DropClient();
++				OnClientDisconnected(sim);
++				return;
++			}
++		}
+ 		char buf[4096];
+ 		size_t got = 0;
+ 		IoResult rr = g_state.transport.Recv(buf, sizeof buf, &got);
+diff --git a/src/AltirraSDL/source/bridge/bridge_transport.cpp b/src/AltirraSDL/source/bridge/bridge_transport.cpp
+index 5bca60d..2aa9bd3 100644
+--- a/src/AltirraSDL/source/bridge/bridge_transport.cpp
++++ b/src/AltirraSDL/source/bridge/bridge_transport.cpp
+@@ -462,6 +462,15 @@ IoResult Transport::SendAll(const void* buf, size_t len) {
+ 	// Append to any previously-pending tail and try to flush
+ 	// everything in one go.
+ 	mPendingSend.append((const char*)buf, len);
++	return FlushPending();
++}
++
++IoResult Transport::FlushPending() {
++	if (BR_IS_INVALID(mClientFd))
++		return IoResult::Error;
++	if (mPendingSend.empty())
++		return IoResult::Ok;
++
+ 	const char* p = mPendingSend.data();
+ 	size_t remaining = mPendingSend.size();
+ 
+@@ -478,7 +487,8 @@ IoResult Transport::SendAll(const void* buf, size_t len) {
+ 		}
+ 		int e = BR_LAST_ERR();
+ 		if (BR_WOULDBLOCK(e) || BR_INTR(e)) {
+-			// Save the unsent tail; the next SendAll will retry.
++			// Save the unsent tail; the next FlushPending (from
++			// Poll or the next SendAll) will retry.
+ 			mPendingSend.assign(p, remaining);
+ 			return IoResult::WouldBlock;
+ 		}
+diff --git a/src/AltirraSDL/source/bridge/bridge_transport.h b/src/AltirraSDL/source/bridge/bridge_transport.h
+index aa40144..0e8d645 100644
+--- a/src/AltirraSDL/source/bridge/bridge_transport.h
++++ b/src/AltirraSDL/source/bridge/bridge_transport.h
+@@ -79,6 +79,14 @@ public:
+ 	// should try again later (the unsent tail is queued internally).
+ 	IoResult SendAll(const void* buf, size_t len);
+ 
++	// Retry the tail SendAll could not fit into the kernel buffer.
++	// A reply bigger than the socket buffer (HISTORY at its full
++	// count is over a megabyte) needs this: the client is blocked
++	// reading the reply, so no further command will arrive to
++	// trigger the retry -- the server's poll loop has to.
++	bool HasPendingSend() const { return !mPendingSend.empty(); }
++	IoResult FlushPending();
++
+ 	// Drop the active client immediately. Does not affect the
+ 	// listening socket. Used after Shutdown of the bridge or on
+ 	// protocol errors that warrant dropping the connection.

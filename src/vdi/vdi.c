@@ -10,6 +10,7 @@
 #include "pointer.h"
 #include "../vbxe/vbxe.h"
 #include "../sys/irq.h"
+#include "../sys/zwin.h"
 
 WORD contrl[CONTRL_SIZE];
 WORD intin[INTIN_SIZE];
@@ -18,9 +19,9 @@ WORD intout[INTOUT_SIZE];
 WORD ptsout[PTSOUT_SIZE];
 Vwk  vwk;
 
-/* Standard VDI line styles 1..7 (7 is user-defined; we start it solid). */
-UWORD line_styles[8] = {
-    0xFFFF, 0xFFFF, 0xFFF0, 0xE0E0, 0xFF18, 0xFF00, 0xF191, 0xFFFF
+/* Standard VDI line styles 1..6; 7 is the workstation's own (vwk.ud_ls). */
+static const UWORD line_styles[7] = {
+    0xFFFF, 0xFFFF, 0xFFF0, 0xE0E0, 0xFF18, 0xFF00, 0xF191
 };
 
 /* VDI pen -> hardware pen.
@@ -1250,36 +1251,84 @@ static void load_palette(void)
     vbxe_palette(1, 0, hw, 16);
 }
 
-static void vdi_v_opnwk(void)
+/* ---- workstations ----------------------------------------------------- */
+
+/* The donor gives every v_opnvwk a Vwk of its own and looks the caller's
+ * handle up before each call, so that an application's attributes and
+ * clip and the AES's never disturb each other: the AES draws on the
+ * physical workstation, an application on the virtual one it opened on
+ * it.  Here the drawing code addresses ONE workstation, `vwk`, absolutely
+ * (what the small data model makes cheap), so the open ones are kept in
+ * a table and the one a call names is copied in when it is not the one
+ * already there -- a switch costs two copies of a Vwk and happens where
+ * the drawing changes hands, not per call.  Handle 1 is the physical
+ * workstation, at [0]; a slot whose handle is 0 is closed.  The current
+ * slot's copy in the table is stale until the next switch writes it. */
+#define NUM_VWK 4
+ZWIN static Vwk vwk_tab[NUM_VWK];
+static WORD     vwk_cur;            /* the slot vwk holds */
+
+/* Make handle h's workstation the current one; 0 if it is not open. */
+static WORD vwk_select(WORD h)
 {
-    vwk.handle     = 1;
-    vwk.clip       = 0;
-    vwk.xmn_clip   = 0;
-    vwk.ymn_clip   = 0;
+    WORD i = (WORD)(h - 1);
+    if (h < 1 || h > NUM_VWK || vwk_tab[i].handle == 0)
+        return 0;
+    if (i != vwk_cur) {
+        vwk_tab[vwk_cur] = vwk;
+        vwk = vwk_tab[i];
+        vwk_cur = i;
+        /* A user pattern lives in the Vwk, so its pointer is the same
+         * for every workstation that has one, and the expansion cache
+         * keys on that pointer: what it holds may be the other's. */
+        if (vwk.patptr == vwk.ud_patrn)
+            pe_valid = 0;
+    }
+    return 1;
+}
+
+/* init_wk: a workstation's attributes as work_in asks for them, validated
+ * the way the setters validate them, clip off, the rest at their defaults.
+ * (The donor stores work_in[8] as the fill index WITHOUT the minus one
+ * that vsf_style applies -- so does the original DRI driver -- which
+ * selects the pattern after the one asked for and reads past the table at
+ * index 24.  Not reproduced.) */
+static void init_wk(WORD handle)
+{
+    uint8_t *z = (uint8_t *)&vwk;
+    WORD l, top;
+
+    for (l = 0; l < (WORD)sizeof vwk; l++)
+        z[l] = 0;                   /* the user pattern too */
+    vwk.handle     = handle;
     vwk.xmx_clip   = SCR_W - 1;
     vwk.ymx_clip   = SCR_H - 1;
     vwk.wrt_mode   = MD_REPLACE - 1;
     vwk.line_width = 1;
     vwk.fill_per   = 1;
-    /* init_wk: the attributes work_in asks for, validated the way the
-     * setters validate them.  (The donor stores work_in[8] as the fill
-     * index WITHOUT the minus one that vsf_style applies -- so does the
-     * original DRI driver -- which selects the pattern after the one asked
-     * for and reads past the table at index 24.  Not reproduced.) */
-    {
-        WORD l, top;
-        l = intin[1];  vwk.line_index = (l < 1 || l > 7)  ? 1 : l;
-        l = intin[2];  vwk.line_color = (l < 0 || l > 15) ? 1 : l;
-        l = intin[6];  vwk.text_color = (l < 0 || l > 15) ? 1 : l;
-        l = intin[7];  vwk.fill_style = (l < FIS_HOLLOW || l > FIS_USER) ? FIS_HOLLOW : l;
-        top = (vwk.fill_style == FIS_PATTERN) ? MAX_FILL_PATTERN : MAX_FILL_HATCH;
-        l = intin[8];  vwk.fill_index = (WORD)(((l < 1 || l > top) ? 1 : l) - 1);
-        l = intin[9];  vwk.fill_color = (l < 0 || l > 15) ? 1 : l;
-    }
+    vwk.ud_ls      = 0xFFFF;
+    l = intin[1];  vwk.line_index = (l < 1 || l > 7)  ? 1 : l;
+    l = intin[2];  vwk.line_color = (l < 0 || l > 15) ? 1 : l;
+    l = intin[6];  vwk.text_color = (l < 0 || l > 15) ? 1 : l;
+    l = intin[7];  vwk.fill_style = (l < FIS_HOLLOW || l > FIS_USER) ? FIS_HOLLOW : l;
+    top = (vwk.fill_style == FIS_PATTERN) ? MAX_FILL_PATTERN : MAX_FILL_HATCH;
+    l = intin[8];  vwk.fill_index = (WORD)(((l < 1 || l > top) ? 1 : l) - 1);
+    l = intin[9];  vwk.fill_color = (l < 0 || l > 15) ? 1 : l;
     st_fl_ptr();
+}
+
+static void vdi_v_opnwk(void)
+{
+    WORD i;
+    /* The physical workstation, and every virtual one closed with it. */
+    for (i = 0; i < NUM_VWK; i++)
+        vwk_tab[i].handle = 0;
+    vwk_cur = 0;
+    init_wk(VDI_PHYS_HANDLE);
+    vwk_tab[0] = vwk;
     pe_valid = 0;
     lh_valid = lv_valid = 0;
-    /* Opening a workstation resets the driver, cursor included: the saved
+    /* Opening the device resets the driver, cursor included: the saved
      * block under the pointer belongs to a screen that no longer applies. */
     cur_hide  = 1;
     cur_drawn = 0;
@@ -1288,6 +1337,61 @@ static void vdi_v_opnwk(void)
     load_palette();
     fill_workout();
     contrl[6] = vwk.handle;
+}
+
+/* v_opnvwk: the first free handle above the physical one, or 0 in
+ * contrl[6] when there is none -- the donor's answer.  The device is not
+ * touched: the palette, the pointer and the screen are the physical
+ * workstation's. */
+static void vdi_v_opnvwk(void)
+{
+    WORD i;
+    for (i = 1; i < NUM_VWK; i++)
+        if (vwk_tab[i].handle == 0)
+            break;
+    if (i == NUM_VWK) {
+        contrl[6] = 0;
+        return;
+    }
+    vwk_tab[vwk_cur] = vwk;
+    vwk_cur = i;
+    init_wk((WORD)(i + 1));
+    vwk_tab[i] = vwk;
+    fill_workout();
+    contrl[6] = vwk.handle;
+}
+
+/* The physical workstation current again, from a virtual one that is
+ * closed: its copy in the table is what the last switch away saved. */
+static void vwk_to_phys(void)
+{
+    vwk_cur = 0;
+    vwk = vwk_tab[0];
+    if (vwk.patptr == vwk.ud_patrn)
+        pe_valid = 0;
+}
+
+/* v_clsvwk: the workstation the call names -- the dispatcher made it
+ * current -- unless it is the physical one, which only v_clswk closes.
+ * The physical workstation is current afterwards, as in the donor. */
+static void vdi_v_clsvwk(void)
+{
+    if (vwk_cur == 0)
+        return;
+    vwk_tab[vwk_cur].handle = 0;
+    vwk_to_phys();
+}
+
+/* What a program left open when it ended (src/sys/app.c app_free): the
+ * AES draws on the physical workstation, so every virtual one is some
+ * program's, and with one program at a time they are all its. */
+void vdi_close_virtuals(void)
+{
+    WORD i;
+    for (i = 1; i < NUM_VWK; i++)
+        vwk_tab[i].handle = 0;
+    if (vwk_cur != 0)
+        vwk_to_phys();
 }
 
 static void vdi_vq_extnd(void)
@@ -1504,7 +1608,8 @@ static void line_diag(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask)
  * Diagonals fall back to Bresenham through the MEMAC window and are slow. */
 static void draw_line(WORD x1, WORD y1, WORD x2, WORD y2)
 {
-    UWORD mask = line_styles[(vwk.line_index >= 1 && vwk.line_index <= 7)
+    UWORD mask = (vwk.line_index == 7) ? vwk.ud_ls
+               : line_styles[(vwk.line_index >= 1 && vwk.line_index <= 6)
                              ? vwk.line_index : 1];
 
     if ((y1 == y2 || x1 == x2) && mask != 0xFFFF) {
@@ -1997,7 +2102,7 @@ static void vdi_v_choice(void)
  * uses it for rubber-band and drag outlines. */
 static void vdi_vsl_udsty(void)
 {
-    line_styles[7] = (UWORD)intin[0];
+    vwk.ud_ls = (UWORD)intin[0];
 }
 
 /* Escape.  Only sub-opcodes 2 and 3 matter to the AES (leave and enter the
@@ -2125,8 +2230,8 @@ static const VDI_OP jmptb1[] = {
 };
 
 static const VDI_OP jmptb2[] = {
-    vdi_v_opnwk,     /* 100 v_opnvwk -- same device, one workstation */
-    v_nop,           /* 101 v_clsvwk (nop, as in DRI's own driver) */
+    vdi_v_opnvwk,    /* 100 */
+    vdi_v_clsvwk,    /* 101 */
     vdi_vq_extnd,    /* 102 */
     v_nop,           /* 103 v_contourfill (nop) */
     v_nop,           /* 104 vsf_perimeter */
@@ -2165,6 +2270,11 @@ void vdi(void)
     WORD op = contrl[0];
     contrl[2] = 0;                  /* no points out unless a handler says so */
     contrl[4] = 0;                  /* no ints out   ditto */
+    /* The workstation the call names, unless the call opens one.  A
+     * handle that is not open gets nothing done and nothing back, as
+     * in the donor's screen(). */
+    if (op != V_OPNWK && op != V_OPNVWK && !vwk_select(contrl[6]))
+        return;
     if (op >= 1 && op < 1 + N1)
         jmptb1[op - 1]();
     else if (op >= 100 && op < 100 + N2)

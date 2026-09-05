@@ -8,12 +8,15 @@
  *
  * The arrays are sized for what THIS library's bindings need, not for the
  * VDI's maxima: v_opnvwk's 45 intout and 12 ptsout words set the two
- * output sizes, and nothing here passes more than 16 points or 32 words.
- * An application that adds a binding with larger needs grows them.
+ * output sizes, nothing here passes more than 16 points, and intin is
+ * the VDI's own 128 words (src/vdi/vdi.h) because v_gtext takes a line
+ * of text that long -- the desktop's window titles and info lines are
+ * up to 80 characters.  An application that adds a binding with larger
+ * needs grows them.
  */
 #include "gem.h"
 
-WORD contrl[12], intin[32], ptsin[16], intout[45], ptsout[12];
+WORD contrl[12], intin[128], ptsin[16], intout[45], ptsout[12];
 WORD control[5], global[15], int_in[16], int_out[7];
 LONG addr_in[3], addr_out[1];
 
@@ -82,7 +85,7 @@ void v_gtext(WORD handle, WORD x, WORD y, const char *s)
     WORD n = 0;
     ptsin[0] = x;
     ptsin[1] = y;
-    while (*s && n < 32)
+    while (*s && n < 128)
         intin[n++] = (WORD)(unsigned char)*s++;
     vdi(8, 1, n, handle);
 }
@@ -183,6 +186,21 @@ WORD evnt_timer(UWORD lo, UWORD hi)
     int_in[0] = (WORD)lo;
     int_in[1] = (WORD)hi;
     return aes(24, 2, 1, 0, 0);
+}
+
+WORD evnt_keybd(void)
+{
+    return aes(20, 0, 1, 0, 0);
+}
+
+WORD shel_write(WORD doex, WORD isgr, WORD iscr, const char *cmd, const char *tail)
+{
+    int_in[0] = doex;
+    int_in[1] = isgr;
+    int_in[2] = iscr;
+    addr_in[0] = (LONG)(uint32_t)(const char __far *)cmd;
+    addr_in[1] = (LONG)(uint32_t)(const char __far *)tail;
+    return aes(121, 3, 1, 2, 0);
 }
 
 /* -- GEMDOS ---------------------------------------------------------- */

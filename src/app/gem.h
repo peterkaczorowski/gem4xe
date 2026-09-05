@@ -112,7 +112,7 @@ typedef struct {
 /* -- The bindings an application uses; src/app/gemlib.c.  The arrays are
  * the application's own and are left in place after each call so that a
  * caller can look at what came back. */
-extern WORD contrl[12], intin[32], ptsin[16], intout[45], ptsout[12];
+extern WORD contrl[12], intin[128], ptsin[16], intout[45], ptsout[12];
 extern WORD control[5], global[15], int_in[16], int_out[7];
 extern LONG addr_in[3], addr_out[1];
 
@@ -136,6 +136,14 @@ WORD wind_get(WORD handle, WORD field, WORD *o1, WORD *o2, WORD *o3, WORD *o4);
 WORD wind_close(WORD handle);
 WORD wind_delete(WORD handle);
 WORD evnt_timer(UWORD lo, UWORD hi);
+WORD evnt_keybd(void);          /* scan code << 8 | ASCII, as on the ST */
+
+/* shel_write's doex: what the shell does once this program returns.  The
+ * tail is the ST's: a length byte, then the characters. */
+#define SHW_NOEXEC   0          /* back to the desktop */
+#define SHW_EXEC     1          /* run cmd, then the desktop again */
+#define SHW_SHUTDOWN 4          /* leave GEM (the desktop's Quit) */
+WORD shel_write(WORD doex, WORD isgr, WORD iscr, const char *cmd, const char *tail);
 
 /* -- GEMDOS, the ST's osbind names.  Pointers are far so that a buffer
  * Malloc gave out -- which is far memory -- can be read into directly;

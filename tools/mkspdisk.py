@@ -10,7 +10,7 @@ program, the file-layer fixtures and a small directory tree on it:
 Under SpartaDOS X the cartridge boots instead and this is just D1:, which
 is why the tree, not the boot code, is the point of the disk.
 
-  python3 tools/mkspdisk.py <sparta32.atr> <m3.xex> <out.atr> [--sectors N]
+  python3 tools/mkspdisk.py <sparta32.atr> <m3.xex> <out.atr> [--name M3.COM] [--sectors N]
                             [--add FILE NAME]...
 
 tests/emu/m14_sparta.py predicts the listing from the image itself
@@ -33,13 +33,13 @@ TREE = [
 ]
 
 
-def build(src_atr, xex, out_atr, sectors=1040, adds=(), volname="GEM4XE"):
+def build(src_atr, xex, out_atr, sectors=1040, adds=(), volname="GEM4XE", name="M3.COM"):
     os.makedirs(os.path.dirname(os.path.abspath(out_atr)), exist_ok=True)
     img = ATRImage(128, sectors)
     fs = Sdfs.format(img, volname)
     fs.boot_from(Sdfs(ATRImage.load(src_atr)))
     with open(xex, "rb") as f:
-        fs.add_file("M3.COM", f.read())
+        fs.add_file(name, f.read())
     for path, name in adds:
         with open(path, "rb") as f:
             fs.add_file(name, f.read())
@@ -57,12 +57,13 @@ def build(src_atr, xex, out_atr, sectors=1040, adds=(), volname="GEM4XE"):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("src", help="a SpartaDOS 3.2 boot disk (a copy)")
-    ap.add_argument("xex", help="the program, stored as M3.COM")
+    ap.add_argument("xex", help="the program, stored under --name")
     ap.add_argument("out")
+    ap.add_argument("--name", default="M3.COM", help="the program's name on the disk")
     ap.add_argument("--sectors", type=int, default=1040)
     ap.add_argument("--add", nargs=2, action="append", default=[], metavar=("FILE", "NAME"))
     a = ap.parse_args(argv)
-    build(a.src, a.xex, a.out, a.sectors, a.add)
+    build(a.src, a.xex, a.out, a.sectors, a.add, name=a.name)
     return 0
 
 

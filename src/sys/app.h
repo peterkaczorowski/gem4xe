@@ -31,6 +31,7 @@
 #define APP_E_POOL   -3     /* no room in the bank-$00 pool */
 #define APP_E_FAR    -4     /* no far bank */
 #define APP_E_FIXUP  -5     /* a fixup offset outside its part */
+#define APP_E_FILE   -6     /* the file would not open or read (app_load_file) */
 
 typedef struct {
     uint16_t near_base;     /* where the near part landed, page aligned */
@@ -53,5 +54,18 @@ uint16_t pool_room(void);                          /* bytes left          */
 int16_t app_load(const uint8_t __far *blob, uint32_t len, APP *app);
 int16_t app_exec(const APP *app);
 void    app_free(const APP *app);
+
+/* A whole file, by its CIO name, into far memory: where it starts, with
+ * its length in *len, or 0 when it would not open or read to its end --
+ * and then nothing is kept.  It is taken from the far heap, so what
+ * app_free() winds back to decides who owns it.  The file is read
+ * through a slice of the pool, which is given back before returning. */
+uint32_t far_read_file(const char *cioname, uint32_t *len);
+
+/* app_load() on a file: the GEM name (X:\DIR\NAME.G4A, or a bare name on
+ * the default drive) through the DOS seam, read whole, then loaded.  The
+ * file's bytes are left in far memory below the application's and go
+ * back with them at app_free(). */
+int16_t app_load_file(const char *gemname, APP *app);
 
 #endif /* GEM4XE_APP_H */

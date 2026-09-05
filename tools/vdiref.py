@@ -35,7 +35,11 @@ V_STRING, VQ_KEY_S = 31, 128
 VSF_UDPAT = 112
 MD_REPLACE, MD_TRANS, MD_XOR, MD_ERASE = 1, 2, 3, 4
 
-LINE_STYLES = [0xFFFF, 0xFFFF, 0xFFF0, 0xE0E0, 0xFF18, 0xFF00, 0xF191, 0xFFFF]
+LINE_STYLES = [0xFFFF, 0xFFFF, 0xFFF0, 0xE0E0, 0xFF18, 0xFF00, 0xF191]  # 7: ud_ls
+# The physical workstation's handle, by specification, and how many the
+# driver has, virtual ones included (vdi.c NUM_VWK).
+VDI_PHYS_HANDLE = 1
+NUM_VWK = 4
 
 # GEM 8x8 system font, read from the SAME generated file the target links, so
 # the reference cannot drift from the device.
@@ -141,15 +145,18 @@ class VDI:
         self.reset()
         self.s.fill(self.base, STRIDE, STRIDE, SCR_H, 0x00)   # pen 0 = white
 
+    # What a workstation carries (vdi.c Vwk): the attributes, the clip,
+    # its user pattern and line style.  The driver keeps one set current
+    # and swaps by handle; so does this.
+    WK_FIELDS = ("clip", "xmn", "ymn", "xmx", "ymx", "wrt_mode", "line_width",
+                 "line_index", "line_color", "text_color",
+                 "fill_style", "fill_index", "fill_color", "ud_patrn", "ud_ls")
+
     def reset(self):
-        # one workstation, physical, and its handle is 1 (vdi.c v_opnwk);
-        # v_opnvwk opens the same one and hands the same handle back
-        self.handle = 1
-        self.clip = 0
-        self.xmn, self.ymn, self.xmx, self.ymx = 0, 0, SCR_W - 1, SCR_H - 1
-        self.wrt_mode = 0
-        self.line_width = 1
-        self.ud_patrn = [0] * 16
+        # v_opnwk: the physical workstation, handle 1, and every virtual
+        # one closed with it
+        self.handle = VDI_PHYS_HANDLE
+        self.wk = {}                # the open workstations NOT current, by handle
         self._init_wk(WORK_IN)
         # mouse cursor
         self.cur_xhot = self.cur_yhot = 0
@@ -167,7 +174,6 @@ class VDI:
         self.keys = []
         self.key_mods = 0
         self.in_mode = [0, 2, 2, 2, 2]
-        self.line_styles = list(LINE_STYLES)
         self.contrl2 = self.contrl4 = 0
         self.intout = [0, 0, 0]
         self.ptsout = [0, 0, 0]
@@ -258,10 +264,17 @@ class VDI:
 
     def _init_wk(self, w):
         """init_wk: the attributes a workstation opens with, from work_in,
-        validated as the setters validate them.  Donor names: fill_style is
-        the INTERIOR (hollow/solid/pattern/hatch/user), fill_index is
-        vsf_style's index minus one -- the minus one the ROM's init forgets,
-        which gem4xe does not reproduce."""
+        validated as the setters validate them, the clip off and the rest
+        at their defaults.  Donor names: fill_style is the INTERIOR
+        (hollow/solid/pattern/hatch/user), fill_index is vsf_style's index
+        minus one -- the minus one the ROM's init forgets, which gem4xe
+        does not reproduce."""
+        self.clip = 0
+        self.xmn, self.ymn, self.xmx, self.ymx = 0, 0, SCR_W - 1, SCR_H - 1
+        self.wrt_mode = 0
+        self.line_width = 1
+        self.ud_patrn = [0] * 16
+        self.ud_ls = 0xFFFF
         self.line_index = w[1] if 1 <= w[1] <= 7 else 1
         self.line_color = w[2] if 0 <= w[2] <= 15 else 1
         self.text_color = w[6] if 0 <= w[6] <= 15 else 1
@@ -341,7 +354,8 @@ class VDI:
                 self._paint_pixel(x, y, pen, (r >> (15 - (x & 15))) & 1)
 
     def _line(self, x1, y1, x2, y2):
-        mask = self.line_styles[self.line_index if 1 <= self.line_index <= 7 else 1]
+        mask = (self.ud_ls if self.line_index == 7
+                else LINE_STYLES[self.line_index if 1 <= self.line_index <= 6 else 1])
         if y1 == y2 and mask == 0xFFFF:
             a, b = sorted((x1, x2))
             r = self._clip_rect(a, y1, b, y2)
@@ -585,8 +599,63 @@ class VDI:
         self.cur_lastx, self.cur_lasty = self.ptr_x, self.ptr_y
         self._cursor_show_now()
 
+    # -- workstations ----------------------------------------------------
+    def _attrs(self):
+        return {f: getattr(self, f) for f in self.WK_FIELDS}
+
+    def _select(self, handle):
+        """Make handle's workstation the current one; False when it is
+        not open.  The user pattern and line style travel with it."""
+        if handle == self.handle:
+            return True
+        if handle not in self.wk:
+            return False
+        self.wk[self.handle] = self._attrs()
+        for f, val in self.wk.pop(handle).items():
+            setattr(self, f, val)
+        self.handle = handle
+        return True
+
+    def _opnvwk(self, ints):
+        """v_opnvwk: the first free handle above the physical one, made
+        current, with the attributes work_in asks for.  The driver answers
+        handle 0 and does nothing else when its slots are all open; here
+        that is an error, since no script means to.  The device --
+        palette, pointer, screen -- is the physical workstation's and is
+        not touched."""
+        free = [h for h in range(VDI_PHYS_HANDLE + 1, NUM_VWK + 1)
+                if h != self.handle and h not in self.wk]
+        if not free:
+            raise RuntimeError(f"v_opnvwk: the driver's {NUM_VWK} workstations "
+                               f"are all open")
+        self.wk[self.handle] = self._attrs()
+        self.handle = free[0]
+        self._init_wk(ints if len(ints) >= 11 else WORK_IN)
+        self._workout()
+
+    def _clsvwk(self):
+        """v_clsvwk: the current workstation (the one the call named)
+        unless it is the physical one; the physical one is current after."""
+        if self.handle == VDI_PHYS_HANDLE:
+            return
+        for f, val in self.wk.pop(VDI_PHYS_HANDLE).items():
+            setattr(self, f, val)
+        self.handle = VDI_PHYS_HANDLE
+
+    def close_virtuals(self):
+        """What a program left open when it ended (vdi_close_virtuals)."""
+        self._select(VDI_PHYS_HANDLE)
+        self.wk = {}
+
     # -- dispatch --------------------------------------------------------
-    def call(self, op, pts=(), ints=(), form=None):
+    def call(self, op, pts=(), ints=(), form=None, handle=None):
+        """One VDI call on workstation `handle` -- contrl[6] -- or on the
+        current one when none is named: the physical one, unless the
+        caller's script opened a virtual one, which is what an
+        application's replayed calls do (m11, m16) and the runner's never
+        do (src/m3_vdi.c names the physical one).  The AES names its own
+        (aesref.vcall).  A handle that is not open gets nothing done and
+        nothing back, as in the driver."""
         pts = list(pts); ints = list(ints)
         # Per-call outputs, mirroring what src/m3_vdi.c records: this is how
         # the input and inquiry opcodes get tested at all.
@@ -594,15 +663,22 @@ class VDI:
         self.contrl4 = 0
         self.intout = [0, 0, 0]
         self.ptsout = [0, 0, 0]
+        if op not in (V_OPNWK, V_OPNVWK):
+            if not self._select(self.handle if handle is None else handle):
+                return
         if op == V_CLRWK:
             self.s.fill(self.base, STRIDE, STRIDE, SCR_H, 0x00)
-        elif op in (V_OPNWK, V_OPNVWK):
+        elif op == V_OPNWK:
             keep = (self.ptr_x, self.ptr_y)
             self.reset()
             self.ptr_x, self.ptr_y = keep
             if len(ints) >= 11:
                 self._init_wk(ints)
             self._workout()
+        elif op == V_OPNVWK:
+            self._opnvwk(ints)
+        elif op == V_CLSVWK:
+            self._clsvwk()
         elif op == VQ_EXTND:
             if ints and ints[0]:
                 self._extnd1()
@@ -665,7 +741,7 @@ class VDI:
             self.intout[0] = 20          # 50 Hz PAL frame, in ms
             self.contrl4 = 1
         elif op == VSL_UDSTY:
-            self.line_styles[7] = ints[0] & 0xFFFF
+            self.ud_ls = ints[0] & 0xFFFF
         elif op == VSC_FORM:
             self.cur_xhot, self.cur_yhot = ints[0], ints[1]
             self.cur_bg, self.cur_fg = ints[3], ints[4]

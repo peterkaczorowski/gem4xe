@@ -621,29 +621,38 @@ class AES:
         self.fs_path_addr = self.rec_addr = 0
 
     # -- gemgsxif.c ---------------------------------------------------------
+    def vcall(self, op, pts=(), ints=(), form=None):
+        """A VDI call on the AES's own workstation -- gsx_call's
+        contrl[6] = gl_handle -- so that an application's attributes and
+        clip, on the virtual workstation it opened, and the AES's never
+        disturb each other."""
+        return self.v.call(op, pts, ints, form, handle=self.gl_handle)
+
     def gsx_start(self):
         v = self.v
         self.gl_mode = self.gl_tcolor = self.gl_lcolor = -1
         self.gl_fis = self.gl_patt = -1
         self.gl_moff = 0
         self.gl_mform = self.gl_pmform = self.gr_saved = None
-        self.gl_handle = v.handle   # the workstation vdi_init opened
-        v.call(VQ_EXTND, (), (0,))
+        # the workstation vdi_init opened: the AES draws on the device
+        # itself, an application on a virtual one
+        self.gl_handle = vdiref.VDI_PHYS_HANDLE
+        self.vcall(VQ_EXTND, (), (0,))
         self.gl_width = v.intout[0] + 1
         self.gl_height = v.intout[1] + 1
         wpixel, hpixel = v.intout[3], v.intout[4]
-        v.call(VQ_EXTND, (), (1,))
+        self.vcall(VQ_EXTND, (), (1,))
         self.gl_nplanes = v.intout[4]
-        v.call(VST_HEIGHT, (0, 0), ())
+        self.vcall(VST_HEIGHT, (0, 0), ())
         (self.gl_wptschar, self.gl_hptschar,
          self.gl_wchar, self.gl_hchar) = v.ptsout[0:4]
         self.gl_hbox = self.gl_hchar + 3
         self.gl_wbox = cdiv(self.gl_hbox * hpixel, wpixel)
         if self.gl_wbox < self.gl_wchar + 4:
             self.gl_wbox = self.gl_wchar + 4
-        v.call(VSL_TYPE, (), (7,))
-        v.call(VSL_WIDTH, (1, 0), ())
-        v.call(VSL_UDSTY, (), (0xFFFF,))
+        self.vcall(VSL_TYPE, (), (7,))
+        self.vcall(VSL_WIDTH, (1, 0), ())
+        self.vcall(VSL_UDSTY, (), (0xFFFF,))
         w, h = self.gl_width, self.gl_height
         self.gl_rscreen = Rect(0, 0, w, h)
         self.gl_rfull = Rect(0, self.gl_hbox, w, h - self.gl_hbox)
@@ -655,20 +664,20 @@ class AES:
 
     def gsx_moff(self):
         if not self.gl_moff:
-            self.v.call(V_HIDE_C)
+            self.vcall(V_HIDE_C)
         self.gl_moff += 1
 
     def gsx_mon(self):
         self.gl_moff -= 1
         if not self.gl_moff:
-            self.v.call(V_SHOW_C, (), (1,))
+            self.vcall(V_SHOW_C, (), (1,))
 
     def gsx_mforce(self):
         """The pointer shown whatever the hide count, which is returned
         for gsx_munforce to put back (the menu's ct_mouse)."""
         old = self.gl_moff
         if old:
-            self.v.call(V_SHOW_C, (), (0,))
+            self.vcall(V_SHOW_C, (), (0,))
             self.gl_moff = 0
         return old
 
@@ -679,26 +688,26 @@ class AES:
 
     def gsx_attr(self, text, mode, color):
         if mode != self.gl_mode:
-            self.v.call(VSWR_MODE, (), (mode,))
+            self.vcall(VSWR_MODE, (), (mode,))
             self.gl_mode = mode
         if text:
             if color != self.gl_tcolor:
-                self.v.call(VST_COLOR, (), (color,))
+                self.vcall(VST_COLOR, (), (color,))
                 self.gl_tcolor = color
         elif color != self.gl_lcolor:
-            self.v.call(VSL_COLOR, (), (color,))
+            self.vcall(VSL_COLOR, (), (color,))
             self.gl_lcolor = color
 
     def gsx_fcolor(self, color):
-        self.v.call(VSF_COLOR, (), (color,))
+        self.vcall(VSF_COLOR, (), (color,))
 
     def gsx_sclip(self, pt):
         self.gl_clip = pt.copy()
         if pt.w and pt.h:
-            self.v.call(VS_CLIP, (pt.x, pt.y, pt.x + pt.w - 1,
+            self.vcall(VS_CLIP, (pt.x, pt.y, pt.x + pt.w - 1,
                                   pt.y + pt.h - 1), (1,))
         else:
-            self.v.call(VS_CLIP, (0, 0, 0, 0), (0,))
+            self.vcall(VS_CLIP, (0, 0, 0, 0), (0,))
 
     def gsx_gclip(self):
         return self.gl_clip.copy()
@@ -715,11 +724,11 @@ class AES:
     def gsx_box(self, pt):
         x, y = pt.x, pt.y
         x2, y2 = x + pt.w - 1, y + pt.h - 1
-        self.v.call(V_PLINE, (x, y, x2, y, x2, y2, x, y2, x, y), ())
+        self.vcall(V_PLINE, (x, y, x2, y, x2, y2, x, y2, x, y), ())
 
     def gsx_cline(self, x1, y1, x2, y2):
         self.gsx_moff()
-        self.v.call(V_PLINE, (x1, y1, x2, y2), ())
+        self.vcall(V_PLINE, (x1, y1, x2, y2), ())
         self.gsx_mon()
 
     # -- the XOR rubber lines (gemgraf.c) ---------------------------------
@@ -734,9 +743,9 @@ class AES:
             else:
                 yl = y1 if x1 < x2 else y2
                 st = HZTLTBL[yl & 1]
-            v.call(VSL_UDSTY, (), (st,))
-            v.call(V_PLINE, (x1, y1, x2, y2), ())
-        v.call(VSL_UDSTY, (), (0xFFFF,))
+            self.vcall(VSL_UDSTY, (), (st,))
+            self.vcall(V_PLINE, (x1, y1, x2, y2), ())
+        self.vcall(VSL_UDSTY, (), (0xFFFF,))
 
     def gsx_xbox(self, pt):
         x, y = pt.x, pt.y
@@ -757,25 +766,25 @@ class AES:
     def gsx_mouse(self):
         """(buttons, x, y) from vq_mouse."""
         v = self.v
-        v.call(VQ_MOUSE)
+        self.vcall(VQ_MOUSE)
         return v.intout[0], v.ptsout[0], v.ptsout[1]
 
     def gsx_kstate(self):
-        self.v.call(VQ_KEY_S)
+        self.vcall(VQ_KEY_S)
         return self.v.intout[0]
 
     def gsx_getkey(self):
         """One key from the VDI's queue, or None (v_string, one key per
         call on this driver)."""
         v = self.v
-        v.call(V_STRING, (0, 0), (1, 0))
+        self.vcall(V_STRING, (0, 0), (1, 0))
         if v.contrl4 == 0:
             return None
         return v.intout[0]
 
     def gsx_tblt(self, font, x, y, nc):
         y += self.gl_hptschar
-        self.v.call(V_GTEXT, (x, y), self.intin[:nc])
+        self.vcall(V_GTEXT, (x, y), self.intin[:nc])
 
     def gsx_tcalc(self, font, text, w, h):
         n = self.expand_string(text)
@@ -791,7 +800,7 @@ class AES:
         wdwidth = cdiv(cdiv(w, 8), 2)
         if fg == -1:
             raise NotImplementedError("vro_cpyfm from a memory form")
-        self.v.call(VRT_CPYFM, pts, (rule, fg, bg), (form, wdwidth))
+        self.vcall(VRT_CPYFM, pts, (rule, fg, bg), (form, wdwidth))
         self.gsx_mon()
 
     # -- gemgraf.c ----------------------------------------------------------
@@ -820,12 +829,12 @@ class AES:
     def bb_fill(self, mode, fis, patt, x, y, w, h):
         self.gsx_attr(True, mode, self.gl_tcolor)
         if fis != self.gl_fis:
-            self.v.call(VSF_INTERIOR, (), (fis,))
+            self.vcall(VSF_INTERIOR, (), (fis,))
             self.gl_fis = fis
         if patt != self.gl_patt:
-            self.v.call(VSF_STYLE, (), (patt,))
+            self.vcall(VSF_STYLE, (), (patt,))
             self.gl_patt = patt
-        self.v.call(VR_RECFL, (x, y, x + w - 1, y + h - 1), ())
+        self.vcall(VR_RECFL, (x, y, x + w - 1, y + h - 1), ())
 
     def gr_rect(self, icol, ipat, pt):
         fis = FIS_PATTERN
@@ -1383,12 +1392,12 @@ class AES:
         self.gl_ticks = 0
         self.gl_queue = []
         self.ct_init()
-        v.call(VEX_TIMV)
+        self.vcall(VEX_TIMV)
         v.vec_timv = self.ev_timv
         self.gl_ticktime = max(v.intout[0], 1)
-        v.call(VEX_BUTV)
+        self.vcall(VEX_BUTV)
         v.vec_butv = self.ev_butv
-        v.call(VEX_MOTV)
+        self.vcall(VEX_MOTV)
         v.vec_motv = self.ev_motv
         b, x, y = self.gsx_mouse()
         self.xrat = self.pr_xrat = x
@@ -1936,7 +1945,7 @@ class AES:
         if self.gl_mform is not None:
             self.gl_pmform = self.gl_mform
         self.gl_mform = form
-        self.v.call(VSC_FORM, (), tuple(form))
+        self.vcall(VSC_FORM, (), tuple(form))
 
     def gr_mouse(self, mode, form=None):
         """graf_mouse: a shape, or a command about the pointer.  The
@@ -2413,7 +2422,7 @@ class AES:
 
     def bb_screen(self, sx, sy, dx, dy, w, h):
         self.gsx_moff()
-        self.v.call(VRO_CPYFM, (sx, sy, sx + w - 1, sy + h - 1,
+        self.vcall(VRO_CPYFM, (sx, sy, sx + w - 1, sy + h - 1,
                                 dx, dy, dx + w - 1, dy + h - 1), (S_ONLY,))
         self.gsx_mon()
 
@@ -2431,7 +2440,7 @@ class AES:
         clip = self.gsx_gclip()
         self.gsx_sclip(self.gl_rzero)
         self.gsx_moff()
-        self.v.call(VRO_CPYFM, (x, pr.y, x + w - 1, pr.y + pr.h - 1,
+        self.vcall(VRO_CPYFM, (x, pr.y, x + w - 1, pr.y + pr.h - 1,
                                 x, pr.y, x + w - 1, pr.y + pr.h - 1),
                     (S_ONLY,), forms)
         self.gsx_mon()

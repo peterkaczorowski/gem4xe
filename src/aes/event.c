@@ -39,6 +39,7 @@
  * change the owner (gl_ctmown).
  */
 #include "aes.h"
+#include "../sys/zwin.h"
 
 /* ---- the pointer as the AES sees it ------------------------------------ */
 
@@ -90,7 +91,7 @@ static WORD     ct_x, ct_y;     /* where that press was */
  * held arrow does not stack up scrolls the application cannot catch up
  * with).  A full queue drops the message: GEM would block the sender,
  * and here the sender is the process that would have to drain it. */
-static WORD gl_queue[NUM_MSGS][8];
+ZWIN static WORD gl_queue[NUM_MSGS][8];
 static WORD gl_qcount;
 
 /* ---- the button-state test every waiter is phrased in ------------------

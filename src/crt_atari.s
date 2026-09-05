@@ -37,7 +37,7 @@
               .rtmodel core, "*"
 
               .extern __program_start, _fl_ok
-              .public _atari_entry, _sys_exit
+              .public _atari_entry, _sys_exit, _exit_msg
               .public ae_sp, ae_pokmsk  ; for the CIO trampoline, src/sys/cio.s
 
 #define NMIEN  0xD40E                 /* ANTIC: VBI / DLI enable */
@@ -45,10 +45,12 @@
 #define POKMSK 0x0010                 /* OS shadow of IRQEN */
 #define ICCOM  0x0342                 /* IOCB #0: command */
 #define ICBAL  0x0344                 /*          buffer address */
+#define ICBLL  0x0348                 /*          buffer length */
 #define ICAX1  0x034A                 /*          aux 1: open mode */
 #define ICAX2  0x034B
 #define CIOV   0xE456
 #define CIO_OPEN  3
+#define CIO_PUTREC 9
 #define CIO_CLOSE 12
 #define OPEN_RW   12
 
@@ -126,6 +128,26 @@ _sys_exit:
               lda     #0
               sta     ICAX2
               jsr     CIOV
+;;; A last word, if the program left one: the reopen has just cleared the
+;;; screen, so a message printed before this point would not be read.
+;;; _exit_msg is the bank-$00 address of an EOL-terminated line, or 0.
+              lda     _exit_msg
+              ora     _exit_msg+1
+              beq     ae_out
+              ldx     #0
+              lda     #CIO_PUTREC
+              sta     ICCOM
+              lda     _exit_msg
+              sta     ICBAL
+              lda     _exit_msg+1
+              sta     ICBAL+1
+              lda     #0xff
+              sta     ICBLL
+              lda     #0
+              sta     ICBLL+1
+              jsr     CIOV
+ae_out:
               rts                     ; to DOS
 
 ae_edev:      .byte   "E:", 0x9b
+_exit_msg:    .word   0               ; set from C: a line to print on the way out

@@ -88,7 +88,12 @@ typedef struct {
     const UWORD *patptr;
     WORD  patmsk;
     UWORD ud_patrn[16];     /* vsf_udpat's pattern, FIS_USER */
+    UWORD ud_ls;            /* vsl_udsty's line style, index 7 */
 } Vwk;
+
+/* The physical workstation's handle, by specification; v_opnvwk hands
+ * out the ones above it. */
+#define VDI_PHYS_HANDLE 1
 
 /* fill interior styles (vsf_interior) */
 #define FIS_HOLLOW  0
@@ -108,6 +113,8 @@ extern const UWORD fill_oem[128];
 extern const UWORD fill_hatch0[48];
 extern const UWORD fill_hatch1[96];
 
+/* The workstation a call names in contrl[6]: every VDI routine reads and
+ * writes this one, and the dispatcher copies the right one in (vdi.c). */
 extern Vwk vwk;
 
 /* writing modes, as vswr_mode takes them (1-based) */
@@ -170,6 +177,7 @@ extern const uint8_t __far font8x8[FONT_STRIDE * FONT_H];
 
 void vdi(void);             /* dispatch on contrl[0]; the GSX "SCREEN" entry */
 void vdi_init(void);        /* one-time bring-up of the physical workstation */
+void vdi_close_virtuals(void); /* every virtual workstation closed: a program's, at its end */
 void vdi_font_expand(void); /* 1bpp -> 4bpp glyph masks into VRAM; call once */
 
 /* Mouse cursor.  vdi_cursor_move() is what an input poll calls after

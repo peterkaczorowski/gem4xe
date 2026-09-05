@@ -1,5 +1,6 @@
 /* shel.c -- the shell library: shel_read, shel_write, shel_get, shel_put,
- * shel_find, shel_envrn.  EmuTOS aes/gemshlib.c, without the shell loop.
+ * shel_find, shel_envrn, and the shell loop that runs the desktop and
+ * the programs it asks for.  EmuTOS aes/gemshlib.c.
  *
  * What the donor's shell library keeps -- the command and tail the next
  * application starts with, the environment, and the 4 KB the desktop
@@ -13,9 +14,10 @@
  * pointer INTO it and an application's pointers are 16 bits.
  *
  * shel_write records a request, as the donor's does: which program to
- * run next and how.  Acting on it is the shell loop's job, which gem4xe
- * does not have until there is a desktop to return to; the request sits
- * in sh_doexec for whoever asks (src/m3_vdi.c reads it back in the gate).
+ * run next and how.  Acting on it is sh_main's, the shell loop: the
+ * desktop, then whatever it asked for, then the desktop again, until
+ * something asks to shut down (SHW_SHUTDOWN).  The request sits in
+ * sh_doexec for whoever asks (src/m3_vdi.c reads it back in the gate).
  *
  * NAMES.  A GEM application names a file the TOS way, X:\DIR\NAME.EXT,
  * and the Atari OS the CIO way: Dn:NAME.EXT on DOS 2, Dn:>DIR>NAME.EXT
@@ -44,7 +46,11 @@ static const char sh_env[] = "PATH=\0D:\0";
 
 WORD sh_doexec;                 /* the pending request: SHW_*, or -1  */
 WORD sh_isgem;
+static WORD sh_next;            /* what runs next: SH_DESKTOP, SH_PROGRAM */
 static uint32_t sh_cmd_far, sh_tail_far, sh_buf_far;   /* 0 until sh_init */
+
+#define SH_DESKTOP  0
+#define SH_PROGRAM  1
 
 void sh_init(void)
 {
@@ -80,12 +86,14 @@ WORD sh_write(WORD doex, WORD isgem, WORD isover, const char *pcmd,
         far_write8(sh_cmd_far, 0);
         sh_doexec = doex;
         sh_isgem = 1;
+        sh_next = SH_DESKTOP;
         break;
     case 1:                                 /* SHW_EXEC */
         far_strput(sh_cmd_far, pcmd, SH_CMDLEN);
         far_put(sh_tail_far, (const uint8_t *)ptail, SH_TAILLEN);
         sh_doexec = doex;
         sh_isgem = (isgem != 0);
+        sh_next = SH_PROGRAM;
         break;
     case 4:                                 /* SHW_SHUTDOWN */
         sh_doexec = doex;
@@ -158,4 +166,93 @@ WORD sh_find(char *pspec)
         return 0;
     cio_close(fd);
     return 1;
+}
+
+/* ---- the shell loop ------------------------------------------------- */
+
+/* The desktop's file, read once and kept.  The far heap above the
+ * shell's own buffers belongs to whichever program is running and is
+ * wound back when it exits (app_free), so the desktop's bytes are taken
+ * before the first program and stay for every return to it: a loaded
+ * desktop costs a copy, not a disk read. */
+#define SH_DESKNAME "DESKTOP.G4A"
+static uint32_t sh_desk_blob, sh_desk_len;
+
+WORD sh_runs;                   /* programs started, the desktop included */
+WORD sh_lastret;                /* what the last one's main() returned */
+WORD sh_lastrc;                 /* the last load's status (APP_*) */
+
+/* The desktop or the requested program: loaded, run, freed.  The load
+ * status, which sh_main reports to the user before the next iteration;
+ * and after a program the desktop is what runs next unless the program
+ * asked otherwise -- the donor's rule, set before the program runs so
+ * that its own shel_write wins. */
+static WORD sh_ldapp(void)
+{
+    APP app;
+    char cmd[SH_CMDLEN];
+    WORD st, was = sh_next;
+
+    if (was == SH_DESKTOP) {
+        st = app_load((const uint8_t __far *)sh_desk_blob, sh_desk_len, &app);
+    } else {
+        far_strget(cmd, sh_cmd_far, SH_CMDLEN);
+        sh_next = SH_DESKTOP;
+        sh_isgem = 1;
+        st = app_load_file(cmd, &app);
+    }
+    sh_lastrc = st;
+    if (st != APP_OK) {
+        if (was == SH_DESKTOP)      /* nothing to return to: the loop ends */
+            sh_doexec = 4;
+        return st;
+    }
+    sh_runs++;
+    sh_doexec = -1;                 /* what the program asks for */
+    sh_lastret = app_exec(&app);
+    app_free(&app);
+    /* A desktop that returns without asking for anything has nothing
+     * left to do: that is a shutdown, not the desktop again forever. */
+    if (was == SH_DESKTOP && sh_doexec == -1)
+        sh_doexec = 4;
+    return 0;
+}
+
+/* The donor's sh_main: until a shutdown, reset the windows and the menu,
+ * clear the screen, report the last failure, run the next thing.  The
+ * one departure is what a load failure of the desktop itself means:
+ * the donor has a ROM desktop that cannot fail to load, and here it is
+ * a file, so the loop ends and the caller hears which way (a negative
+ * APP_* status); otherwise the count of programs run. */
+WORD sh_main(void)
+{
+    WORD rc = 0;
+
+    if (!sh_cmd_far)
+        return APP_E_POOL;
+    if (!sh_desk_blob) {
+        char cio[CIO_NAME_MAX + 1];
+        sh_cioname(SH_DESKNAME, cio);
+        sh_desk_blob = far_read_file(cio, &sh_desk_len);
+        if (!sh_desk_blob)
+            return APP_E_FILE;
+    }
+    sh_runs = 0;
+    sh_lastret = 0;
+    sh_lastrc = 0;
+    sh_next = SH_DESKTOP;
+    sh_isgem = 1;
+    sh_doexec = 0;
+    do {
+        wm_init();
+        mn_init();
+        gsx_sclip(&gl_rscreen);
+        ob_draw(gl_wtree, ROOT, 0);         /* the desk, edge to edge */
+        if (rc)
+            fm_alert(1, rc == APP_E_FILE
+                        ? "[1][This application|cannot be found.][ OK ]"
+                        : "[1][This application|cannot be loaded.][ OK ]");
+        rc = sh_ldapp();
+    } while (sh_doexec != 4);
+    return rc ? rc : sh_runs;
 }

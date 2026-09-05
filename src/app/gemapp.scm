@@ -14,23 +14,26 @@
 ;;; is fixed here.  The loader relocates by pages, which is why the direct
 ;;; page -- the only thing whose low byte matters -- sits at a page boundary.
 ;;;
-;;; The two sizes are the application's budget: 2 KB near (gem4xe's pool is
-;;; that big -- src/gem4xe.scm) and one bank of code.  Both are limits the
-;;; link enforces and the loader checks again against what it has.  The
-;;; split of the 2 KB -- a page of direct page, 1.5 KB without bits, 256
-;;; bytes with -- is what the gate application needs; another application
-;;; moves the boundary, and the loader never sees it.
+;;; The sizes are the application's budget: a near region of a page of
+;;; direct page plus `bss` bytes without bits plus `bits` bytes with, out
+;;; of gem4xe's pool (src/gem4xe.scm), and one bank of code.  All are
+;;; limits the link enforces and the loader checks again against what it
+;;; has.  The gate application (src/m11_app.c) links with 2 KB and 256
+;;; bytes; the desktop asks for more, and the loader never sees the
+;;; difference -- it reads the extent from the file's header, rounded up
+;;; to whole pages (tools/mkg4a.py), since the loader relocates by pages;
+;;; page multiples here waste none of it.
 
-(define (app-layout near far)
+(define (app-layout near far bss bits)
   (list
     (list 'memory 'AppDP
           (list 'address (cons near (+ near #xff)))
           '(section (registers ztiny)))
     (list 'memory 'AppBss
-          (list 'address (cons (+ near #x100) (+ near #x6ff)))
+          (list 'address (cons (+ near #x100) (+ near #xff bss)))
           '(section stack data zdata heap))
     (list 'memory 'AppBits
-          (list 'address (cons (+ near #x700) (+ near #x7ff)))
+          (list 'address (cons (+ near #x100 bss) (+ near #xff bss bits)))
           '(section cdata idata data_init_table))
     ;; Two far memories, either side of the bank's $D5 page: the emulator's
     ;; native-mode branch reads a wrong-page address folded into bank $00,
@@ -45,4 +48,4 @@
     '(block heap  (size #x0000))
     '(base-address _DirectPageStart AppDP 0)))
 
-(define memories (app-layout #x1000 #x020000))
+(define memories (app-layout #x1000 #x020000 #x800 #x100))

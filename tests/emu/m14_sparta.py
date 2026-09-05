@@ -89,10 +89,12 @@ def wait_prompt(b, prompt="D1:", limit=3000, step=50):
     return -1
 
 
-def boot(b):
+def boot(b, prepare=None):
     """The DOS up on the 6502, the CPU switched, the DOS up again, the
     program typed at its prompt and polled for.  Returns (frames the
-    load took, the STATUS block), or (-1, None)."""
+    load took, the STATUS block), or (-1, None).  `prepare(b)`, if
+    given, runs at the prompt just before the program is typed: the
+    moment to paint memory the load will not touch (m16's stack)."""
     t = wait_prompt(b, limit=4000)
     if t < 0:
         return -1, None
@@ -105,6 +107,8 @@ def boot(b):
         return -1, None
     print(f"  and after {t + 100} frames on the 65816")
     bank = cart_bank(b)
+    if prepare:
+        prepare(b)
     type_line(b, "M3")
     for t in range(0, 8000, 50):
         st = bytes(b.memdump(STATUS, 14))

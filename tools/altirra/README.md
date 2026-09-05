@@ -52,12 +52,37 @@ The protocol document in the patch (`AltirraBridge/docs/PROTOCOL.md`)
 describes the verbs.  `tools/a8test/bridge.py` has `key_raw()` and
 `key_tap()` over `KEYRAW`.
 
+## altirra-sdl-bridge-65c816-debug.patch -- a post-mortem for native mode
+
+Not in PR #88; written for the shell-loop fault in `docs/phase14.md`
+(milestone 3), on top of the two above.  Against the bridge only:
+
+- `REGS` reports the 65C816's other half when the CPU is one: `K`, `B`,
+  `D`, `SH`, `AH`, `XH`, `YH` and `E`.  Without them a native-mode
+  stack pointer or program counter is a 16-bit truncation.
+- `CONFIG history <bool>`: the CPU's instruction history ring, off by
+  default because recording costs time.  `HISTORY n` entries then carry
+  `k`, `b`, `sh`, `e` and the instruction's `bytes` for a 65C816, so a
+  client can disassemble what ran.  The fault handler parks in `wai`
+  (`src/sys/irq.s`) so that the ring still holds the instructions before
+  the fault when the host gets round to reading it.
+- a fix: a reply larger than the socket's buffer (`HISTORY 4096` is
+  well over it) was sent as far as the kernel would take and the rest
+  kept for "the next SendAll" -- which never came, because the client
+  was blocked reading the reply and sent nothing.  The server's poll
+  loop now flushes the pending tail first.
+
+`tools/a8test/bridge.py` uses none of it from a gate; the probes in
+`docs/phase14.md` did.  To go upstream as a second pull request once
+#88 has landed, so that the first stays what it was reviewed as.
+
 ## Building
 
     git clone https://github.com/ilmenit/AltirraSDL && cd AltirraSDL
     git checkout b3061c7
     git apply /path/to/gem4xe/tools/altirra/altirra-65c816-native-mode.patch
     git apply /path/to/gem4xe/tools/altirra/altirra-sdl-u1mb-keyraw.patch
+    git apply /path/to/gem4xe/tools/altirra/altirra-sdl-bridge-65c816-debug.patch
     ./build.sh --release --system-sdl3 \
         --cmake -DALTIRRA_ENABLE_FFMPEG_RECORDING=OFF \
         --cmake -DALTIRRA_FETCH_FFMPEG=OFF -j$(nproc)

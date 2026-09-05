@@ -6,11 +6,13 @@
 ;;;   $0200-$06FF  OS vars / page 6      -- not ours ($02E0/$02E2 are the .xex vectors)
 ;;;   $0700-$1FFF  DOS resident          -- not ours
 ;;;   $2000-$20FF  direct page           <- ours
-;;;   $2100-$367F  stack / data / zdata  <- ours
+;;;   $2100-$367F  stack / data / zdata  <- ours (the stack is 2 KB; see below)
 ;;;   $3680-$3FFD  near code and rodata  <- ours
 ;;;   $3FFE-$3FFF  the cstartup's reset word, inert
-;;;   $4000-$5FFF  the application pool             <- ours; see BANKED below
-;;;   $6000-$7FFF  the test runner's host-poked buffers        <- ours
+;;;   $4000-$47FF  zwin: bss no interrupt handler touches  <- ours; see BANKED
+;;;   $4800-$67FF  the application pool             <- ours; see BANKED below
+;;;   $6800-$7FFF  the test runner's host-poked buffers        <- ours
+;;;                (the runner's link; GEM.COM gives the pool the whole window)
 ;;;   $8000-$9BFF  RESERVED: VBXE MEMAC A window       -- nothing may RUN here,
 ;;;                but it is plain RAM until vbxe_init() opens the window, so
 ;;;                farload's staging buffer borrows it at LOAD time (farstage)
@@ -96,7 +98,7 @@
 ;;; Two far memories per bank, either side of that page.  `first` is where
 ;;; bank $01's memory starts: its bottom for the real build, and higher for
 ;;; a test link -- `make test-m6` links a second image with
-;;; `--memories-expression "(layout #x01c000)"`, which leaves bank $01 too
+;;; `--memories-expression "(layout #x01c000 #x67ff)"`, which leaves bank $01 too
 ;;; small for the code and forces the spill, so the mechanism is exercised
 ;;; long before the code grows into it on its own.
 (define (far-bank b first)
@@ -115,14 +117,19 @@
           (apply append (map (lambda (b) (far-bank b (* b #x10000)))
                              '(2 3 4 5 6 7 8 9 10 11 12 13 14 15)))))
 
-(define (layout far-start)
-  (append (far-banks far-start) bank0))
+;;; A layout is a far start and where the application pool ends: the
+;;; runner links `(layout #x010000 #x67ff)`, which leaves $6800-$7FFF for
+;;; its host-poked buffers, and GEM.COM `(layout #x010000 #x7fff)`, which
+;;; has no such buffers and gives the pool the whole banked window.
+(define (layout far-start pool-end)
+  (append (far-banks far-start) (bank0 pool-end)))
 
 ;;; Bank $00.  The far memories go ahead of these in the final list.  The
 ;;; linker fills same-section memories in definition order, and nothing here
 ;;; shares a section with them, so only the far memories' order among
 ;;; themselves matters.
-(define bank0
+(define (bank0 pool-end)
+  (append
   '((memory DirectPage (address (#x2000 . #x20ff))
             (section (registers ztiny)))
     ;; The stack and the data.  The linker will not mix sections that carry
@@ -147,29 +154,45 @@
     ;; that simply has to land somewhere the loader will not mind: the last
     ;; word of gem4xe's own 8 KB.
     (memory Vector     (address (#x3ffe . #x3fff))
-            (section (reset #x3ffe)))
+            (section (reset #x3ffe))))
 
-    ;; The application pool: where a loaded application's near part -- its
-    ;; direct page, stack and data -- goes (src/sys/app.c).  Nothing is
-    ;; linked into it; the block only reserves the extent, and
-    ;; src/sys/apppool.s reports the bounds the linker gave it, so the
-    ;; loader learns them from the map rather than restating them.  In the
-    ;; banked window (see the note at the top): fast on a Rapidus, and out
-    ;; of the cartridge's way.  Four times what one application is linked to
-    ;; fit (src/app/gemapp.scm); the rest is the desktop's, and the
-    ;; selector's tree and buffers are taken from here too (src/aes/fsel.c).
-    (memory AppPool    (address (#x4000 . #x5fff))
-            (section apppool))
+  ;; The application pool: where a loaded application's near part -- its
+  ;; direct page, stack and data -- goes (src/sys/app.c), and where the
+  ;; shell's and the selector's trees and buffers are taken from
+  ;; (src/aes/shel.c, src/aes/fsel.c).  Nothing is linked into it; the
+  ;; block only reserves the extent, and src/sys/apppool.s reports the
+  ;; bounds the linker gave it, so the loader learns them from the map
+  ;; rather than restating them.  In the banked window (see the note at
+  ;; the top): fast on a Rapidus, and out of the cartridge's way.  It runs
+  ;; from above the zwin memory to wherever the layout ends it.
+  ;; Bank-$00 data that is not the interrupt handlers' -- the window
+  ;; gadget trees, the message queue, the formatting strings, the blit
+  ;; list -- in the banked window's first 2 KB (section zwin, named on
+  ;; each variable), so that the stack can be a real stack.  Window 0 is
+  ;; the only one a Rapidus runs at full speed both ways (src/sys/rapidus.c),
+  ;; and the stack wants that more than any of these do: what moved here
+  ;; is read far more than written, and a write costs one bus cycle.
+  '((memory Window     (address (#x4000 . #x47ff))
+            (section zwin)))
+  (list (list 'memory 'AppPool (list 'address (cons #x4800 pool-end))
+              '(section apppool)))
 
-    ;; The conformance runner's host-poked buffers.  A bss section cannot share
-    ;; a memory with sections that carry bits, so it gets its own -- which also
-    ;; means nothing else can land in it by accident.  The other half of the
-    ;; banked window: what the SDX note says of a CIO buffer in the pool
-    ;; holds for the runner's buffers, which the file-layer gate hands to
-    ;; CIO on purpose.
-    (memory TestStage  (address (#x6000 . #x7fff))
-            (section teststage))
+  ;; The conformance runner's host-poked buffers, in the rest of the
+  ;; window -- when there is a rest: GEM.COM has no such buffers and its
+  ;; layout ends the pool at the top of the window, and then this memory
+  ;; is not defined at all, so a stray `teststage` section fails its link
+  ;; rather than landing somewhere.  A bss section cannot share a memory
+  ;; with sections that carry bits, so it gets its own -- which also means
+  ;; nothing else can land in it by accident.  What the SDX note says of a
+  ;; CIO buffer in the pool holds for the runner's buffers, which the
+  ;; file-layer gate hands to CIO on purpose.
+  (if (< pool-end #x7fff)
+      (list (list 'memory 'TestStage
+                  (list 'address (cons (+ pool-end 1) #x7fff))
+                  '(section teststage)))
+      '())
 
+  '(
     ;; The load-time staging buffer, inside the MEMAC A window.  It holds no
     ;; linked content -- it is bss, and tools/mkxex.py writes it a chunk at a
     ;; time from the .xex -- so placing it over a region the driver later maps
@@ -181,13 +204,25 @@
     (memory Stage      (address (#x8000 . #x9bff))
             (section farstage))
 
-    (block stack   (size #x0400))
+    ;; 2 KB.  The shell's chain -- the runner or GEM.COM, sh_main, the
+    ;; loader, app_run -- is on it under an application, and a COP is
+    ;; served on top of that: gem_entry, crysbind, the window manager, the
+    ;; object library, the VDI.  At 1 KB that chain ran out inside
+    ;; wind_open's first redraw and the pushes went on down into zdata
+    ;; (phase 14, milestone 3: vec_curv became a return address).
+    (block stack   (size #x0800))
     (block heap    (size #x0000))   ;; nothing here calls malloc
-    (block apppool (size #x2000))   ;; applications' near parts, the selector's tree
-    (base-address _DirectPageStart DirectPage 0)
-    ))
+    (base-address _DirectPageStart DirectPage 0))
+
+  ;; The pool's block is its memory's whole extent, so apppool.s reports
+  ;; the same bounds whichever layout linked.
+  (list (list 'block 'apppool (list 'size (- (+ pool-end 1) #x4800))))
+  ))
 
 ;;; The far code -- banks $01-$0F, filled from the bottom of bank $01.  A .xex
 ;;; cannot load above $FFFF; src/farload.s copies the image up as DOS reads
-;;; the file.
-(define memories (layout #x010000))
+;;; the file.  This default is the conformance runner's layout: 10 KB of
+;;; pool and 6 KB of test stage.  The runner's buffers are 6016 bytes
+;;; (src/m3_vdi.c), so the stage is as small as it can be and the pool has
+;;; the rest.
+(define memories (layout #x010000 #x67ff))

@@ -2,7 +2,10 @@
 #include <string.h>
 #include "sys/app.h"
 #include "sys/abi.h"
+#include "sys/cio.h"
+#include "sys/dos.h"
 #include "sys/gemdos.h"
+#include "vdi/vdi.h"
 #include "sys/farmem.h"
 
 /* The pool's bounds, from the linker (src/sys/apppool.s). */
@@ -150,6 +153,90 @@ int16_t app_exec(const APP *app)
 void app_free(const APP *app)
 {
     gemdos_release();               /* its handles, searches and DTA */
+    vdi_close_virtuals();           /* its workstations */
     pool_release(app->pool_mark);
     farmem.brk = app->far_mark;     /* and everything it Malloc'd */
+}
+
+/* The file, in pieces the size of a slice of the pool (2 KB when the pool
+ * has it, sixty-four bytes of stack when it does not -- src/sys/gemdos.c
+ * reads the same way), each piece taken from the far heap as it arrives:
+ * the heap is a bump allocator and the pieces are whole multiples of its
+ * alignment, so they make one extent, which is checked rather than
+ * assumed.  CIO hands back fewer bytes than asked only at the end of the
+ * file, and a status of EOF there still delivers the bytes before it
+ * (src/sys/cio.h). */
+uint32_t far_read_file(const char *cioname, uint32_t *len)
+{
+    uint8_t small[64], *slice = 0;
+    uint16_t n = 0, got, mark;
+    uint32_t start, at, total = 0;
+    uint16_t st;                        /* not a byte: B8, tools/ccbug */
+    int16_t fd;
+
+    *len = 0;
+    if (!farmem.banks)
+        return 0;
+    start = farmem.brk;
+    fd = cio_open(cioname, CIO_A_READ, 0);
+    if (fd < 0)
+        return 0;
+    mark = pool_mark();
+    n = pool_room();
+    n = n > 2048 ? 2048 : (uint16_t)(n & ~3);
+    if (n >= 128)
+        slice = pool_alloc(n, 4);
+    if (!slice) {
+        slice = small;
+        n = sizeof small;
+    }
+    for (;;) {
+        st = cio_read(fd, slice, n, &got);
+        if (got > n)
+            got = n;
+        if (st != CIO_OK && st != CIO_OK_EOF && st != CIO_E_EOF) {
+            total = 0;                  /* a real error: keep nothing */
+            break;
+        }
+        if (got) {
+            at = far_alloc(got);
+            if (at != start + total) { /* out of far memory */
+                total = 0;
+                break;
+            }
+            far_put(at, slice, got);
+            total += got;
+        }
+        if (got < n || st != CIO_OK)
+            break;
+    }
+    cio_close(fd);
+    if (slice != small)
+        pool_release(mark);
+    if (!total) {
+        farmem.brk = start;
+        return 0;
+    }
+    *len = total;
+    return start;
+}
+
+int16_t app_load_file(const char *gemname, APP *app)
+{
+    char cio[CIO_NAME_MAX + 1];
+    uint32_t blob, len, mark = farmem.brk;
+    int16_t st;
+
+    dos_cioname(gemname, cio);
+    blob = far_read_file(cio, &len);
+    if (!blob) {
+        memset(app, 0, sizeof *app);
+        return APP_E_FILE;
+    }
+    st = app_load((const uint8_t __far *)blob, len, app);
+    if (st != APP_OK)
+        farmem.brk = mark;              /* the file goes too */
+    else
+        app->far_mark = mark;           /* and at app_free, with the rest */
+    return st;
 }

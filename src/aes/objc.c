@@ -15,13 +15,14 @@
  */
 #include "aes.h"
 #include "../vdi/vdi.h"
+#include "../sys/zwin.h"
 
 /* GEM's scratch strings for formatting and editing a field (the D structure
  * in the donor).  A field longer than MAX_LEN-1 is out of contract. */
-static char g_rawstr[MAX_LEN];
-static char g_tmpstr[MAX_LEN];
-static char g_valstr[MAX_LEN];
-static char g_fmtstr[MAX_LEN];
+ZWIN static char g_rawstr[MAX_LEN];
+ZWIN static char g_tmpstr[MAX_LEN];
+ZWIN static char g_valstr[MAX_LEN];
+ZWIN static char g_fmtstr[MAX_LEN];
 
 /* The TEDINFO of the field being edited, shared by ob_edit's helpers. */
 static TEDINFO edblk;

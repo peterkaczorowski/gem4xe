@@ -7,6 +7,7 @@
  * Measure before moving any of this to as65816.
  */
 #include "vbxe.h"
+#include "../sys/zwin.h"
 
 uint16_t vbxe_base = 0;
 
@@ -240,7 +241,7 @@ void vbxe_wait_vbl(void)
  * because the blitter has NO jump instruction: the "Next" bit only advances
  * to the physically adjacent BCB. */
 #define MAX_BCB 12
-static uint8_t  bcb[MAX_BCB * BCB_SIZE];
+ZWIN static uint8_t  bcb[MAX_BCB * BCB_SIZE];
 static uint8_t  bcb_count = 0;
 
 void blit_reset(void) { bcb_count = 0; }

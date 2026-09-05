@@ -184,6 +184,13 @@ irq_kfull:    inc     abs:irq_kb_count
 ;;; violation and would re-execute forever if returned from.  (COP is the
 ;;; application ABI's entry and goes to src/sys/abi.s; fault code 1 is
 ;;; retired with it.)
+;;;
+;;; The park is a WAI loop with POKEY's IRQs off, not a tight branch: a
+;;; branch spinning at 20 MHz overwrites an emulator's instruction history
+;;; within a frame, and the history of the last few hundred instructions
+;;; is exactly what a BRK's post-mortem needs (tests read it through the
+;;; bridge).  With I set only an NMI ends each wait, so the loop runs one
+;;; iteration per vertical blank.
 ;;; ---------------------------------------------------------------------------
 irq_brk:      sep     #0x20
               lda     #2
@@ -191,7 +198,10 @@ irq_brk:      sep     #0x20
 irq_abort:    sep     #0x20
               lda     #3
 irq_park:     sta     long:irq_fault
-irq_spin:     bra     irq_spin
+              lda     #0
+              sta     long:IRQEN
+irq_spin:     wai
+              bra     irq_spin
 
 ;;; ---------------------------------------------------------------------------
 ;;; What goes to $FFE4-$FFEF: COP, BRK, ABORT, NMI, (reserved), IRQ.  The

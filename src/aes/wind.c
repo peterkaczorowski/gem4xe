@@ -33,6 +33,7 @@
  * NOT HERE YET: the menu bar.
  */
 #include "aes.h"
+#include "../sys/zwin.h"
 
 #define DROP_SHADOW_SIZE    2
 
@@ -92,8 +93,8 @@ static const TEDINFO gl_asamp = {
 
 /* ---- state ---------------------------------------------------------- */
 
-static OBJECT  W_TREE[NUM_WIN];
-static OBJECT  W_ACTIVE[NUM_ELEM];
+ZWIN static OBJECT  W_TREE[NUM_WIN];
+ZWIN static OBJECT  W_ACTIVE[NUM_ELEM];
 WINDOW         gl_win[NUM_WIN];
 static ORECT   gl_olist[NUM_ORECT];
 static ORECT  *gl_rul;              /* the free rectangles */

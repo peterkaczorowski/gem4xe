@@ -380,6 +380,21 @@ static void sys_op(WORD op)
         intout[9] = PORTB;
         c4 = 10;
         break;
+    /* The shell loop (src/aes/shel.c): DESKTOP.G4A from the boot disk,
+     * whatever it asks for, until a shutdown.  [6] what sh_main returned
+     * -- the programs run, or a negative APP_* status -- [7] the runs,
+     * [8] the last program's main() result, [9] the last load status,
+     * [10] and [11] the ABI's calls taken and refused, over all of it. */
+    case 16:
+        gem_calls = gem_bad = 0;
+        intout[6]  = sh_main();
+        intout[7]  = sh_runs;
+        intout[8]  = sh_lastret;
+        intout[9]  = sh_lastrc;
+        intout[10] = (WORD)gem_calls;
+        intout[11] = (WORD)gem_bad;
+        c4 = 12;
+        break;
     default:
         break;
     }
@@ -812,7 +827,7 @@ static void run_script(void)
         contrl[0] = op;
         contrl[1] = npts;
         contrl[3] = nint;
-        contrl[6] = 1;
+        contrl[6] = VDI_PHYS_HANDLE;    /* the script draws where the AES does */
         vdi();
         }
         if (vdi_result_count < MAX_RESULTS) {

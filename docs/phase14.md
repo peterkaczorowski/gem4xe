@@ -5,7 +5,10 @@ Status: **in progress, in Altirra.**  Milestone 1, the GEMDOS layer:
 directory walk, the file calls, memory, the write path, attributes,
 Dcreate/Ddelete and Dfree, every answer compared with the image on the
 host; DOS 2 and SpartaDOS X are recorded below as they are measured.
-Nothing here has run on a Rapidus, a VBXE or a real SpartaDOS machine.
+Milestone 3, the shell loop: `make test-m16` PASS, and GEM.COM itself
+boots, runs the desktop, runs a program from it, and returns to the DOS
+prompt on both product disks (the section at the end).  Nothing here
+has run on a Rapidus, a VBXE or a real SpartaDOS machine.
 
 The GEM Desktop is a GEM application: it draws through the VDI, runs
 under the AES, and asks **GEMDOS** for everything else -- which files
@@ -68,9 +71,9 @@ buffer from the pool and the bytes are copied up.
 ## Two bugs that were not where they looked
 
 **The runner died at `Dsetpath("deep")`, reporting 10798 records.**
-10798 is `0x2A2E`, `".*"` in little-endian ASCII.  The stack is 1 KB at
-`$3201-$3600` and `vdi_result_count` sits at `$31FD`, directly beneath
-it; the first thing a stack overflow overwrites is the word the harness
+10798 is `0x2A2E`, `".*"` in little-endian ASCII.  The stack was then 1 KB
+at `$3201-$3600` (2 KB since milestone 3) and `vdi_result_count` sat at
+`$31FD`, directly beneath it; the first thing a stack overflow overwrites is the word the harness
 polls.  The GEMDOS calls held two 128-byte paths and a 64-byte CIO name
 in locals, `gd_full` under `gd_fsfirst` under `gemdos_call` under the
 runner's op, and a COP from an application is served on gem4xe's stack
@@ -337,3 +340,155 @@ nothing -- `whatsnew-450.txt`, 4.49f: "XIO 35 worked by accident,
 fixed".  `Fdelete` then removes the file it should have refused.  The
 gate reports that as a note and skips the locked-file checks on such a
 DOS; the port's side of it is the same code that passes on 4.50.
+
+## Milestone 3: the shell loop, and GEM.COM
+
+`make test-m16` PASS.  The GEM Desktop is a program the AES runs, and
+the AES's shell loop -- `sh_main` in the donor's gemshlib.c -- is what
+runs it: the desktop, then whatever the desktop asks for through
+`shel_write`, then the desktop again, until it asks to shut down.  This
+milestone builds that loop, a desktop just large enough to drive it,
+and **GEM.COM**, the product: the same bring-up as the conformance runner
+with no host in it, which hands the screen to the loop and gives the
+machine back to DOS when the loop ends.
+
+`src/aes/shel.c`'s `sh_main` is the donor's: reset the windows and the
+menu, draw the desk edge to edge, report the last failure, load and run
+the next thing.  One departure, because the donor's desktop is in ROM
+and cannot fail to load while ours is a file: a desktop that will not
+load ends the loop with the reason (a negative `APP_*`), and a desktop
+that returns without asking for anything is a shutdown, not the desktop
+again forever.  `DESKTOP.G4A` is read once (`far_read_file`, in slices
+the size of the pool's spare room) and kept below every program's far
+memory, so a return to the desktop is a copy and a relocation, not a
+disk read.  `src/desk/desktop.c` is the v0 desktop: a line of help and
+three keys -- R runs `M11.G4A`, the ABI gate's program; X asks for a
+program that is not there; Q shuts down.
+
+The gate plays the user: R, X, RETURN on the shell's alert, Q; the desk
+and the help line against the model at each stop, the shell's counters
+polled while it is inside the loop, and afterwards the pool back where
+it was and the far heap higher by exactly the desktop's file.  GEM.COM
+was then driven the same way by hand on both product disks
+(`build/gem-sp.atr`, SpartaDOS 3.2; `build/gem-boot.atr`, DOS II+/D):
+GEM, R, Q, the `D1:` prompt back and a DIR working after it.  The
+disks are built by `make` now -- so is `m6split-boot.atr`, after a
+gate run by hand against it compared a stale disk with a fresh linker
+map and reported two bytes wrong in bank `$01`.  A gate's disk must be
+as fresh as its map, and the default target is where that is enforced.
+
+### A fault that was a stack overflow
+
+The first run of M11 under the shell died with `graf_dragbox` "running
+during `wind_open`" -- an AES call nobody had made.  Nobody had: the
+VDI's fill had written `pe_ptr`, its pattern-expansion cache, and
+`pe_ptr` lived at `$320E`, four bytes below the bottom of the 1 KB
+stack, exactly where `gr_rect`'s return address had just been pushed.
+The `rtl` went to `$01:3CD7`, the cached pattern's address plus one,
+which in that build was three bytes into `crysbind`'s AES dispatch:
+`dey; lda ($8e,s),y; jsl gr_dragbox`.  A drag box waits for the button,
+the wait ran with the cursor vector clobbered, and the BRK it ended in
+was at `$0032`.  Nothing in that chain was the bug; the chain was
+`main`, the runner's op, `sh_main`, `app_exec`, the COP handler,
+`gem_entry`, `crysbind`, `wm_open`, `draw_change`, `ob_draw`, `gr_rect`,
+`bb_fill`, the VDI and its fill -- a kilobyte of frames, which is what a
+program running under the shell under the runner costs.  Measured, the
+low-water mark on the R path is 1191 bytes -- and the gate now measures
+it every run: the stack section is painted at the DOS prompt before `M3`
+is typed (the `.xex` writes nothing between `$2100` and `$367F`, and the
+startup zeroes `zdata`, not the stack), read back after `sh_main`
+returns, and the run fails if the first touched byte is within 256 of
+the bottom.  1199 bytes of the 2048 at the last run.
+
+So the stack is 2 KB, and bank `$00` had no 1 KB to give it: LoRAM was
+at 98.7% and Near at 97.9%.  What moved out is bss no interrupt handler
+touches and nothing polls from the host while a DOS call is in flight
+-- the window trees, the message queue, the formatting strings, the
+blit list, 1480 bytes -- into a new section `zwin` at `$4000-$47FF`,
+the first 2 KB of the banked window (`ZWIN` on the definition,
+`src/sys/zwin.h`).  The pool starts at `$4800`, 8 KB under the runner
+and the whole window under GEM.COM (`src/gem4xe.scm`'s `layout`
+function takes the far start and where the pool ends; the runner
+links `(layout #x010000 #x67ff)`, GEM.COM `#x7fff`).  Why the data
+moved and not the stack: on a Rapidus only window 0 runs at full speed
+both ways -- the others read from SRAM and write through to the bus --
+and a stack is written as often as it is read, while what moved is
+read far more than written.
+
+The fault handler learned from this too: `irq_brk`/`irq_abort` park in
+a `wai` loop with POKEY's IRQs off rather than a tight branch, because
+a branch spinning at 20 MHz overwrites the emulator's instruction
+history within a frame, and the last few hundred instructions are what
+a post-mortem needs (the patched emulator's `REGS` and `HISTORY`
+verbs, `tools/altirra/README.md`).
+
+### Virtual workstations
+
+Two of the gate's screen checks failed in mirror image.  After M11 the
+target's desk was right and the model's was solid; after the alert the
+model's was right and the target's was solid.  Both had the same cause:
+one workstation.  The AES caches the attributes it last set --
+`gl_mode`, `gl_fis`, `gl_patt` and the rest, the donor's `gsx_attr` --
+and skips the VDI call when nothing changed, which is only correct if
+nothing else touches its workstation.  M11 opens a workstation and sets
+its own fill, so when the desktop came back the AES believed pattern 4
+was still set and drew the desk with M11's solid fill; the model's
+V_OPNVWK reset the same shared state under its own caches the other
+way round.  Invalidating the caches would have fixed the gate and
+broken every GEM program, which relies on its own attributes surviving
+an AES call.
+
+The VDI now has what the specification says it has: a physical
+workstation and virtual ones (`NUM_VWK` 4, `src/vdi/vdi.c`).  The
+small data model addresses globals absolutely, so there is no pointer
+to swap: `vwk` stays the one workstation every routine reads, and the
+dispatcher copies the right one in and the previous one out when
+`contrl[6]` names another -- the donor's `screen()` looks the handle up
+before every call but open, and does nothing for an unknown one.
+`v_opnvwk` hands out the first free handle above the physical one, from
+its own `intin` (no device reset), and `v_clsvwk` never closes the
+physical one.  The AES draws on the physical workstation
+(`VDI_PHYS_HANDLE`, as EmuTOS's `gsx_start` opens the device itself);
+a program gets the handle from `graf_handle` and opens a virtual one on
+it; `app_free` closes what the program left open.  The user line style
+(`vsl_udsty`) and the user fill pattern are per workstation, and the
+pattern-expansion cache is invalidated when a user-pattern workstation
+is swapped in, since its `patptr` is the same global either way.  The
+model (`tools/vdiref.py`) keeps one attribute set per handle and
+`aesref.py`'s AES calls name the physical one; the gates that draw
+from a program -- m11, m16 -- now do it on handle 2 on both sides.
+
+### The far heap moved by 224 bytes it should not have
+
+The last failure: the far heap ended 7028 bytes above where it started,
+and the desktop's file is 6804.  The 224 were the pointer's three
+remembered forms (3 x 37 words, rounded to the allocator's 4), which
+`graf_mouse` took lazily the first time a form was set -- during the
+shell's alert, with no program loaded, so it stayed.  Had the first
+form been set while a program was loaded, `app_free`'s wind-back of
+the heap would have taken the forms with the program and the next
+load would have written over them.  The AES's far memory is taken at
+start-up, before any program's; that was the rule for `sh_init` and
+`fs_start` already and it is `gsx_start`'s now.
+
+### Sizes that changed on the way
+
+The application ABI's `intin` is 128 words, because `v_opnvwk`'s
+`work_in` is 11 and `vsc_form`'s form is 37 and `v_gtext`'s string is
+whatever it is; a program's near budget (`APP_BSS`, `src/app/gemapp.scm`)
+is 2 KB.  The SpartaDOS product and gate disks are 2048 sectors
+(`SP_SECTORS`): M3.COM and GEM.COM are 95 KB each, and the DOS 2 disk's
+1040 sectors hold one of them, the fixtures and the two `.G4A` files
+with 81 to spare, which is why the shell gate runs on the SpartaDOS
+disk and the products get a disk each.
+
+The bank-`$00` map, as it stands (the one in `src/gem4xe.scm` is the
+authority):
+
+    $2000-$20FF  direct page
+    $2100-$367F  zdata, the 2 KB stack, data          90%
+    $3680-$3FFD  near code and constants              98%
+    $4000-$47FF  zwin: bss the handlers never touch   86%
+    $4800-$67FF  the application pool (to $7FFF under GEM.COM)
+    $6800-$7FFF  the runner's host-poked buffers
+    $8000-$9BFF  MEMAC A; farload's staging at load time

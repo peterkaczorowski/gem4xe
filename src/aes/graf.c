@@ -148,6 +148,9 @@ WORD mul_div_round(WORD m1, WORD m2, WORD d1)
 
 /* Read the workstation's geometry and derive the AES layout constants.
  * Assumes vdi_init() has already opened the physical workstation. */
+static uint32_t gl_mfmem;               /* the pointer's three forms, far:
+                                         * taken in gsx_start, kept below */
+
 void gsx_start(void)
 {
     WORD hpixel, wpixel;
@@ -155,7 +158,14 @@ void gsx_start(void)
     gl_mode = gl_tcolor = gl_lcolor = -1;
     gl_fis = gl_patt = -1;
     gl_moff = 0;
-    gl_handle = vwk.handle;     /* the physical workstation vdi_init opened */
+    gl_handle = VDI_PHYS_HANDLE;    /* the workstation vdi_init opened: the
+                                     * AES draws on the device itself, and
+                                     * an application on a virtual one */
+    if (!gl_mfmem)                  /* the pointer's three forms: once, and
+                                     * now, below any program's memory --
+                                     * app_free returns the heap to where
+                                     * the program found it */
+        gl_mfmem = far_alloc(3UL * GEM_MFORM_WORDS * 2);
 
     /* vq_extnd(0) answers as v_opnwk did: extent and pixel size. */
     gsx_1code(VQ_EXTND, 0);
@@ -236,14 +246,11 @@ void gsx_mon(void)
 #define MF_PREV   1
 #define MF_SAVED  2
 
-static uint32_t gl_mfmem;               /* three forms, far */
 static WORD     gl_mform_set;           /* has one been set at all? */
 
 static uint32_t mf_slot(WORD which)
 {
-    if (!gl_mfmem)
-        gl_mfmem = far_alloc(3UL * GEM_MFORM_WORDS * 2);
-    if (!gl_mfmem)
+    if (!gl_mfmem)                  /* gsx_start could not get them */
         return 0;
     return gl_mfmem + (uint32_t)which * (GEM_MFORM_WORDS * 2);
 }
