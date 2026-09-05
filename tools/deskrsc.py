@@ -79,8 +79,32 @@ NOBS_MKD = 5
 CDBOX, CDTITLE, CDFILES, CDFOLDS, CDOK, CDCNCL = 0, 1, 2, 3, 4, 5
 NOBS_CDEL = 6
 
-# free strings
+# Free strings: the icon labels, and every alert the desktop puts up.
+# No string a person reads belongs in the C -- an alert written as a
+# literal cannot be translated, and the donor does not write them that
+# way either: EmuTOS's desktop keeps them in its resource and asks for
+# them by index (fun_alert, desk/deskfun.c).  The names are the donor's
+# where the donor has the same alert.  docs/shipping.md is the plan the
+# rest of it belongs to; the one alert that cannot come from here is
+# the one that says the resource is missing.
 STDISK, STTRASH = 0, 1
+(STNOMEM, STNOWIND, STDEFDIR, STDELFIL, STDELDIR, STFOFAIL, STFO8DEE,
+ STDEEPPA) = range(2, 10)
+
+# (index, name, text) in index order; the alerts as form_alert parses
+# them -- [icon][the lines, | between][the buttons]
+ALERTS = [
+    (STNOMEM,  "STNOMEM",  "[3][There is no memory|for the windows.][ Quit ]"),
+    (STNOWIND, "STNOWIND", "[1][There are no more|windows available.][ OK ]"),
+    (STDEFDIR, "STDEFDIR", "[1][Failed to set default|directory.][ OK ]"),
+    (STDELFIL, "STDELFIL", "[1][That file cannot be deleted.][ OK ]"),
+    (STDELDIR, "STDELDIR", "[1][That folder cannot be deleted.][ OK ]"),
+    (STFOFAIL, "STFOFAIL", "[1][You cannot create a folder|"
+                           "with that name.][ OK ]"),
+    (STFO8DEE, "STFO8DEE", "[3][You cannot delete a folder|this far down "
+                           "the|directory path.][ OK ]"),
+    (STDEEPPA, "STDEEPPA", "[3][A folder in here has|too long a path.][ OK ]"),
+]
 
 # ICONBLKs, in the order of the table; IG_* name them
 IB_HARD, IB_FLOPPY, IB_TRASH, IB_FOLDER, IB_APPL, IB_DOCU = 0, 1, 2, 3, 4, 5
@@ -105,6 +129,7 @@ INDICES = [
     ("ADDELDIA", ADDELDIA), ("CDFILES", CDFILES), ("CDFOLDS", CDFOLDS),
     ("CDOK", CDOK), ("CDCNCL", CDCNCL),
     ("STDISK", STDISK), ("STTRASH", STTRASH),
+    *[(name, i) for i, name, _ in ALERTS],
     ("IB_HARD", IB_HARD), ("IB_FLOPPY", IB_FLOPPY), ("IB_TRASH", IB_TRASH),
     ("IB_FOLDER", IB_FOLDER), ("IB_APPL", IB_APPL), ("IB_DOCU", IB_DOCU),
 ]
@@ -278,6 +303,8 @@ def build():
     assert delete_tree(r) == ADDELDIA
     assert r.free_string("DISK") == STDISK
     assert r.free_string("TRASH") == STTRASH
+    for i, name, text in ALERTS:
+        assert r.free_string(text) == i, (name, i)
     for ib, ig in IB_TABLE:
         (mask, data, char, xchar, ychar, xicon, yicon, wicon, hicon,
          xtext, ytext, wtext, htext) = deskicons.ICONS[ig]

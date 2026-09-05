@@ -24,6 +24,22 @@
  * scarcest memory (docs/phase14.md, milestone 6). */
 static char op_path[LEN_ZPATH];
 
+/* -- what the desktop says --------------------------------------------- */
+
+/* An alert whose text is a free string of DESKTOP.RSC, by index (the
+ * donor's fun_alert).  No string a person reads is in the C: a literal
+ * cannot be translated, and the resource is where a translator can
+ * reach it -- rsrc_gaddr answers a bank-$00 address, which is what
+ * form_alert wants (docs/shipping.md).  The one exception is the alert
+ * that says the resource is missing (desktop.c). */
+WORD fun_alert(WORD defbut, WORD stnum)
+{
+    char *str;
+
+    rsrc_gaddr(R_STRING, stnum, (void **)&str);
+    return form_alert(defbut, str);
+}
+
 /* -- strings ----------------------------------------------------------- */
 
 static char *put_str(char *d, const char *s)
@@ -189,7 +205,7 @@ static WORD del_file(void)
 {
     if (Fdelete(op_path) == E_OK)
         return TRUE;
-    form_alert(1, "[1][That file cannot be deleted.][ OK ]");
+    fun_alert(1, STDELFIL);
     return FALSE;
 }
 
@@ -205,8 +221,7 @@ static WORD walk(WORD level, WORD counting)
     char *tail;
 
     if (level >= MAX_DELLEVEL) {
-        form_alert(1, "[3][You cannot delete a folder|this far down the|"
-                      "directory path.][ OK ]");
+        fun_alert(1, STFO8DEE);
         return FALSE;
     }
     dta = &G.g_opdta[level];
@@ -216,8 +231,7 @@ static WORD walk(WORD level, WORD counting)
         if (dta->d_fname[0] != '.') {           /* "." and ".." */
             if (dta->d_attrib & FA_SUBDIR) {
                 if (!add_path(op_path, dta->d_fname)) {
-                    form_alert(1, "[3][A folder in here has|too long a "
-                                  "path.][ OK ]");
+                    fun_alert(1, STDEEPPA);
                     return FALSE;
                 }
                 if (!walk((WORD)(level + 1), counting))
@@ -228,7 +242,7 @@ static WORD walk(WORD level, WORD counting)
                 if (counting) {
                     G.g_ndirs++;
                 } else if (Ddelete(op_path) != E_OK) {
-                    form_alert(1, "[1][That folder cannot be deleted.][ OK ]");
+                    fun_alert(1, STDELDIR);
                     return FALSE;
                 } else {
                     G.g_ndirs--;
@@ -294,7 +308,7 @@ void fun_mkdir(WNODE *pw)
     i = (WORD)(Dcreate(op_path) == E_OK);
     desk_busy(FALSE);
     if (!i) {
-        form_alert(1, "[1][You cannot create a folder|with that name.][ OK ]");
+        fun_alert(1, STFOFAIL);
         return;
     }
     win_rebld(pw);
@@ -326,7 +340,7 @@ void fun_del(WNODE *pw)
         put_str(op_path, pw->w_path.p_spec);
         if (pf->f_attr & FA_SUBDIR) {
             if (!add_path(op_path, pf->f_name)) {
-                form_alert(1, "[3][A folder in here has|too long a path.][ OK ]");
+                fun_alert(1, STDEEPPA);
                 ok = FALSE;
                 break;
             }
@@ -366,7 +380,7 @@ void fun_del(WNODE *pw)
             sub_path(op_path);
             tail = add_fname(op_path, pf->f_name);
             if (Ddelete(op_path) != E_OK) {
-                form_alert(1, "[1][That folder cannot be deleted.][ OK ]");
+                fun_alert(1, STDELDIR);
                 break;
             }
             G.g_ndirs--;

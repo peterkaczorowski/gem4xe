@@ -626,7 +626,7 @@ static WORD do_dopen(WORD curr)
 
     pw = win_alloc();
     if (!pw) {
-        form_alert(1, "[1][There are no more|windows available.][ OK ]");
+        fun_alert(1, STNOWIND);
         act_chg(DESKWH, DROOT, curr, FALSE, TRUE);
         return FALSE;
     }
@@ -704,7 +704,7 @@ WORD do_aopen(WNODE *pw, WORD curr, const char __far *name)
     Dsetdrv((WORD)(app_path[0] - 'A'));
     if (Dsetpath(app_path) < 0) {
         desk_busy(FALSE);
-        form_alert(1, "[1][Failed to set default|directory.][ OK ]");
+        fun_alert(1, STDEFDIR);
         return FALSE;
     }
     desk_busy(FALSE);

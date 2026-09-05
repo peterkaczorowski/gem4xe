@@ -952,15 +952,35 @@ built -- and reads the working copy afterwards, checking the
 emulator's own account of its configuration directory against the one
 it looked in.
 
+### The strings, and where they live now
+
+Eleven `form_alert` calls in the desktop carried their text as C
+literals, which is the one thing that cannot be translated.  They are
+free strings of `DESKTOP.RSC` now, asked for by index through
+`fun_alert(defbut, stnum)` -- the donor's shape, and its names where it
+has the same alert -- with `rsrc_gaddr(R_STRING, n)` answering the
+bank-$00 address `form_alert` wants.  Eleven call sites, nine strings:
+two of the texts are used twice, and the resource holds each once.  The
+resource grew 430 bytes; the desktop's near constants shrank by 450,
+which put `DESK_BITS` back to 512 and the near region back to fifteen
+pages.  One alert stays a literal, necessarily: the one that says
+`DESKTOP.RSC` is not on the disk.
+
+`docs/shipping.md` is the plan this belongs to -- `LANG.RSC` for what
+the system says, a per-language resource per application, because a GEM
+dialog's geometry travels with its text.
+
 ### The gate
 
 `tests/emu/m19_files.py` boots a fresh copy of milestone 5's disk and
-drives the desktop through seven stops: the desk, the window on
+drives the desktop through eight stops: the desk, the window on
 `A:\*.*`, the New folder dialog with `NEWDIR` typed into it, the
-listing with the folder in it, `SUB` selected, the delete dialog
-saying three files and two folders, and the listing with `SUB` gone.
-The screens are compared with the model's at every stop, `G` at five
-of them, and the call counts agree: 264 on both sides, none refused.
+listing with the folder in it, the alert when the same name is typed
+again -- "You cannot create a folder with that name", out of the
+resource -- `SUB` selected, the delete dialog saying three files and
+two folders, and the listing with `SUB` gone.  The screens are compared
+with the model's at every stop, `G` at five of them, and the call
+counts agree: 289 on both sides, none refused.
 Then the disk image is read back: `NEWDIR` is there and empty, `SUB`
 and everything under it -- `ONE.TXT`, `TWO.DAT`, `DEEP\THREE.TXT` --
 is gone.  The pool and the far heap come back where they were; the

@@ -266,7 +266,7 @@ build/app_blob.o: build/app_blob.c
 # through tools/iconconv.py, checked in like the font).  The milestone-3
 # desktop (src/m16_desk.c: a line of help, R/X/Q) stays as the stand-in
 # test-m16 drives the shell loop with.
-# The near region is 16 pages: the direct page, the bss, the constants.
+# The near region is 15 pages: the direct page, the bss, the constants.
 # The bss holds the desktop's globals (GLOBES, src/desk/desk.h: the screen
 # tree, the window nodes, the icon records, ~2 KB) and its stack, which
 # is the gate application's 256 bytes and more: the folder window's open
@@ -278,7 +278,7 @@ build/app_blob.o: build/app_blob.c
 DESK_OBJS  = $(G4A_LIB) build/desk/desktop.o build/desk/deskobj.o build/desk/deskwin.o \
              build/desk/deskfun.o
 DESK_BSS   = 2944
-DESK_BITS  = 768
+DESK_BITS  = 512
 DESK_STACK = 640
 DESK_H     = src/app/gem.h src/desk/desk.h build/deskrsc.h
 

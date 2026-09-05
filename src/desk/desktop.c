@@ -289,6 +289,7 @@ int main(void)
 
     if (!rsrc_load("DESKTOP.RSC")) {
         desk_busy(FALSE);
+        /* the one string that cannot come from the resource */
         form_alert(1, "[3][DESKTOP.RSC is not on|the boot disk.][ Quit ]");
         shel_write(SHW_SHUTDOWN, 0, 0, "", "\0");
         appl_exit();
@@ -307,7 +308,7 @@ int main(void)
     desk_build();
     if (!win_start()) {
         desk_busy(FALSE);
-        form_alert(1, "[3][There is no memory|for the windows.][ Quit ]");
+        fun_alert(1, STNOMEM);
         rsrc_free();
         shel_write(SHW_SHUTDOWN, 0, 0, "", "\0");
         appl_exit();

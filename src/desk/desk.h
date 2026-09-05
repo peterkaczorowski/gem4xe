@@ -172,7 +172,8 @@ void app_save(void);
 void cnx_get(void);
 void cnx_put(void);
 
-/* deskfun.c: what the File menu does to files */
+/* deskfun.c: what the desktop says, and what the File menu does to files */
+WORD fun_alert(WORD defbut, WORD stnum);
 void fun_mkdir(WNODE *pw);
 void fun_del(WNODE *pw);
 

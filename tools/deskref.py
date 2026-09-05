@@ -70,7 +70,9 @@ from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA,  # noqa: E402
                      OPENITEM, NFOLITEM, DELTITEM, CLOSITEM, CLSWITEM,
                      QUITITEM, DEVERSN, DEOK,
                      MKNAME, MKOK, CDFILES, CDFOLDS, CDOK,
-                     STDISK, STTRASH, IB_HARD, IB_FLOPPY, IB_TRASH,
+                     STDISK, STTRASH, STNOMEM, STNOWIND, STDEFDIR,
+                     STDELFIL, STDELDIR, STFOFAIL, STFO8DEE, STDEEPPA,
+                     IB_HARD, IB_FLOPPY, IB_TRASH,
                      IB_FOLDER, IB_APPL, IB_DOCU, NOT_YET)
 
 # the two AES calls aesref numbers only in its dispatcher
@@ -380,6 +382,13 @@ class Desktop:
     def end_dialog(self):
         d = self.dlg
         self.call(FORM_DIAL, (FMD_FINISH, 0, 0, 0, 0, d.x, d.y, d.w, d.h))
+
+    def fun_alert(self, defbut, stnum):
+        """deskfun.c fun_alert: the text is a free string of the
+        resource, fetched by index -- so it can be translated -- and
+        rsrc_gaddr answers the bank-$00 address form_alert wants."""
+        addr = self.rsrc_gaddr(R_STRING, stnum)
+        return self.form_alert(defbut, self.a.mem[addr].s)
 
     def busy(self, on):
         self.call(WIND_UPDATE, (BEG_UPDATE,))
@@ -881,7 +890,7 @@ class Desktop:
     def do_dopen(self, curr):
         pw = self.win_alloc()
         if pw is None:
-            self.form_alert(1, "[1][There are no more|windows available.][ OK ]")
+            self.fun_alert(1, STNOWIND)
             self.act_chg(DESKWH, DROOT, curr, False, True)
             return False
         path = chr(self.obj_info(curr).char & 0xFF) + ":\\*.*"
@@ -915,7 +924,7 @@ class Desktop:
         self.a.mem[STACK_STRING] = Text(app_path)
         if self.gemdos_long(DSETPATH, STACK_STRING) < 0:
             self.busy(False)
-            self.form_alert(1, "[1][Failed to set default|directory.][ OK ]")
+            self.fun_alert(1, STDEFDIR)
             return False
         self.busy(False)
         app_path += name
@@ -1202,8 +1211,7 @@ class Desktop:
         ok = self.op_gemdos(DCREATE) == E_OK
         self.busy(False)
         if not ok:
-            self.form_alert(1, "[1][You cannot create a folder|"
-                               "with that name.][ OK ]")
+            self.fun_alert(1, STFOFAIL)
             return
         self.win_rebld(pw)
         return
@@ -1246,8 +1254,7 @@ class Desktop:
         a DTA of its own -- our GEMDOS keeps a search by the DTA that
         owns it, so the nested walk does not disturb this one."""
         if level >= MAX_DELLEVEL:
-            self.form_alert(1, "[3][You cannot delete a folder|this far down "
-                               "the|directory path.][ OK ]")
+            self.fun_alert(1, STFO8DEE)
             return False
         dta = self.opdta + level * DTA_SIZE
         self.call(FSETDTA, (dta & 0xFFFF, dta >> 16))
@@ -1257,8 +1264,7 @@ class Desktop:
             if name[:1] != ".":
                 if attr & FA_SUBDIR:
                     if not self.add_path(name):
-                        self.form_alert(1, "[3][A folder in here has|too long "
-                                           "a path.][ OK ]")
+                        self.fun_alert(1, STDEEPPA)
                         return False
                     if not self.walk(level + 1, counting):
                         return False
@@ -1268,8 +1274,7 @@ class Desktop:
                     if counting:
                         self.ndirs += 1
                     elif self.op_gemdos(DDELETE) != E_OK:
-                        self.form_alert(1, "[1][That folder cannot be "
-                                           "deleted.][ OK ]")
+                        self.fun_alert(1, STDELDIR)
                         return False
                     else:
                         self.ndirs -= 1
@@ -1281,8 +1286,7 @@ class Desktop:
                     if counting:
                         self.nfiles += 1
                     elif self.op_gemdos(FDELETE) != E_OK:
-                        self.form_alert(1, "[1][That file cannot be "
-                                           "deleted.][ OK ]")
+                        self.fun_alert(1, STDELFIL)
                         return False
                     else:
                         self.nfiles -= 1
@@ -1312,8 +1316,7 @@ class Desktop:
             self.op_path = pn.spec.s
             if pf.attr & FA_SUBDIR:
                 if not self.add_path(pf.name):
-                    self.form_alert(1, "[3][A folder in here has|too long a "
-                                       "path.][ OK ]")
+                    self.fun_alert(1, STDEEPPA)
                     ok = False
                     break
                 ok = self.walk(0, True)
@@ -1347,8 +1350,7 @@ class Desktop:
                 self.sub_path()
                 self.add_fname(pf.name)
                 if self.op_gemdos(DDELETE) != E_OK:
-                    self.form_alert(1, "[1][That folder cannot be "
-                                       "deleted.][ OK ]")
+                    self.fun_alert(1, STDELDIR)
                     break
                 self.ndirs -= 1
                 self.inf_numset(tree, CDFOLDS, self.ndirs)
@@ -1357,8 +1359,7 @@ class Desktop:
             else:
                 self.add_fname(pf.name)
                 if self.op_gemdos(FDELETE) != E_OK:
-                    self.form_alert(1, "[1][That file cannot be "
-                                       "deleted.][ OK ]")
+                    self.fun_alert(1, STDELFIL)
                     break
                 self.nfiles -= 1
                 self.inf_numset(tree, CDFILES, self.nfiles)
@@ -1460,7 +1461,7 @@ class Desktop:
         self.desk_build()
         if not self.win_start():
             self.busy(False)
-            self.form_alert(1, "[3][There is no memory|for the windows.][ Quit ]")
+            self.fun_alert(1, STNOMEM)
             self.call(RSRC_FREE)
             self.call(SHEL_WRITE, (SHW_SHUTDOWN, 0, 0))
             self.call(APPL_EXIT)

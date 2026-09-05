@@ -45,7 +45,7 @@ full-screen repaints.
 | `make test-m16` | PASS | the shell loop: DESKTOP.G4A loaded and run, a program run from it and the desktop back, a missing program's alert, shutdown -- the screen against the reference at each stop, the pool and the far heap back where they were, the stack's low-water mark (1199 of 2048 bytes); the VDI's virtual workstations (one per program) under it. GEM.COM, the product, does the same from the DOS prompt and returns to it |
 | `make test-m17` | PASS | the GEM Desktop: DESKTOP.G4A's menu bar, drive icons and trash, an icon clicked, Desk -> About and its dialog, a drive opened into a folder window, a folder opened in it and closed back out, the fuller, the arrows, the closer, File -> Quit -- driven at the mouse and checked against `tools/deskref.py`, the desktop itself transcribed against the AES model, its directory listings answered from the disk image: thirteen screens, the desktop's 1984 bytes of globals byte for byte at nine of them, 252 calls on both sides, the pool and far heap back, the runner's and the desktop's stack low-water marks (1223 of 2048, 292 of 640) |
 | `make test-m18` | PASS | a program run from the desktop: drive A opened, the window full, M11.G4A double-clicked -- the desktop puts its window's place in the shell buffer as DESKTOP.INF text and exits, the shell runs the program, the desktop comes back and opens the window where it was, File -> Quit -- the desktop transcribed twice against one AES model with the program's calls counted between: six screens, `G` at four waits, 275 calls over the three programs, the pool and far heap back, each run's stack low-water mark (425 and 268 of 640) |
-| `make test-m19` | PASS | the desktop's first writes to a disk: File -> New folder, the name typed into its dialog, `Dcreate`, the folder in the listing; the SUB folder selected and File -> Delete, counted first (three files, two folders, the walk a DTA deep per level), confirmed in a dialog whose counts tick down, and the tree gone -- seven screens, `G` at five waits, 264 calls on both sides, and the disk image itself read back afterwards |
+| `make test-m19` | PASS | the desktop's first writes to a disk: File -> New folder, the name typed into its dialog, `Dcreate`, the folder in the listing; the same name again, refused, and the alert -- text and all -- out of DESKTOP.RSC's free strings; the SUB folder selected and File -> Delete, counted first (three files, two folders, the walk a DTA deep per level), confirmed in a dialog whose counts tick down, and the tree gone -- eight screens, `G` at five waits, 289 calls on both sides, and the disk image itself read back afterwards |
 | `make test-m14u` `test-m15u` | PASS | the same two on SpartaDOS X 4.49b booted from a real Ultimate 1MB flash image, U1MB switched on -- needs the patched emulator in `tools/altirra/`, so not in `make test` |
 | `make check-cc` | PASS | the ten compiler bugs worked around, in the vendor's simulator |
 | `make movie` | PASS | a session with the AES itself, filmed frame by frame and checked as a gate: `build/movie/gem4xe.mp4` |
@@ -233,10 +233,12 @@ hard disk with APT partitions, which SpartaDOS X drives and Altirra
 emulates (`side2`, `side3`, `kmkjzide`, `myide`); the floppy becomes a
 bootstrap, and the disks that exist should at least come up in the
 desktop (`AUTORUN.SYS` on DOS 2, `AUTOEXEC.BAT` under SpartaDOS) rather
-than at a prompt. And **no string a person reads belongs in the C**:
-eleven of the desktop's alerts still are, where the donor keeps them as
-free strings in the resource, which is the seam a translation needs. The
-plan is a `LANG.RSC` for what the system says — far-resident, copied a
+than at a prompt. **No string a person reads belongs in the C**, and none does
+now: the desktop's eleven alerts are nine free strings of DESKTOP.RSC,
+asked for by index (`fun_alert`, the donor's shape), and the gate puts
+one on the screen and compares it. The one exception is the alert that
+says the resource is missing, which cannot come from the resource. Next
+is a `LANG.RSC` for what the *system* says — far-resident, copied a
 string at a time into a near buffer, since bank $00 is the scarce thing
 — beside a per-language resource for each application, because a GEM
 dialog's geometry travels with its text.

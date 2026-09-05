@@ -113,16 +113,26 @@ is what carries arguments -- both already true.
 
 ## 5. Localization: `LANG.RSC`
 
-**The rule: no string a person reads is in the C.**  Today eleven are
-(`grep form_alert src/desk/*.c`) -- the desktop's alerts, written as
-literals while the milestones were about mechanism.  The donor does not
-do that: EmuTOS's desktop keeps them as *free strings* in its resource
-and asks for them by index (`fun_alert(1, STDELDIR)`), which is exactly
-the seam a translator needs.  Our resource builder already makes free
-strings (`tools/rsc.py`'s `free_string`, `R_FRSTR`) and the AES already
-resolves them (`rsrc_gaddr(R_STRING, n)`), so moving the eleven is a
-small, self-contained milestone -- and the last chance to do it cheaply,
-because every milestone after this one adds more.
+**The rule: no string a person reads is in the C.**  Eleven were, when
+this was written -- the desktop's alerts, written as literals while the
+milestones were about mechanism -- and they are not any more.  The
+donor's shape is the one they moved into: EmuTOS's desktop keeps them
+as *free strings* in its resource and asks for them by index
+(`fun_alert(1, STDELDIR)`), our builder already made free strings
+(`tools/rsc.py`'s `free_string`) and the AES already resolved them
+(`rsrc_gaddr(R_STRING, n)` answers a bank-$00 address, which is what
+`form_alert` wants).  Eleven call sites became **nine strings** -- two
+of the texts were used twice -- with the donor's names where the donor
+has the same alert (`STNOWIND`, `STDEFDIR`, `STDELFIL`, `STDELDIR`,
+`STFOFAIL`, `STFO8DEE`, `STDEEPPA`), and `test-m19` puts one on the
+screen (New folder, the name it already has) and compares it against
+the model.  The resource grew 430 bytes and the desktop's near
+constants shrank by 450, which gave a page of the pool back.
+
+**One string cannot come from the resource**: the alert that says
+`DESKTOP.RSC` is not on the disk.  It stays a literal in `desktop.c`,
+with a comment saying why -- and it is the one line a translator will
+have to accept in English.
 
 The split, once they are out of the C:
 
@@ -172,9 +182,8 @@ real one).
 Nothing above blocks the desktop's remaining features, but two pieces
 are cheapest now and dear later:
 
-1. **The eleven strings out of the C and into `DESKTOP.RSC`'s free
-   strings**, with `fun_alert(defbut, index)` in the donor's shape.  A
-   milestone of its own, or the first half of the next one.
+1. ~~The eleven strings out of the C and into `DESKTOP.RSC`'s free
+   strings~~ -- done, above.
 2. **`AUTOEXEC.BAT` on the SpartaDOS product disk and `AUTORUN.SYS` on
    the DOS 2 one**, so the disks that already exist boot into the
    desktop rather than to a prompt.

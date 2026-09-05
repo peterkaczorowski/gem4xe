@@ -37,7 +37,7 @@ from deskref import Desktop, DROOT, GLOBES_SIZE, LEN_ZPATH  # noqa: E402
 from deskrsc import (FILEMENU, NFOLITEM, DELTITEM, QUITITEM,  # noqa: E402
                      MKOK, CDOK)
 from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE,  # noqa: E402
-                     F, B, K, DCLICK, drive, compare)
+                     F, B, K, RETURN, DCLICK, drive, compare)
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
 from m12_file import Runner                 # noqa: E402
 from m13_alert import ALLOC                 # noqa: E402
@@ -62,8 +62,8 @@ CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME",
                           "altirra")
 NEWDIR = "NEWDIR"                           # the folder the gate makes
 KILLDIR = "SUB"                             # ...and the tree it deletes
-STOPS = ["desktop", "window-a", "new-folder", "made", "selected",
-         "delete", "deleted"]
+STOPS = ["desktop", "window-a", "new-folder", "made", "exists",
+         "selected", "delete", "deleted"]
 
 
 def inputs(memo):
@@ -93,16 +93,31 @@ def inputs(memo):
                 *path(d.pointer(), ok), F(4), B(1), F(14), B(0)]
 
     def made(d):
-        # the folder is in the listing: one click selects SUB
-        pw = d.win_ontop()
-        sub = d.item(pw, KILLDIR)
-        return [F(3), probe(d), SHOT, *path(d.pointer(), sub), F(4), B(1),
-                F(2), B(0), F(14)]
+        # the folder is in the listing: New folder again, with the name
+        # it already has, to see what the desktop says about it
+        return [F(3), probe(d), SHOT, *menu(d, FILEMENU, NFOLITEM, False)[1:]]
+
+    def again(d):
+        # the same dialog, the same name: Dcreate refuses it
+        ok = d.centre(d.a_mkdir, MKOK)
+        return [F(3), B(0), F(2), *[K(c, ord(c.lower())) for c in NEWDIR],
+                F(2), *path(d.pointer(), ok), F(4), B(1), F(14), B(0)]
+
+    def exists(d):
+        # the alert, whose text is a free string of DESKTOP.RSC
+        # (STFOFAIL): RETURN takes its default button
+        return [F(3), SHOT, K("RETURN", RETURN)]
 
     def selected(d):
+        # one click selects SUB
+        pw = d.win_ontop()
+        sub = d.item(pw, KILLDIR)
+        return [F(3), probe(d), *path(d.pointer(), sub), F(4), B(1),
+                F(2), B(0), F(14)]
+
+    def chosen(d):
         # File -> Delete: the count pass runs before the dialog
-        return [F(3), probe(d), SHOT,
-                *menu(d, FILEMENU, DELTITEM, False)[1:]]
+        return [F(3), SHOT, *menu(d, FILEMENU, DELTITEM, False)[1:]]
 
     def delete(d):
         # form_do on ADDELDIA: what it counted, then OK
@@ -113,7 +128,8 @@ def inputs(memo):
     def deleted(d):
         return [F(3), probe(d), SHOT, *menu(d, FILEMENU, QUITITEM, False)[1:]]
 
-    return [desktop, window_a, new_folder, made, selected, delete, deleted]
+    return [desktop, window_a, new_folder, made, again, exists, selected,
+            chosen, delete, deleted]
 
 
 def model(mark, brk, pointer, drvmap):
