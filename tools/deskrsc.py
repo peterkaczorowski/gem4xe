@@ -42,13 +42,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rsc                                  # noqa: E402
 from rsc import ch, NIL                     # noqa: E402
-from aesref import (G_BOX, G_IBOX, G_STRING, G_BUTTON, G_TITLE, NONE,  # noqa: E402
-                    NORMAL, SELECTABLE, DEFAULT, EXIT, DISABLED,
-                    OUTLINED, CHECKED, LASTOB)
+from aesref import (G_BOX, G_IBOX, G_STRING, G_BUTTON, G_TITLE, G_FTEXT,  # noqa: E402
+                    NONE, NORMAL, SELECTABLE, DEFAULT, EXIT, DISABLED,
+                    EDITABLE, OUTLINED, CHECKED, LASTOB)
 import deskicons                            # noqa: E402
 
 # -- trees ---------------------------------------------------------------------
-ADMENU, ADDINFO = 0, 1
+ADMENU, ADDINFO, ADMKDBOX, ADDELDIA = 0, 1, 2, 3
 
 # ADMENU objects, in the donor's names where the donor has the item
 ROOT, THEBAR, THEACTIVE = 0, 1, 2
@@ -71,6 +71,14 @@ NOBS_MENU = 48
 DEBOX, DETITLE, DEVERSN, DEOK = 0, 1, 5, 13
 NOBS_INFO = 14
 
+# ADMKDBOX objects, the donor's names (desk_rsc.h)
+MKBOX, MKTITLE, MKNAME, MKOK, MKCNCL = 0, 1, 2, 3, 4
+NOBS_MKD = 5
+
+# ADDELDIA objects: the donor's ADCPALER cut to what a delete shows
+CDBOX, CDTITLE, CDFILES, CDFOLDS, CDOK, CDCNCL = 0, 1, 2, 3, 4, 5
+NOBS_CDEL = 6
+
 # free strings
 STDISK, STTRASH = 0, 1
 
@@ -92,6 +100,10 @@ INDICES = [
     ("FITITEM", FITITEM), ("IICNITEM", IICNITEM), ("IAPPITEM", IAPPITEM),
     ("PREFITEM", PREFITEM), ("READITEM", READITEM), ("SAVEITEM", SAVEITEM),
     ("DEVERSN", DEVERSN), ("DEOK", DEOK),
+    ("ADMKDBOX", ADMKDBOX), ("MKNAME", MKNAME), ("MKOK", MKOK),
+    ("MKCNCL", MKCNCL),
+    ("ADDELDIA", ADDELDIA), ("CDFILES", CDFILES), ("CDFOLDS", CDFOLDS),
+    ("CDOK", CDOK), ("CDCNCL", CDCNCL),
     ("STDISK", STDISK), ("STTRASH", STTRASH),
     ("IB_HARD", IB_HARD), ("IB_FLOPPY", IB_FLOPPY), ("IB_TRASH", IB_TRASH),
     ("IB_FOLDER", IB_FOLDER), ("IB_APPL", IB_APPL), ("IB_DOCU", IB_DOCU),
@@ -99,7 +111,7 @@ INDICES = [
 
 # The items the desktop does not do yet: disabled at start (menu_ienable),
 # not in the file, so the file stays RCS-shaped.
-NOT_YET = (SHOWITEM, NFOLITEM, DELTITEM,
+NOT_YET = (SHOWITEM,
            FORMITEM, TEXTITEM, NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM,
            NSRTITEM, FITITEM, IICNITEM, IAPPITEM, PREFITEM, READITEM,
            SAVEITEM)
@@ -137,6 +149,20 @@ ABOUT = [
     ("See COPYING for the details", 6, 14),
 ]
 ABOUT_W, ABOUT_H = 40, 18
+
+# The two dialogs the file operations put up, in the donor's shape
+# (ADMKDBOX, and ADCPALER cut to what a delete shows).  The templates'
+# underscores size the text buffers rsc.ted() makes, and each buffer
+# holds that many spaces in the file, because the AES sets te_txtlen
+# from the text's length at load (rsrc.c, the donor's fix_tedinfo_std)
+# and an empty buffer would leave the field one character long.  "F" is
+# the AES's filename class -- it admits no dot, which is why the donor's
+# template has one of its own -- and "9" its digits.
+MKD_W, MKD_H = 32, 7
+MKD_TMPL, MKD_VALID = "Name: ________.___", "F"    # 11 places, 8 and 3
+CDEL_W, CDEL_H = 34, 9
+CDEL_FILES = "Number of files:   _____"
+CDEL_FOLDS = "Number of folders: _____"
 
 
 def menu_tree(r):
@@ -199,10 +225,57 @@ def info_tree(r):
     return r.tree(objs)
 
 
+def mkdir_tree(r):
+    """ADMKDBOX: the name of a new folder, typed into an editable field.
+    The donor's is 30 characters wide with the field indented one; ours
+    is two wider so the template fits our 8-pixel cells."""
+    objs = [
+        (NIL, MKTITLE, MKCNCL, G_BOX, NONE, OUTLINED, 0x00021100,
+         ch(0), ch(0), ch(MKD_W), ch(MKD_H)),
+        (MKNAME, NIL, NIL, G_STRING, NONE, NORMAL, r.string("NEW FOLDER"),
+         ch(11), ch(1), ch(10), ch(1)),
+        (MKOK, NIL, NIL, G_FTEXT, EDITABLE, NORMAL,
+         r.ted(" " * MKD_TMPL.count("_"), MKD_TMPL, MKD_VALID),
+         ch(6), ch(3), ch(len(MKD_TMPL)), ch(1)),
+        (MKCNCL, NIL, NIL, G_BUTTON, SELECTABLE | DEFAULT | EXIT, NORMAL,
+         r.string("OK"), ch(5), ch(5), ch(9), ch(1)),
+        (ROOT, NIL, NIL, G_BUTTON, SELECTABLE | EXIT | LASTOB, NORMAL,
+         r.string("Cancel"), ch(18), ch(5), ch(9), ch(1)),
+    ]
+    assert len(objs) == NOBS_MKD, (len(objs), NOBS_MKD)
+    return r.tree(objs)
+
+
+def delete_tree(r):
+    """ADDELDIA: what a delete is about to do, counted first -- the
+    donor's copy/delete dialog with the fields it fills in for a
+    delete, and its counts tick down as the walk goes."""
+    objs = [
+        (NIL, CDTITLE, CDCNCL, G_BOX, NONE, OUTLINED, 0x00021100,
+         ch(0), ch(0), ch(CDEL_W), ch(CDEL_H)),
+        (CDFILES, NIL, NIL, G_STRING, NONE, NORMAL, r.string("DELETE FILE(S)"),
+         ch(10), ch(1), ch(14), ch(1)),
+        (CDFOLDS, NIL, NIL, G_FTEXT, NONE, NORMAL,
+         r.ted(" " * CDEL_FILES.count("_"), CDEL_FILES, "9"),
+         ch(5), ch(3), ch(len(CDEL_FILES)), ch(1)),
+        (CDOK, NIL, NIL, G_FTEXT, NONE, NORMAL,
+         r.ted(" " * CDEL_FOLDS.count("_"), CDEL_FOLDS, "9"),
+         ch(5), ch(4), ch(len(CDEL_FOLDS)), ch(1)),
+        (CDCNCL, NIL, NIL, G_BUTTON, SELECTABLE | DEFAULT | EXIT, NORMAL,
+         r.string("OK"), ch(6), ch(6), ch(9), ch(1)),
+        (ROOT, NIL, NIL, G_BUTTON, SELECTABLE | EXIT | LASTOB, NORMAL,
+         r.string("Cancel"), ch(19), ch(6), ch(9), ch(1)),
+    ]
+    assert len(objs) == NOBS_CDEL, (len(objs), NOBS_CDEL)
+    return r.tree(objs)
+
+
 def build():
     r = rsc.Rsc()
     assert menu_tree(r) == ADMENU
     assert info_tree(r) == ADDINFO
+    assert mkdir_tree(r) == ADMKDBOX
+    assert delete_tree(r) == ADDELDIA
     assert r.free_string("DISK") == STDISK
     assert r.free_string("TRASH") == STTRASH
     for ib, ig in IB_TABLE:
@@ -238,8 +311,9 @@ def main(argv):
         f.write(data)
     with open(argv[2], "w") as f:
         f.write(c_header(data))
-    print(f"{argv[1]}: {len(data)} bytes, {NOBS_MENU} + {NOBS_INFO} objects, "
-          f"{len(IB_TABLE)} icons; {argv[2]}")
+    print(f"{argv[1]}: {len(data)} bytes, "
+          f"{NOBS_MENU} + {NOBS_INFO} + {NOBS_MKD} + {NOBS_CDEL} objects in "
+          f"four trees, {len(IB_TABLE)} icons; {argv[2]}")
     return 0
 
 

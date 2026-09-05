@@ -77,11 +77,22 @@ extern unsigned int _fl_running_bank(void);
 /* From src/crt_atari.s -- back to DOS; never returns. */
 extern void _sys_exit(void);
 
+/* The three staging buffers are the gate rig's, not the driver's, and
+ * they share the banked window with the application pool: what they do
+ * not take, a loaded application and its resource can have.  The
+ * conformance gates need them full size; the desktop gates need a few
+ * calls' worth and a pool the size of GEM.COM's, so build/m3desk.xex is
+ * this same runner compiled with the three sizes cut and linked with
+ * the pool ending where its staging begins (the Makefile). */
+#ifndef SCRIPT_WORDS
 #define SCRIPT_WORDS 1024
+#endif
 __attribute__((section("teststage")))
 volatile WORD vdi_script[SCRIPT_WORDS];
 
+#ifndef SCRATCH_BYTES
 #define SCRATCH_BYTES 2048
+#endif
 __attribute__((section("teststage")))
 volatile unsigned char vdi_scratch[SCRATCH_BYTES];
 
@@ -93,7 +104,9 @@ volatile unsigned char vdi_scratch[SCRATCH_BYTES];
  * eight-word message a MU_MESAG delivered (tools/vdiref.py RESULT_WORDS). */
 #define RESULT_WORDS 20
 #define RESULT_INTOUT 15
+#ifndef MAX_RESULTS
 #define MAX_RESULTS  48
+#endif
 __attribute__((section("teststage")))
 volatile WORD vdi_results[MAX_RESULTS * RESULT_WORDS];
 /* The count is the one word the host polls WHILE a call runs, so it

@@ -1,0 +1,447 @@
+#!/usr/bin/env python3
+"""Phase 14, milestone 7 gate: the desktop's first writes to a disk.
+
+The desktop from milestones 4 to 6, driven at the mouse and the
+keyboard through two operations that change what is on the disk:
+
+  File -> New folder puts up ADMKDBOX, the name typed into its editable
+  field ("NEWDIR"), OK -> Dcreate, and the window lists the folder that
+  was not there before;
+
+  the SUB folder selected, File -> Delete counts what it is about to do
+  (the donor's OP_COUNT pass: the folders inside folders walked, a DTA
+  per level), says so in ADDELDIA -- three files, two folders -- and on
+  OK deletes them, the counts ticking down as they go, and the window
+  lists what is left.
+
+Everything milestone 5's gate checks is checked here (the screens
+against the model, G byte for byte at every stop, the call count, the
+pool and the far heap, the stack), and one thing more: the disk image
+itself, read back with tools/atr.py when the run is over.  The gate
+runs on a COPY of the milestone-5 disk, made afresh for every run,
+because this is the first gate whose target rewrites the directory it
+booted from.
+"""
+import hashlib
+import os
+import shutil
+import sys
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from a8test.launcher import launch          # noqa: E402
+import aesref, vdiref, vbxeref, symfile, atr    # noqa: E402
+import deskref                              # noqa: E402
+from deskref import Desktop, DROOT, GLOBES_SIZE, LEN_ZPATH  # noqa: E402
+from deskrsc import (FILEMENU, NFOLITEM, DELTITEM, QUITITEM,  # noqa: E402
+                     MKOK, CDOK)
+from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE,  # noqa: E402
+                     F, B, K, DCLICK, drive, compare)
+from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
+from m12_file import Runner                 # noqa: E402
+from m13_alert import ALLOC                 # noqa: E402
+from m14_sparta import boot, screen         # noqa: E402
+from m16_shell import SHELL                 # noqa: E402
+from m17_desktop import (DISK as SRC_DISK, DESKTOP, DESK_SYM, SYMS,  # noqa: E402
+                         SHOT, PROBE, DRVBYT, header, listing, menu)
+from demo_aes import path                   # noqa: E402
+
+DISK = os.path.abspath(os.path.join(ROOT, "build", "m19-run.atr"))
+# Where the emulator keeps what a run writes.  Mounted --bootrw,
+# AltirraSDL does not write the file it was given: it copies it to
+# `<config>/disk_state/<the image's SHA-256>/pristine.atr` and mounts a
+# working copy, `disk.atr`, beside it (its src/AltirraSDL/source/app/
+# disk_state.cpp, ATResolveDiskMount) -- and reuses that copy on every
+# later mount of the same bytes.  So the gate drops the pair before it
+# starts, and reads the working copy afterwards; the emulator's log says
+# which configuration directory it chose, and the gate checks it against
+# this one rather than trusting it.
+CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME",
+                                         os.path.expanduser("~/.config")),
+                          "altirra")
+NEWDIR = "NEWDIR"                           # the folder the gate makes
+KILLDIR = "SUB"                             # ...and the tree it deletes
+STOPS = ["desktop", "window-a", "new-folder", "made", "selected",
+         "delete", "deleted"]
+
+
+def inputs(memo):
+    """The step producers, one per wait the desktop blocks in, as
+    milestone 5's gate has them: `memo` collects G at each."""
+    def probe(d):
+        memo.setdefault("globes", []).append(d.globes())
+        return PROBE
+
+    def desktop(d):
+        # the desk is up: two clicks on drive A's icon opens its window
+        icon = d.centre(d.g_screen_addr, d.screen[DROOT].ob_head)
+        return [F(3), probe(d), SHOT, *path(d.pointer(), icon), F(4),
+                *DCLICK(icon)]
+
+    def window_a(d):
+        # the window on A:\*.*: File -> New folder
+        memo["wh"] = d.win_ontop().id
+        return [F(3), probe(d), SHOT, *menu(d, FILEMENU, NFOLITEM, False)[1:]]
+
+    def new_folder(d):
+        # form_do on ADMKDBOX, entered with the button still down from
+        # the item: the name typed, then OK
+        ok = d.centre(d.a_mkdir, MKOK)
+        return [F(3), B(0), F(2),
+                *[K(c, ord(c.lower())) for c in NEWDIR], F(2), SHOT,
+                *path(d.pointer(), ok), F(4), B(1), F(14), B(0)]
+
+    def made(d):
+        # the folder is in the listing: one click selects SUB
+        pw = d.win_ontop()
+        sub = d.item(pw, KILLDIR)
+        return [F(3), probe(d), SHOT, *path(d.pointer(), sub), F(4), B(1),
+                F(2), B(0), F(14)]
+
+    def selected(d):
+        # File -> Delete: the count pass runs before the dialog
+        return [F(3), probe(d), SHOT,
+                *menu(d, FILEMENU, DELTITEM, False)[1:]]
+
+    def delete(d):
+        # form_do on ADDELDIA: what it counted, then OK
+        ok = d.centre(d.a_delete, CDOK)
+        return [F(3), B(0), F(2), SHOT, *path(d.pointer(), ok), F(4),
+                B(1), F(14), B(0)]
+
+    def deleted(d):
+        return [F(3), probe(d), SHOT, *menu(d, FILEMENU, QUITITEM, False)[1:]]
+
+    return [desktop, window_a, new_folder, made, selected, delete, deleted]
+
+
+def model(mark, brk, pointer, drvmap):
+    """The prelude and the desktop against the model, as milestone 5's
+    gate builds it (m17_desktop.model), with this gate's inputs."""
+    v, a, want = aesref.run(PRELUDE, [], {}, pointer=pointer, pool=mark)
+    v.close_virtuals()
+    a.wm_init()
+    a.mn_init()
+    a.ratinit()
+    a.tree = a.W_TREE
+    a.draw(0, 0, (0, 0, a.gl_width, a.gl_height))
+    link_near, near_size, far_banks = header(DESKTOP)
+    desk_len = (os.path.getsize(DESKTOP) + 3) & ~3
+    a.dos_brk = ((brk + desk_len + 0xFFFF) & ~0xFFFF) + (far_banks << 16)
+    a.dos_dirs = listing(DISK)
+    # A folder SpartaDOS X has just made measures 0 in its parent's
+    # entry -- measured here, against the 23 (one entry) the host's own
+    # mkdir writes -- and the window's information line counts it, so
+    # the model's fresh directory measures 0 as well.
+    a.dos_newdir = 0
+    g_link = symfile.load(DESK_SYM)["G"]
+    memo = {}
+    d = Desktop(v, a, mark, link_near, near_size, g_link, drvmap, inputs(memo))
+    d.main()
+    return v, a, want, d, memo
+
+
+def fresh_disk():
+    """A copy of milestone 5's disk, and the emulator's own working copy
+    of it dropped, so the run starts from the fixture as built.  Returns
+    where the run's writes will land."""
+    shutil.copyfile(SRC_DISK, DISK)
+    with open(DISK, "rb") as f:
+        sha = hashlib.sha256(f.read()).hexdigest()
+    state = os.path.join(CONFIG_DIR, "disk_state", sha)
+    if os.path.isdir(state):
+        shutil.rmtree(state)                # this image's, by its own hash
+    return os.path.join(state, "disk.atr")
+
+
+def check_disk(check, written):
+    """What the run left on the disk, read back from the image."""
+    if not os.path.exists(written):
+        check(False, f"the emulator wrote no working copy at {written}")
+        return
+    fs = atr.Sdfs(atr.ATRImage.load(written))
+    names = {e.filename.upper(): e for e in fs.entries("")}
+    check(NEWDIR in names, f"{NEWDIR} is not in the image's root")
+    if NEWDIR in names:
+        e = names[NEWDIR]
+        check(e.is_dir, f"{NEWDIR} is on the disk but is not a folder")
+        if e.is_dir:
+            left = [x.filename for x in fs.entries(NEWDIR)]
+            check(not left, f"the new folder is not empty: {left}")
+    check(KILLDIR not in names,
+          f"{KILLDIR} is still in the image's root after the delete")
+    print(f"  the image afterwards: {sorted(names)}")
+
+
+def main(argv):
+    keep = "--shot" in argv
+    written = fresh_disk()
+    syms = symfile.load(SYMS)
+    fails = []
+
+    def check(cond, msg):
+        if not cond:
+            fails.append(msg)
+            print(f"  FAIL: {msg}")
+
+    calls, ptr = syms["gem_calls"], syms["ptr_state"]
+    desk_len = (os.path.getsize(DESKTOP) + 3) & ~3
+    os.makedirs(SHOTDIR, exist_ok=True)
+    shots = []
+
+    def shot(b, name):
+        p = os.path.join(SHOTDIR, f"m19-{name}.png")
+        b.screenshot(p)
+        shots.append(p)
+        return p
+
+    def map_range(path_, name):
+        ln = [ln for ln in open(os.path.join(ROOT, "build", path_))
+              if ln.startswith(name + " ")][0].split()
+        return tuple(int(x, 16) for x in ln[1].split("-"))
+
+    stk_lo, stk_hi = map_range("m3desk.map", "stack")
+    dstk = map_range("desktop.map", "stack")         # at the link's near base
+    dlink = map_range("desktop.map", "AppDP")[0]
+    PAINT, MARGIN, DESK_MARGIN = 0xA5, 256, 64
+
+    def paint(b):
+        b.memload(stk_lo, bytes([PAINT]) * (stk_hi - stk_lo + 1))
+
+    def low_water(b):
+        dmp = b.memdump(stk_lo, stk_hi - stk_lo + 1)
+        for i, x in enumerate(dmp):
+            if x != PAINT:
+                return stk_lo + i
+        return stk_hi + 1
+
+    # --bootrw: the writes go to the image.  Altirra's default for a
+    # mounted disk is virtual read/write -- the guest sees its writes and
+    # the file never changes -- which is right for every other gate and
+    # wrong for this one, whose point is what ends up on the disk.
+    emu = launch(tag="m19", memsize="1088K",
+                 extra_args=["--bootrw", "--disk", DISK])
+    b = emu.bridge
+    try:
+        t, st = boot(b, prepare=paint)
+        if st is None:
+            print("FAIL: the runner did not come up")
+            for ln in screen(b):
+                if ln.strip():
+                    print("   |" + ln)
+            return 1
+        print(f"  M3.COM loaded and running {t} frames after RETURN")
+        kind = st[8]
+        drvmap = 0x03 if kind else (b.peek(DRVBYT) or 1)
+        r = Runner(b, syms)
+        r.run(PRELUDE)
+        rec = r.run([(ALLOC, (), ())])[0][2:]
+        mark, room, brk = rec[6] & 0xFFFF, rec[7], (rec[8] & 0xFFFF) | (rec[9] << 16)
+        print(f"before: pool ${mark:04X}, {room} free; far brk ${brk:06X}; "
+              f"DOS kind {kind}, drive map {drvmap:#04x}")
+
+        pointer = (b.peek16(ptr), b.peek16(ptr + 2))
+        ref_v, ref_a, want, d, memo = model(mark, brk, pointer, drvmap)
+        script = d.script
+        print(f"  the model's desktop: {len(script)} calls, waits at {d.waits}, "
+              f"near ${d.near:04X}, G ${d.G:04X}, arena ${d.dta:06X}; "
+              f"{len(ref_a.shots)} screens")
+        check(len(ref_a.shots) == len(STOPS),
+              f"the model took {len(ref_a.shots)} shots, not {len(STOPS)}")
+
+        stage = PRELUDE + [(SHELL, (), ())]
+        words = aesref.encode(stage, 0)
+        b.memload(r.sa, b"".join(
+            (x if x < 32768 else x - 65536).to_bytes(2, "little", signed=True)
+            for x in words))
+        b.poke(STATUS + ST_DONE, 0)
+        poke16(b, r.count, NOT_STARTED)
+        poke16(b, calls, 0)
+        b.poke(STATUS + ST_GO, 1)
+
+        def read():
+            return (b.peek16(calls) - 1) & 0xFFFF
+
+        first = d.waits[0]
+        for t in range(0, 4000, 5):
+            n = read()
+            if n != NOT_STARTED and n >= first:
+                break
+            b.frames(5)
+        else:
+            check(False, f"the desktop did not reach its first wait (call {read()})")
+            return 1
+        check(n == first, f"the desktop is in call {n}, not its first wait {first}")
+        print(f"  the desktop up {t} frames after GO, in call {n}")
+
+        # its stack, painted below where it stands at this wait
+        app_s = b.peek16(b.peek16(syms["gem_api_sp"]) - 1)
+        dstk_lo, dstk_hi = (x + d.near - dlink for x in dstk)
+        check(dstk_lo <= app_s <= dstk_hi,
+              f"the desktop's S ${app_s:04X} is off its stack "
+              f"${dstk_lo:04X}-${dstk_hi:04X}")
+        b.memload(dstk_lo, bytes([PAINT]) * (app_s + 1 - dstk_lo))
+
+        def desk_low_water(bb):
+            dmp = bb.memdump(dstk_lo, dstk_hi - dstk_lo + 1)
+            for i, x in enumerate(dmp):
+                if x != PAINT:
+                    return dstk_lo + i
+            return dstk_hi + 1
+
+        probes = iter(enumerate(memo["globes"]))
+
+        def probe(bb):
+            k, want_g = next(probes)
+            got = bb.memdump(d.G, GLOBES_SIZE)
+            if got == want_g:
+                print(f"  G at ${d.G:04X}, probe {k} (call {read()}): "
+                      f"{GLOBES_SIZE} bytes as the model has them")
+                return
+            bad = [i for i in range(GLOBES_SIZE) if got[i] != want_g[i]]
+            field = [f for f, _ in deskref.GLOBES
+                     if deskref.g_offset(f) <= bad[0]][-1]
+            check(False, f"G at probe {k} (call {read()}) differs at {len(bad)} "
+                         f"byte(s), first at +{bad[0]} ({field} +"
+                         f"{bad[0] - deskref.g_offset(field)}): target "
+                         f"{got[bad[0]:bad[0] + 8].hex()} model "
+                         f"{want_g[bad[0]:bad[0] + 8].hex()}")
+
+        stops = iter(STOPS)
+
+        def take(bb):
+            shot(bb, next(stops))
+
+        plan = {k: [("shot", take) if s == SHOT else
+                    ("probe", probe) if s == PROBE else s for s in v]
+                for k, v in d.plan.items()}
+        err = drive(b, None, ptr, plan, read=read)
+        check(not err, f"driving the desktop: {err}")
+        if err:
+            # where it stuck: the screen, what the delete had counted,
+            # which call the target is inside, the path the operation
+            # was working on, and the last few frames of history (the
+            # patched bridge; --shot keeps the picture)
+            print(f"  screen at the stall: {shot(b, 'stall')}")
+            fault = b.peek(syms["irq_fault"])
+            lw = desk_low_water(b)
+            print(f"  irq_fault {fault}; the desktop's stack "
+                  f"${dstk_lo:04X}-${dstk_hi:04X}, low water ${lw:04X}"
+                  f"{' -- OVERFLOWED' if lw == dstk_lo else ''}")
+            got = b.memdump(d.G + deskref.g_offset("g_nfiles"), 8)
+            print(f"  the target counted {int.from_bytes(got[0:4], 'little')} "
+                  f"file(s) and {int.from_bytes(got[4:8], 'little')} folder(s)")
+            # the ABI keeps the caller's parameter block, whose control
+            # array starts with the opcode (src/sys/abi.c gem_pb,
+            # gem_which; a .g4a's block is in bank $00 with its data)
+            which = b.peek(syms["gem_which"])
+            pb = b.peek16(syms["gem_pb"]) | (b.peek16(syms["gem_pb"] + 2) << 16)
+            kind = {0x01: "GEMDOS", 0x73: "VDI", 0xC8: "AES"}.get(which, hex(which))
+            if pb < 0x10000:
+                ctl = b.peek16(pb) | (b.peek16(pb + 2) << 16)
+                op = b.peek16(ctl & 0xFFFF) if ctl < 0x10000 else -1
+                print(f"  it is inside a {kind} call, opcode {op}")
+            addr = symfile.load(DESK_SYM)["op_path"] + d.near - dlink
+            raw = bytes(b.memdump(addr, LEN_ZPATH))
+            end = raw.find(0)
+            print(f"  its op_path ${addr:04X}: "
+                  f"{raw[:end if end >= 0 else None].decode('latin-1')!r}")
+            try:
+                print(f"  REGS: {b.ok('REGS')}")
+                b.ok("CONFIG history true")
+                b.frames(2)
+                for h in b.ok("HISTORY 32").get("entries", []):
+                    print(f"    {h.get('k', '')}:{h['pc']} "
+                          f"{h.get('bytes', h['op'])} a={h['a']} x={h['x']} "
+                          f"y={h['y']} s={h.get('sh', '')}{h['s']} p={h['p']} "
+                          f"e={h.get('e', '')}")
+            except Exception as exc:            # an unpatched build
+                print(f"  no post-mortem: {exc}")
+        poke16(b, ptr + 4, 0)               # the button, held since Quit
+        check(next(probes, None) is None, "not every probe was taken")
+        for name, rgb in zip(STOPS, ref_a.shots):
+            p = os.path.join(SHOTDIR, f"m19-{name}.png")
+            if not os.path.exists(p):
+                check(False, f"no screenshot at {name}")
+                continue
+            bad, shown = vbxeref.compare_to_shot(rgb, p)
+            check(not bad, f"{name}: {bad} px differ from the model; first {shown[:3]}")
+            print(f"  {name:<58s} {'ok' if not bad else 'FAIL'}")
+
+        for _ in range(300):
+            if b.peek(STATUS + ST_DONE) == 0xA5:
+                break
+            b.frames(4)
+        else:
+            check(False, f"after Quit: the runner did not finish (call {read()})")
+            return 1
+        b.frames(4)
+        n = b.peek16(r.count)
+        check(n == len(stage), f"{n} records, not {len(stage)}")
+        recs = vdiref.decode(b.memdump(r.results, n * vdiref.RESULT_WORDS * 2), n)
+        err = compare(b, r.results, len(PRELUDE), PRELUDE, want)
+        check(not err, f"the prelude: {err}")
+        rec = recs[-1][2:]
+        ret, nruns, lret, lrc, ncalls, bad = rec[6:12]
+        print(f"  sh_main returned {ret}: {nruns} run, last returned {lret}, "
+              f"last load {lrc}; {ncalls} ABI calls, {bad} refused")
+        check(ret == 1, f"sh_main returned {ret}, not the 1 program run")
+        check(nruns == 1, f"sh_runs {nruns}, not 1")
+        check(lret == 0, f"the desktop's main() returned {lret}, not 0")
+        check(ncalls == len(script),
+              f"the desktop made {ncalls} ABI calls; the model made {len(script)}")
+        check(bad == 0, f"{bad} ABI calls refused")
+
+        rec = r.run([(ALLOC, (), ())])[0][2:]
+        mark2, room2 = rec[6] & 0xFFFF, rec[7]
+        brk2 = (rec[8] & 0xFFFF) | (rec[9] << 16)
+        print(f"after:  pool ${mark2:04X}, {room2} free; far brk ${brk2:06X}")
+        check((mark2, room2) == (mark, room),
+              f"the pool after: mark ${mark2:04X}, {room2} free; "
+              f"was ${mark:04X}, {room}")
+        check(brk2 == brk + desk_len,
+              f"far brk moved {brk2 - brk} bytes; the desktop's file is {desk_len}")
+        lw = low_water(b)
+        used, size = stk_hi + 1 - lw, stk_hi - stk_lo + 1
+        print(f"stack:  {used} of {size} bytes used at the low-water mark (${lw:04X})")
+        check(lw - stk_lo >= MARGIN,
+              f"the stack came within {lw - stk_lo} bytes of its bottom ${stk_lo:04X}")
+        lw = desk_low_water(b)
+        used, size = dstk_hi + 1 - lw, dstk_hi - dstk_lo + 1
+        print(f"  the desktop's: {used} of {size} bytes used at the low-water "
+              f"mark (${lw:04X})")
+        check(lw - dstk_lo >= DESK_MARGIN,
+              f"the desktop's stack came within {lw - dstk_lo} bytes of its "
+              f"bottom ${dstk_lo:04X}")
+    finally:
+        emu.stop()
+
+    # the emulator's own account of where it kept its state, against
+    # the directory the working copy was looked for in
+    said = [ln.split("=", 1)[1].strip() for ln in open(emu.log, errors="ignore")
+            if ln.startswith("Altirra: config dir =")]
+    check(said and os.path.realpath(said[0]) == os.path.realpath(CONFIG_DIR),
+          f"the emulator's configuration directory is {said}, not {CONFIG_DIR}")
+    check_disk(check, written)              # the disk the run wrote
+    if not fails and not keep:
+        for p in shots:
+            os.remove(p)
+    print(f"gem4xe-m19: {'PASS' if not fails else 'FAIL'} -- New folder and "
+          f"Delete, {len(fails)} problem(s)")
+    return 1 if fails else 0
+
+
+if __name__ == "__main__":
+    if "--model" in sys.argv:
+        fresh_disk()
+        v, a, want, d, memo = model(0x4800, 0x020000, (0, 0), 0x03)
+        deskref.describe(d)
+        print(len(d.script), "calls; waits at", d.waits, "; shots", len(a.shots),
+              "; probes", len(memo["globes"]))
+        for pw in d.wlist:
+            print(f"  wnode root {pw.root} id {pw.id} spec {pw.path.spec.s!r} "
+                  f"count {pw.path.count} size {pw.path.size}")
+        print("  root now:", [e[0] for e in a.dos_dirs["A:\\"]])
+        sys.exit(0)
+    sys.exit(main(sys.argv[1:]))

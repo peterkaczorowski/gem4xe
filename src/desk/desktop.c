@@ -12,9 +12,10 @@
  * folder windows (deskwin.c) a double-click on a drive icon opens;
  * milestone 6 a program run from its icon -- the desktop exits with
  * its windows' places in the shell buffer, and opens them again when
- * the shell loads it back.  The items that act on files are in the
- * menu, disabled, until the milestones that bring them (NOT_YET_ITEMS,
- * build/deskrsc.h).
+ * the shell loads it back; milestone 7 New folder and Delete
+ * (deskfun.c), the first things the desktop does TO a disk.  The items
+ * of later milestones are in the menu, disabled, until the milestone
+ * that brings them (NOT_YET_ITEMS, build/deskrsc.h).
  */
 #include "desk.h"
 
@@ -165,6 +166,15 @@ static WORD do_filemenu(WORD item)
         if ((obj = sel_item(DROOT)) != 0)
             return do_open(DESKWH, obj);
         break;
+    case NFOLITEM:                              /* a folder in the top
+                                                 * window's directory */
+        if (pw)
+            fun_mkdir(pw);
+        break;
+    case DELTITEM:                              /* what is selected there */
+        if (pw)
+            fun_del(pw);
+        break;
     case CLOSITEM:
         if (pw)
             win_close(pw, FALSE);
@@ -286,6 +296,8 @@ int main(void)
     }
     rsrc_gaddr(R_TREE, ADMENU, (void **)&G.a_menu);
     rsrc_gaddr(R_TREE, ADDINFO, (void **)&G.a_info);
+    rsrc_gaddr(R_TREE, ADMKDBOX, (void **)&G.a_mkdir);
+    rsrc_gaddr(R_TREE, ADDELDIA, (void **)&G.a_delete);
     rsrc_gaddr(R_ICONBLK, 0, (void **)&G.a_iblist);
     set_version();
     for (i = 0; i < N_NOT_YET; i++)

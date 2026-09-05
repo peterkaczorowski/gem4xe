@@ -18,10 +18,12 @@
 #include "desk.h"
 
 /* The far arena, Malloc'd once: the DTA the listing reads into, then
- * every window's FNODEs, then the windows' saved places (CSAVE) and
- * the desktop's copy of the shell buffer. */
+ * every window's FNODEs, then the windows' saved places (CSAVE), the
+ * desktop's copy of the shell buffer, and a DTA per level of a delete's
+ * walk (deskfun.c). */
 #define ARENA_SIZE  (sizeof(DTA) + (LONG)NUM_WNODES * NUM_FNODES * sizeof(FNODE) \
-                     + sizeof(CSAVE) + SIZE_SHELBUF)
+                     + sizeof(CSAVE) + SIZE_SHELBUF \
+                     + (LONG)MAX_DELLEVEL * sizeof(DTA))
 
 /* The INF file's default windows (the donor's desk_inf_data1, "#W"):
  * in character cells, x 2 wide 38 high 12, each one lower. */
@@ -120,6 +122,7 @@ WORD win_start(void)
     G.g_cnxsave = (CSAVE __far *)(arena + (LONG)sizeof(DTA)
                                   + (LONG)NUM_WNODES * (NUM_FNODES * sizeof(FNODE)));
     G.g_shelbuf = (char __far *)G.g_cnxsave + sizeof(CSAVE);
+    G.g_opdta = (DTA __far *)(G.g_shelbuf + SIZE_SHELBUF);
     {                                           /* the donor's is zeroed */
         char __far *p = (char __far *)G.g_cnxsave;
         WORD n;
@@ -263,6 +266,8 @@ static void pn_active(PNODE *pn)
     LONG ret;
     WORD count = 0, i;
 
+    pn->p_size = 0;                             /* read again after a delete */
+    pn->p_count = 0;
     ret = Fsfirst(pn->p_spec, DISPATTR);
     while (ret == E_OK && count < NUM_FNODES) {
         if (dta->d_fname[0] != '.') {
@@ -591,6 +596,26 @@ static WORD do_diropen(WNODE *pw, WORD new_win, WORD curr, const char *path,
     }
     desk_busy(FALSE);
     return TRUE;
+}
+
+/* The window's directory listed again, after something on the disk
+ * changed it: the same place, the same view, the items rebuilt.  The
+ * listing's DTA is put back first -- a delete's walk leaves its own
+ * (deskfun.c). */
+void win_rebld(WNODE *pw)
+{
+    GRECT t;
+
+    desk_busy(TRUE);
+    Fsetdta(G.g_dta);
+    pn_active(&pw->w_path);
+    win_sname(pw);
+    win_sinfo(pw);
+    wind_set(pw->w_id, WF_NAME, 0, (WORD)(uint16_t)pw->w_name, 0, 0);
+    desk_verify(pw->w_id);
+    wind_get_grect(pw->w_id, WF_WORKXYWH, &t);
+    do_wredraw(pw->w_id, &t);
+    desk_busy(FALSE);
 }
 
 /* A drive icon: its root in a new window. */

@@ -55,7 +55,7 @@ from deskref import Desktop, DROOT, GLOBES_SIZE  # noqa: E402
 from aesref import (W_CLOSER, W_FULLER, W_DNARROW,  # noqa: E402
                     FA_RDONLY, FA_HIDDEN, FA_SUBDIR, FA_ARCHIVE)
 from deskrsc import (DESKMENU, FILEMENU, ABOUITEM, CLOSITEM, QUITITEM, DEOK)  # noqa: E402
-from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE, SYMS,  # noqa: E402
+from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE,  # noqa: E402
                      F, B, M, DCLICK, drive, compare)
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
 from m12_file import Runner                 # noqa: E402
@@ -65,6 +65,10 @@ from m16_shell import SHELL                 # noqa: E402
 from demo_aes import path                   # noqa: E402
 
 DISK = os.path.abspath(os.path.join(ROOT, "build", "m17-boot.atr"))
+# The desktop gates' runner: the conformance runner with its staging cut
+# down, so the pool it loads the desktop and DESKTOP.RSC into is the size
+# GEM.COM gives them (the Makefile, M3DESK_SIZES).
+SYMS = os.path.join(ROOT, "build", "m3desk.sym")
 DESKTOP = os.path.join(ROOT, "build", "desktop.g4a")
 DESK_SYM = os.path.join(ROOT, "build", "desktop.sym")
 SHOT = ("shot", None)

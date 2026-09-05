@@ -63,10 +63,13 @@ from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
                     RSRC_LOAD, RSRC_FREE, RSRC_GADDR, SHEL_WRITE,
                     SHEL_GET, SHEL_PUT, SIZE_SHELBUF,
                     DSETDRV, DGETDRV, DSETPATH, FSETDTA, MALLOC, FSFIRST,
-                    FSNEXT, FA_SUBDIR)
+                    FSNEXT, DCREATE, DDELETE, FDELETE, FA_SUBDIR)
 from rsc import R_TREE, R_ICONBLK, R_STRING, ICONBLK_SIZE  # noqa: E402
-from deskrsc import (ADMENU, ADDINFO, DESKMENU, FILEMENU, ABOUITEM,  # noqa: E402
-                     OPENITEM, CLOSITEM, CLSWITEM, QUITITEM, DEVERSN, DEOK,
+from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA,  # noqa: E402
+                     DESKMENU, FILEMENU, ABOUITEM,
+                     OPENITEM, NFOLITEM, DELTITEM, CLOSITEM, CLSWITEM,
+                     QUITITEM, DEVERSN, DEOK,
+                     MKNAME, MKOK, CDFILES, CDFOLDS, CDOK,
                      STDISK, STTRASH, IB_HARD, IB_FLOPPY, IB_TRASH,
                      IB_FOLDER, IB_APPL, IB_DOCU, NOT_YET)
 
@@ -91,6 +94,7 @@ WINDOW_STYLE = (NAME | CLOSER | FULLER | MOVER | INFO | SIZER | UPARROW
 LEN_ZPATH, LEN_ZFNAME, LEN_ZINFO = 48, 14, 36
 LEN_WNAME = LEN_ZPATH + 2
 NUM_FNODES = 64
+MAX_DELLEVEL = 4
 DISPATTR = FA_SUBDIR
 F_SELECTED = 0x0001
 SHW_EXEC, SHW_SHUTDOWN = 1, 4               # gem.h
@@ -110,7 +114,7 @@ CSAVE_SIZE = NUM_WNODES * WSAVE_SIZE
 
 # -- deskwin.c -------------------------------------------------------------
 ARENA_SIZE = (DTA_SIZE + NUM_WNODES * NUM_FNODES * FNODE_SIZE + CSAVE_SIZE
-              + SIZE_SHELBUF)
+              + SIZE_SHELBUF + MAX_DELLEVEL * DTA_SIZE)
 WIN_XCELL, WIN_WCELL, WIN_HCELL = 2, 38, 12
 # where the model keeps a string the desktop passes from its stack (the
 # target's address is the compiler's; the gate compares G, not records)
@@ -120,11 +124,13 @@ WIN_YCELL = (6, 8, 10, 13)
 # GLOBES, field by field in the order desk.h declares them; sizes as
 # cc65816 lays them out (WORD 2, a near pointer 2, a far pointer 4,
 # GRECT 8, no padding).
-GLOBES = [("a_menu", 2), ("a_info", 2), ("a_iblist", 2), ("g_handle", 2),
+GLOBES = [("a_menu", 2), ("a_info", 2), ("a_mkdir", 2), ("a_delete", 2),
+          ("a_iblist", 2), ("g_handle", 2),
           ("g_wchar", 2), ("g_hchar", 2), ("g_wbox", 2), ("g_hbox", 2),
           ("g_desk", 8), ("g_wicon", 2), ("g_hicon", 2), ("g_icw", 2),
           ("g_ich", 2), ("g_screenfree", 2), ("g_rmsg", 16),
-          ("g_wcnt", 2), ("g_dta", 4), ("g_cnxsave", 4), ("g_shelbuf", 4),
+          ("g_wcnt", 2), ("g_nfiles", 4), ("g_ndirs", 4),
+          ("g_dta", 4), ("g_opdta", 4), ("g_cnxsave", 4), ("g_shelbuf", 4),
           ("g_wlist", NUM_WNODES * WNODE_SIZE),
           ("g_screen", NUM_SOBS * OBJ_SIZE),
           ("g_screeninfo", NUM_ITEMS * SCREENINFO_SIZE)]
@@ -285,7 +291,9 @@ class Desktop:
         self.wicon = self.hicon = self.icw = self.ich = 0
         self.screenfree = 0
         self.rmsg = [0] * 8
-        self.wcnt, self.dta = 0, 0
+        self.wcnt, self.dta, self.opdta = 0, 0, 0
+        self.nfiles = self.ndirs = 0
+        self.a_mkdir = self.a_delete = 0
         self.cnxsave = self.shelbuf = 0
         self.wsave = [Wsave() for _ in range(NUM_WNODES)]
         # the desktop's copy of the shell buffer, a far CharArray the
@@ -580,6 +588,7 @@ class Desktop:
             pw.path.flist = arena + DTA_SIZE + i * NUM_FNODES * FNODE_SIZE
         self.cnxsave = arena + DTA_SIZE + NUM_WNODES * NUM_FNODES * FNODE_SIZE
         self.shelbuf = self.cnxsave + CSAVE_SIZE
+        self.opdta = self.shelbuf + SIZE_SHELBUF
         self.a.mem[self.shelbuf] = self.shelbuf_data
         for ws in self.wsave:
             ws.x = ws.y = ws.w = ws.h = ws.hsl = ws.vsl = 0
@@ -657,6 +666,8 @@ class Desktop:
         return True
 
     def pn_active(self, pn):
+        pn.size = pn.count = 0                  # read again after a delete
+        pn.fnodes = []
         ret = self.gemdos(FSFIRST, (pn.spec_addr & 0xFFFF, pn.spec_addr >> 16,
                                     DISPATTR))
         count = 0
@@ -853,6 +864,19 @@ class Desktop:
             self.do_wredraw(pw.id, self.wind_get_rect(pw.id, WF_WXYWH))
         self.busy(False)
         return True
+
+    def win_rebld(self, pw):
+        """deskwin.c win_rebld: the listing read again after the disk
+        changed under it, the same place and the same view."""
+        self.busy(True)
+        self.call(FSETDTA, (self.dta & 0xFFFF, self.dta >> 16))
+        self.pn_active(pw.path)
+        self.win_sname(pw)
+        self.win_sinfo(pw)
+        self.wind_set(pw.id, WF_NAME, 0, pw.addr + WN_NAME)
+        self.desk_verify(pw.id)
+        self.do_wredraw(pw.id, self.wind_get_rect(pw.id, WF_WXYWH))
+        self.busy(False)
 
     def do_dopen(self, curr):
         pw = self.win_alloc()
@@ -1119,6 +1143,231 @@ class Desktop:
                 self.desk_verify(wh)
 
     # -- the menu ------------------------------------------------------------
+    # -- deskfun.c: New folder, and Delete ----------------------------------
+    def ted_of(self, tree, obj):
+        """The TEDINFO a G_FTEXT's ob_spec points at (deskinf.c)."""
+        return self.a.mem[self.a.trees[tree][obj].ob_spec]
+
+    def inf_sset(self, tree, obj, text):
+        ted = self.ted_of(tree, obj)
+        old = self.a.mem[ted.ptext]
+        self.a.mem[ted.ptext] = Text(text[:ted.txtlen - 1], old.size)
+
+    def inf_sget(self, tree, obj):
+        return self.a.mem[self.ted_of(tree, obj).ptext].s
+
+    def inf_numset(self, tree, obj, value):
+        """The number at the right of the field, the donor's "%*lu"."""
+        ted = self.ted_of(tree, obj)
+        n = ted.txtlen - 1
+        old = self.a.mem[ted.ptext]
+        self.a.mem[ted.ptext] = Text(f"{value:{n}d}"[-n:], old.size)
+
+    def inf_what(self, tree, ok):
+        """Which of the two buttons after `ok` is selected, its state
+        cleared: 1 for `ok` itself (the donor's inf_what)."""
+        objs = self.a.trees[tree]
+        for i in range(2):
+            if objs[ok + i].ob_state & SELECTED:
+                objs[ok + i].ob_state = NORMAL
+                return 1 if i == 0 else 0
+        return 0
+
+    def fun_fld(self, tree, obj):
+        """One field of a dialog already on the screen (draw_fld)."""
+        io, _ = self.call(OBJC_OFFSET, (obj,), tree=tree)
+        o = self.a.trees[tree][obj]
+        self.call(OBJC_DRAW, (obj, MAX_DEPTH),
+                  (io[1], io[2], o.ob_width, o.ob_height), tree=tree)
+
+    def fun_mkdir(self, pw):
+        """deskfun.c fun_mkdir: the name typed into ADMKDBOX, Dcreate,
+        the window listed again."""
+        tree = self.a_mkdir
+        self.op_path = pw.path.spec.s
+        self.inf_sset(tree, MKNAME, "")
+        self.start_dialog(tree)
+        self.call(FORM_DO, (ROOT,), tree=tree, steps=self.take_input("form_do"))
+        self.end_dialog()
+        if not self.inf_what(tree, MKOK):
+            return
+        name = self.inf_sget(tree, MKNAME)
+        made = name[:8].replace(" ", "")        # the donor's unfmt_str
+        if len(name) > 8:
+            made += "." + name[8:]
+        if not made:
+            return
+        self.add_fname(made)
+        self.busy(True)
+        ok = self.op_gemdos(DCREATE) == E_OK
+        self.busy(False)
+        if not ok:
+            self.form_alert(1, "[1][You cannot create a folder|"
+                               "with that name.][ OK ]")
+            return
+        self.win_rebld(pw)
+        return
+
+    # the path an operation works on, mutated in place as the target
+    # mutates op_path (deskfun.c)
+    @staticmethod
+    def path_tail(p):
+        return p.rfind("\\") + 1
+
+    def add_fname(self, name):
+        self.op_path = self.op_path[:self.path_tail(self.op_path)] + name
+
+    def set_all_files(self):
+        self.op_path = self.op_path[:self.path_tail(self.op_path)] + "*.*"
+
+    def add_path(self, name):
+        k = self.path_tail(self.op_path)
+        p = self.op_path[:k] + name
+        if len(p) + 5 > LEN_ZPATH:
+            self.op_path = self.op_path[:k] + "*.*"
+            return False
+        self.op_path = p + "\\*.*"
+        return True
+
+    def sub_path(self):
+        p = self.op_path
+        k = self.path_tail(p)
+        if k > 3:
+            self.op_path = p[:p.rfind("\\", 0, k - 1) + 1] + "*.*"
+
+    def op_gemdos(self, fn, *rest):
+        """A GEMDOS call on op_path (the target passes its own buffer;
+        the model keeps one string at STACK_STRING)."""
+        self.a.mem[STACK_STRING] = Text(self.op_path)
+        return self.gemdos_long(fn, STACK_STRING, *rest)
+
+    def walk(self, level, counting):
+        """deskfun.c walk: one directory, op_path ending in "*.*", with
+        a DTA of its own -- our GEMDOS keeps a search by the DTA that
+        owns it, so the nested walk does not disturb this one."""
+        if level >= MAX_DELLEVEL:
+            self.form_alert(1, "[3][You cannot delete a folder|this far down "
+                               "the|directory path.][ OK ]")
+            return False
+        dta = self.opdta + level * DTA_SIZE
+        self.call(FSETDTA, (dta & 0xFFFF, dta >> 16))
+        ret = self.op_gemdos(FSFIRST, FA_SUBDIR)
+        while ret == E_OK:
+            name, attr, _t, _d, _size = self.a.dos_dta_data
+            if name[:1] != ".":
+                if attr & FA_SUBDIR:
+                    if not self.add_path(name):
+                        self.form_alert(1, "[3][A folder in here has|too long "
+                                           "a path.][ OK ]")
+                        return False
+                    if not self.walk(level + 1, counting):
+                        return False
+                    self.sub_path()
+                    self.call(FSETDTA, (dta & 0xFFFF, dta >> 16))
+                    self.add_fname(name)
+                    if counting:
+                        self.ndirs += 1
+                    elif self.op_gemdos(DDELETE) != E_OK:
+                        self.form_alert(1, "[1][That folder cannot be "
+                                           "deleted.][ OK ]")
+                        return False
+                    else:
+                        self.ndirs -= 1
+                        self.inf_numset(self.a_delete, CDFOLDS, self.ndirs)
+                        self.fun_fld(self.a_delete, CDFOLDS)
+                    self.set_all_files()
+                else:
+                    self.add_fname(name)
+                    if counting:
+                        self.nfiles += 1
+                    elif self.op_gemdos(FDELETE) != E_OK:
+                        self.form_alert(1, "[1][That file cannot be "
+                                           "deleted.][ OK ]")
+                        return False
+                    else:
+                        self.nfiles -= 1
+                        self.inf_numset(self.a_delete, CDFILES, self.nfiles)
+                        self.fun_fld(self.a_delete, CDFILES)
+                    self.set_all_files()
+            ret = self.gemdos(FSNEXT)
+        return True
+
+    def fun_del(self, pw):
+        """deskfun.c fun_del: what is selected, counted (the donor's
+        OP_COUNT), confirmed in ADDELDIA, then deleted, and the window
+        listed again."""
+        tree = self.a_delete
+        pn = pw.path
+        ok = any(pf.flags & F_SELECTED for pf in pn.fnodes[:pn.count])
+        if not ok:
+            return
+
+        self.busy(True)                         # what it will do
+        self.nfiles = self.ndirs = 0
+        for pf in pn.fnodes[:pn.count]:
+            if not ok:
+                break
+            if not pf.flags & F_SELECTED:
+                continue
+            self.op_path = pn.spec.s
+            if pf.attr & FA_SUBDIR:
+                if not self.add_path(pf.name):
+                    self.form_alert(1, "[3][A folder in here has|too long a "
+                                       "path.][ OK ]")
+                    ok = False
+                    break
+                ok = self.walk(0, True)
+                self.ndirs += 1
+            else:
+                self.nfiles += 1
+        self.busy(False)
+        if not ok:
+            return
+
+        self.inf_numset(tree, CDFILES, self.nfiles)      # ...and ask
+        self.inf_numset(tree, CDFOLDS, self.ndirs)
+        self.start_dialog(tree)
+        self.call(FORM_DO, (ROOT,), tree=tree, steps=self.take_input("form_do"))
+        if not self.inf_what(tree, CDOK):
+            self.end_dialog()
+            return
+
+        self.busy(True)                         # ...and do it
+        for pf in pn.fnodes[:pn.count]:
+            if not ok:
+                break
+            if not pf.flags & F_SELECTED:
+                continue
+            self.op_path = pn.spec.s
+            if pf.attr & FA_SUBDIR:
+                self.add_path(pf.name)          # it fitted at the count
+                ok = self.walk(0, False)
+                if not ok:
+                    break
+                self.sub_path()
+                self.add_fname(pf.name)
+                if self.op_gemdos(DDELETE) != E_OK:
+                    self.form_alert(1, "[1][That folder cannot be "
+                                       "deleted.][ OK ]")
+                    break
+                self.ndirs -= 1
+                self.inf_numset(tree, CDFOLDS, self.ndirs)
+                self.fun_fld(tree, CDFOLDS)
+                self.set_all_files()
+            else:
+                self.add_fname(pf.name)
+                if self.op_gemdos(FDELETE) != E_OK:
+                    self.form_alert(1, "[1][That file cannot be "
+                                       "deleted.][ OK ]")
+                    break
+                self.nfiles -= 1
+                self.inf_numset(tree, CDFILES, self.nfiles)
+                self.fun_fld(tree, CDFILES)
+        self.busy(False)
+        self.end_dialog()
+        self.win_rebld(pw)
+        return
+
     def do_deskmenu(self, item):
         if item == ABOUITEM:
             tree = self.a_info
@@ -1137,6 +1386,12 @@ class Desktop:
             obj = self.sel_item(DROOT)
             if obj:
                 return self.do_open(DESKWH, obj)
+        elif item == NFOLITEM:                  # a folder in the top
+            if pw:                              # window's directory
+                self.fun_mkdir(pw)              # never done: only a
+        elif item == DELTITEM:                  # program ends the loop
+            if pw:
+                self.fun_del(pw)
         elif item == CLOSITEM:
             if pw:
                 self.win_close(pw, False)
@@ -1195,6 +1450,8 @@ class Desktop:
         self.rsrc_load()
         self.a_menu = self.rsrc_gaddr(R_TREE, ADMENU)
         self.a_info = self.rsrc_gaddr(R_TREE, ADDINFO)
+        self.a_mkdir = self.rsrc_gaddr(R_TREE, ADMKDBOX)
+        self.a_delete = self.rsrc_gaddr(R_TREE, ADDELDIA)
         self.a_iblist = self.rsrc_gaddr(R_ICONBLK, 0)
         self.set_version()
         for item in NOT_YET:
@@ -1249,11 +1506,14 @@ class Desktop:
         should read at the same moment."""
         d = self.desk
         out = b"".join(w(x) for x in (
-            self.a_menu, self.a_info, self.a_iblist, self.handle,
+            self.a_menu, self.a_info, self.a_mkdir, self.a_delete,
+            self.a_iblist, self.handle,
             self.wchar, self.hchar, self.wbox, self.hbox,
             d.x, d.y, d.w, d.h, self.wicon, self.hicon, self.icw, self.ich,
             self.screenfree)) + b"".join(w(x) for x in self.rmsg)
-        out += w(self.wcnt) + dw(self.dta) + dw(self.cnxsave) + dw(self.shelbuf)
+        out += (w(self.wcnt) + dw(self.nfiles) + dw(self.ndirs)
+                + dw(self.dta) + dw(self.opdta) + dw(self.cnxsave)
+                + dw(self.shelbuf))
         out += b"".join(pw.pack() for pw in self.wlist)
         assert len(out) == g_offset("g_screen"), len(out)
         out += b"".join(o.pack() for o in self.screen)

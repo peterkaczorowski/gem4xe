@@ -604,7 +604,12 @@ class AES:
         self.dos_dta = 0
         self.dos_dta_data = None
         self.dos_dirs = {}
-        self.dos_search = None
+        self.dos_searches = {}
+        # what a fresh directory's own entry says its length is: the gate
+        # sets it from the filesystem it built the disk with (SDFS writes
+        # the header entry, so 23), because a folder's size counts in the
+        # window's information line and so in G
+        self.dos_newdir = 0
         # shel_write's request, kept for the shell loop, and the shell
         # buffer shel_put/shel_get keep between programs (src/aes/shel.c
         # sh_init clears it)
@@ -4148,18 +4153,59 @@ class AES:
             ret = self.dos_brk
             self.dos_brk += (n + 3) & ~3
             return ret
+        if fn == 0x39:                  # Dcreate: a folder in a listed
+            # directory, empty, and listed itself from now on
+            path = self.mem[long_(0)].s
+            k = path.rfind("\\") + 1
+            parent, name = path[:k], path[k:]
+            if parent not in self.dos_dirs:
+                return GD_EPTHNF & 0xFFFFFFFF
+            if any(e[0] == name for e in self.dos_dirs[parent]):
+                return GD_EACCDN & 0xFFFFFFFF
+            self.dos_dirs[parent].append((name, FA_SUBDIR, 0, 0, self.dos_newdir))
+            self.dos_dirs[path + "\\"] = []
+            return 0
+        if fn == 0x3A:                  # Ddelete: an empty folder
+            path = self.mem[long_(0)].s
+            k = path.rfind("\\") + 1
+            parent, name = path[:k], path[k:]
+            if parent not in self.dos_dirs or path + "\\" not in self.dos_dirs:
+                return GD_EPTHNF & 0xFFFFFFFF
+            if self.dos_dirs[path + "\\"]:
+                return GD_EACCDN & 0xFFFFFFFF
+            self.dos_dirs[parent] = [e for e in self.dos_dirs[parent]
+                                     if e[0] != name]
+            del self.dos_dirs[path + "\\"]
+            return 0
+        if fn == 0x41:                  # Fdelete
+            path = self.mem[long_(0)].s
+            k = path.rfind("\\") + 1
+            parent, name = path[:k], path[k:]
+            entries = self.dos_dirs.get(parent)
+            if entries is None:
+                return GD_EPTHNF & 0xFFFFFFFF
+            if not any(e[0] == name and not e[1] & FA_SUBDIR for e in entries):
+                return GD_EFILNF & 0xFFFFFFFF
+            self.dos_dirs[parent] = [e for e in entries if e[0] != name]
+            return 0
         if fn == 0x4E:                  # Fsfirst
             spec = self.mem[long_(0)].s
             k = spec.rfind("\\") + 1
             path, pattern = spec[:k], spec[k:]
             if path not in self.dos_dirs:
                 raise ValueError(f"Fsfirst {spec!r}: no listing for {path!r}")
-            self.dos_search = (list(self.dos_dirs[path]), pattern, ints[2])
+            # the search belongs to the DTA that started it, as
+            # src/sys/gemdos.c's slots do (SL_OWNER) and the ST's DTA
+            # does: a walk that nests one search inside another gives
+            # each level a DTA, and neither disturbs the other
+            self.dos_searches[self.dos_dta] = (list(self.dos_dirs[path]),
+                                               pattern, ints[2])
             return self.gemdos(0x4F, ())
         if fn == 0x4F:                  # Fsnext
-            if self.dos_search is None:
+            search = self.dos_searches.get(self.dos_dta)
+            if search is None:
                 return GD_ENMFIL & 0xFFFFFFFF
-            entries, pattern, want = self.dos_search
+            entries, pattern, want = search
             while entries:
                 name, attr, time, date, size = entries.pop(0)
                 if attr & FA_SUBDIR and not want & FA_SUBDIR:
@@ -4170,7 +4216,7 @@ class AES:
                     continue
                 self.dos_dta_data = (name, attr, time, date, size)
                 return 0
-            self.dos_search = None
+            del self.dos_searches[self.dos_dta]
             return GD_ENMFIL & 0xFFFFFFFF
         raise ValueError(f"unknown GEMDOS function {fn:#x}")
 
@@ -4201,10 +4247,11 @@ GEMDOS_OP = 2000
 DSETDRV, DGETDRV, DSETPATH = GEMDOS_OP + 0x0E, GEMDOS_OP + 0x19, GEMDOS_OP + 0x3B
 FSETDTA, FGETDTA, MALLOC = GEMDOS_OP + 0x1A, GEMDOS_OP + 0x2F, GEMDOS_OP + 0x48
 FSFIRST, FSNEXT = GEMDOS_OP + 0x4E, GEMDOS_OP + 0x4F
+DCREATE, DDELETE, FDELETE = GEMDOS_OP + 0x39, GEMDOS_OP + 0x3A, GEMDOS_OP + 0x41
 # src/sys/gemdos.h: the attributes and the error the searches answer
 FA_RDONLY, FA_HIDDEN, FA_SYSTEM, FA_VOLUME, FA_SUBDIR, FA_ARCHIVE = (
     0x01, 0x02, 0x04, 0x08, 0x10, 0x20)
-GD_EPTHNF, GD_ENMFIL = -34, -49
+GD_EPTHNF, GD_EACCDN, GD_EFILNF, GD_ENMFIL = -34, -36, -33, -49
 
 
 def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None,

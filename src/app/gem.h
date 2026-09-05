@@ -130,6 +130,24 @@ typedef struct {
     WORD ib_xtext, ib_ytext, ib_wtext, ib_htext;
 } ICONBLK;
 
+/* TEDINFO, what a G_TEXT/G_FTEXT/G_BOXTEXT ob_spec points at: 28 bytes,
+ * the ST's.  The three pointers are LONGs holding bank-$00 addresses;
+ * te_txtlen and te_tmplen are the strings' lengths with the NUL, which
+ * the AES fills in at rsrc_load from the file's own text -- so a field
+ * an application means to fill in later still carries a buffer of the
+ * right length in the resource. */
+typedef struct {
+    LONG te_ptext;              /* what the field holds: the raw places */
+    LONG te_ptmplt;             /* "Name: ________.___" */
+    LONG te_pvalid;             /* one class character per place */
+    WORD te_font, te_fontid;
+    WORD te_just;
+    WORD te_color;
+    WORD te_fontsize;
+    WORD te_thickness;
+    WORD te_txtlen, te_tmplen;
+} TEDINFO;
+
 /* evnt_multi: its flags, a mouse rectangle (five words, as the AES takes
  * them), and the messages the desktop answers. */
 #define MU_KEYBD    0x0001

@@ -266,17 +266,19 @@ build/app_blob.o: build/app_blob.c
 # through tools/iconconv.py, checked in like the font).  The milestone-3
 # desktop (src/m16_desk.c: a line of help, R/X/Q) stays as the stand-in
 # test-m16 drives the shell loop with.
-# The near region is 14 pages: the direct page, the bss, the constants.
+# The near region is 16 pages: the direct page, the bss, the constants.
 # The bss holds the desktop's globals (GLOBES, src/desk/desk.h: the screen
 # tree, the window nodes, the icon records, ~2 KB) and its stack, which
 # is the gate application's 256 bytes and more: the folder window's open
 # -- the button, do_open, do_dopen, do_wopen, a call to the AES on top --
-# ran 256 bytes out (phase 14, milestone 5), and the runner's pool has
-# room for no larger a region: DESKTOP.RSC (4150 bytes) follows it, and
-# GEMDOS takes its work area from what is left (src/sys/gemdos.c).
-DESK_OBJS  = $(G4A_LIB) build/desk/desktop.o build/desk/deskobj.o build/desk/deskwin.o
-DESK_BSS   = 2816
-DESK_BITS  = 512
+# ran 256 bytes out (phase 14, milestone 5).  It shares the pool with
+# DESKTOP.RSC (4652 bytes) and with GEMDOS's work area (src/sys/gemdos.c),
+# which is why the desktop gates run a runner whose staging leaves the
+# pool the room GEM.COM leaves it (build/m3desk.xex, above).
+DESK_OBJS  = $(G4A_LIB) build/desk/desktop.o build/desk/deskobj.o build/desk/deskwin.o \
+             build/desk/deskfun.o
+DESK_BSS   = 2944
+DESK_BITS  = 768
 DESK_STACK = 640
 DESK_H     = src/app/gem.h src/desk/desk.h build/deskrsc.h
 
@@ -340,6 +342,27 @@ build/gem.xex: build/gem.elf
 # hard-coding an address that moves on every rebuild.
 build/m3.xex: build/m3.elf
 	python3 tools/mkxex.py $< $@ --entry _atari_entry --syms build/m3.sym
+
+# The desktop gates' runner: the same code with the staging buffers cut
+# to the few calls they stage (the prelude, the shell op, the pool
+# probes) and the pool run up to where that staging starts, so the
+# desktop and DESKTOP.RSC are loaded into a pool the size GEM.COM gives
+# them rather than the conformance runner's half of the window.  One
+# object differs, so the link is the same list with it swapped in.
+M3DESK_SIZES = -D SCRIPT_WORDS=128 -D SCRATCH_BYTES=512 -D MAX_RESULTS=24
+M3DESK_OBJS  = $(patsubst build/m3_vdi.o,build/m3desk_vdi.o,$(M3_OBJS))
+
+build/m3desk_vdi.o: src/m3_vdi.c src/vbxe/vbxe.h src/vdi/vdi.h src/sys/irq.h src/sys/abi.h src/sys/app.h src/sys/cio.h src/sys/dos.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) $(M3DESK_SIZES) -I src -o $@ $<
+
+build/m3desk.elf: $(M3DESK_OBJS) src/gem4xe.scm
+	$(LD) src/gem4xe.scm $(M3DESK_OBJS) -o $@ $(LIB) $(LDFLAGS) \
+	      --list-file build/m3desk.map \
+	      --memories-expression "(layout #x010000 #x78ff)"
+
+build/m3desk.xex: build/m3desk.elf
+	python3 tools/mkxex.py $< $@ --entry _atari_entry --syms build/m3desk.sym
 
 # The runner outgrew a single-density disk (620 free sectors; the .xex
 # alone wants more), so the fixture is converted to DOS 2.5 enhanced density
@@ -424,7 +447,7 @@ build/m14-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt 
 
 # The desktop gate's disk (test-m17): the runner again, with the real
 # desktop and its resource where test-m16's stand-in was.
-build/m17-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
+build/m17-boot.atr: build/m3desk.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(DISK_FILES) $(DESK_FILES)
@@ -456,7 +479,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19
 
 # The cc65816 code generation bugs gem4xe works around, run in the vendor's
 # own simulator: fails only if a workaround shape has stopped compiling
@@ -588,6 +611,14 @@ test-m17: build/m17-boot.atr build/desktop.g4a build/desktop.sym
 test-m18: build/m17-boot.atr build/desktop.g4a build/desktop.sym
 	python3 tests/emu/m18_launch.py
 
+# The desktop's first writes to a disk (phase 14, milestone 7): File ->
+# New folder and File -> Delete, driven at the mouse and the keyboard
+# against the model, and the disk image read back when the run is over.
+# The gate boots a copy of milestone 5's disk, made afresh every run --
+# it is the first whose target rewrites the directory it booted from.
+test-m19: build/m17-boot.atr build/desktop.g4a build/desktop.sym
+	python3 tests/emu/m19_files.py
+
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.
 demo: build/m3-boot.atr
@@ -620,4 +651,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 demo movie bench emu-stop clean
+.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 demo movie bench emu-stop clean

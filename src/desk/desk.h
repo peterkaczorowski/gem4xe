@@ -51,6 +51,9 @@
 #define LEN_ZFNAME  14                  /* "FILENAME.EXT" and its NUL */
 #define LEN_ZINFO   36                  /* " 1234567 bytes used in 12 items." */
 #define NUM_FNODES  64                  /* a window lists this many at most */
+#define MAX_DELLEVEL 4                  /* folders inside folders a delete
+                                         * walks: a DTA (and a search slot,
+                                         * src/sys/gemdos.c) per level */
 #define DISPATTR    FA_SUBDIR           /* what a window lists: folders too */
 #define F_SELECTED  0x0001              /* f_flags */
 
@@ -112,6 +115,8 @@ typedef struct {
 typedef struct {
     OBJECT  *a_menu;                    /* ADMENU */
     OBJECT  *a_info;                    /* ADDINFO */
+    OBJECT  *a_mkdir;                   /* ADMKDBOX */
+    OBJECT  *a_delete;                  /* ADDELDIA */
     ICONBLK *a_iblist;                  /* IB_HARD .. IB_DOCU */
     WORD     g_handle;                  /* the AES's VDI handle */
     WORD     g_wchar, g_hchar, g_wbox, g_hbox;
@@ -121,7 +126,13 @@ typedef struct {
     WORD     g_screenfree;              /* the free chain's head */
     WORD     g_rmsg[8];                 /* evnt_multi's message */
     WORD     g_wcnt;                    /* windows open */
+    LONG     g_nfiles, g_ndirs;         /* what a delete counted, then what
+                                         * is left of it */
     DTA __far *g_dta;                   /* the listing's DTA, then the FNODEs */
+    DTA __far *g_opdta;                 /* MAX_DELLEVEL of them, one per level
+                                         * of the walk: our GEMDOS keeps a
+                                         * search's state by the DTA that owns
+                                         * it, as the ST does */
     CSAVE __far *g_cnxsave;             /* the windows' places between programs */
     char __far *g_shelbuf;              /* the desktop's copy of the shell buffer */
     WNODE    g_wlist[NUM_WNODES];       /* by w_root - (DROOT + 1) */
@@ -154,10 +165,15 @@ void act_chg(WORD wh, WORD root, WORD obj, WORD set, WORD dodraw);
 void act_select(WORD wh, WORD root, WORD obj);
 WORD do_open(WORD wh, WORD obj);
 WORD do_aopen(WNODE *pw, WORD curr, const char __far *name);
+void win_rebld(WNODE *pw);
 void hndl_wmsg(const WORD *msg);
 void app_start(void);
 void app_save(void);
 void cnx_get(void);
 void cnx_put(void);
+
+/* deskfun.c: what the File menu does to files */
+void fun_mkdir(WNODE *pw);
+void fun_del(WNODE *pw);
 
 #endif /* GEM4XE_DESK_H */

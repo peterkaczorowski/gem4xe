@@ -814,7 +814,7 @@ instead: with a caller elsewhere possible the compiler leaves it a
 function, and the 176 bytes are paid only on the way out to a
 program.  It costs 61 bytes of code.  The first run's mark is then
 425 of 640, in `do_aopen` (the buffers, the GEMDOS frames,
-`shel_write`); the second's 310, and `test-m17`'s window path 333.
+`shel_write`); the second's 268, and `test-m17`'s window path 292.
 The margin is 215 bytes; the milestones that bring
 dialogs over file operations will want it, and the near budget is
 the tight one (milestone 5).
@@ -853,3 +853,117 @@ VTOC and flags the entry deleted as the DOS does.  It holds GEM.COM,
 DESKTOP.G4A and DESKTOP.RSC with 41 sectors free; M11.G4A and the gate
 fixtures are on the SpartaDOS disk only, and what the DOS 2 disk runs
 is still the open question.
+
+## Milestone 7: New folder, and Delete
+
+The first two things the desktop does *to* a disk.  **File -> New
+folder** puts up the donor's `ADMKDBOX` -- a title, an editable field
+with the template `Name: ________.___` and the AES's `F` validation,
+OK and Cancel -- takes the name the user typed, `Dcreate`s it in the
+top window's directory and lists the window again, so the folder
+appears where it will be found.  **File -> Delete** works on what is
+selected there: it counts first, walking folders inside folders (the
+donor's `OP_COUNT` pass), says what it is about to do in `ADDELDIA`
+-- "DELETE FILE(S)", the number of files and the number of folders --
+and on OK deletes them, a folder after its contents, with the two
+counts ticking down in the dialog as they go.
+
+The mechanism is `src/desk/deskfun.c`, in the shape of the donor's
+`deskfun.c` (`fun_mkdir`, `fun_del`) and `deskdir.c` (`d_doop`): one
+near path buffer mutated in place as the walk goes down and back up
+(`add_path`, `sub_path`, `add_fname`, `set_all_files`), and a DTA per
+level of the walk.  The DTAs matter.  Our GEMDOS keeps a directory
+search in a slot owned by the DTA that started it (`SL_OWNER`,
+`src/sys/gemdos.c`), exactly as the ST keeps the search's state in the
+DTA itself, so a folder inside a folder is a nested `Fsfirst`/`Fsnext`
+and the outer search survives it -- provided each level sets its own
+DTA, which is what the donor allocates one for.  `MAX_DELLEVEL` of
+them (four) sit at the end of the far arena; deeper than that is an
+alert, as the donor's eighth level is.  The dialogs' fields are read
+and written through the donor's `deskinf.c` shape (`inf_sset`,
+`inf_sget`, `inf_numset`, `inf_what`), for which `src/app/gem.h` grew
+a `TEDINFO`.
+
+### The room it took
+
+Two dialogs and two operations do not fit where milestone 6 left
+things.  `DESKTOP.RSC` went from 4150 bytes to 4652, and the
+desktop's near region from 14 pages to 16 (2944 bytes of bss, 768 of
+constants) -- and the two share the application pool, which in the
+conformance runner is 8192 bytes, the half of the banked window its
+host-poked staging buffers leave.  Together they wanted 8748.
+
+The room came from the gate rig rather than the product.  `GEM.COM`
+already gives the pool the whole window (14336 bytes); the runner's
+staging is 6 KB of conformance scaffolding that the desktop gates do
+not use -- they stage a prelude, a shell op and the pool probes, a few
+hundred bytes.  So `src/m3_vdi.c`'s three buffer sizes became
+overridable and the Makefile builds `build/m3desk.xex`: the same
+runner with `SCRIPT_WORDS 128`, `SCRATCH_BYTES 512`, `MAX_RESULTS 24`,
+linked `(layout #x010000 #x78ff)`, which leaves the pool 12544 bytes.
+The desktop gates (m17, m18, m19) boot that one and read their
+symbols from its map; the conformance gates keep the runner they had,
+buffers and all.  The desktop is now measured in a pool close to the
+size the real system gives it, which is worth more than the bytes.
+
+### What was wrong on the way
+
+`do_filemenu`'s answer, again.  The item handlers return the
+desktop's *done* flag, and `fun_mkdir` returned TRUE the way the
+donor's does (where it means "handled") -- so the first New folder
+made its folder and then quit the desktop.  The model's dry run found
+it before the emulator ran, exactly as milestone 6's `do_open` was
+found; both operations return nothing now, because only a program run
+from an icon ends the loop.
+
+A rule of the compiler's, broken.  `WORD i = (WORD)(ted->te_txtlen -
+1);` is precisely the shape `tools/ccbug` rule 5 forbids -- a 16-bit
+load through a local pointer with the arithmetic in the same
+expression -- and cc65816 5.18 dropped the load: `i` became the
+TEDINFO's *address* less one.  `inf_numset` then filled some 25 KB
+with spaces, upward from the dialog's text buffer: through the
+resource, through `$D0xx` -- where any write soft-resets VBXE, so the
+screen went black -- and through `$D20E`, which left POKEY asserting
+an interrupt that `POKMSK` did not cover, so `irq_irq` could not
+acknowledge it and the machine froze in an interrupt storm.  The gate
+saw a desktop that stopped making calls; its post-mortem said which
+call it was inside (the ABI keeps the caller's parameter block, and
+its control array starts with the opcode), what the delete had
+counted, what `op_path` held, and then the CPU history, which was the
+same eight instructions of the IRQ handler over and over.  The fix is
+the rule's: the field into its own local, then the subtraction.  The
+minimal shape is in the compiler's own defect list already; what was
+new was the blast radius, and that a write to GTIA space is how a
+runaway loop shows up as a black screen.
+
+A folder SpartaDOS X has just made measures **0** in its parent's
+directory entry, where the host's own `mkdir` writes 23 (one entry).
+The window's information line counts the bytes it lists, so the model
+has to agree: `aesref`'s `Dcreate` takes the size from the gate, which
+sets it to what the target's DOS was measured to report.
+
+And the disk itself.  AltirraSDL mounted `--bootrw` does not write the
+file it was given: it copies it to `<config>/disk_state/<the image's
+SHA-256>/pristine.atr` and mounts a working copy, `disk.atr`, beside
+it (`ATResolveDiskMount`), reusing that copy on every later mount of
+the same bytes.  So the gate drops the pair before it starts -- the
+directory is named by the hash of the image the gate itself just
+built -- and reads the working copy afterwards, checking the
+emulator's own account of its configuration directory against the one
+it looked in.
+
+### The gate
+
+`tests/emu/m19_files.py` boots a fresh copy of milestone 5's disk and
+drives the desktop through seven stops: the desk, the window on
+`A:\*.*`, the New folder dialog with `NEWDIR` typed into it, the
+listing with the folder in it, `SUB` selected, the delete dialog
+saying three files and two folders, and the listing with `SUB` gone.
+The screens are compared with the model's at every stop, `G` at five
+of them, and the call counts agree: 264 on both sides, none refused.
+Then the disk image is read back: `NEWDIR` is there and empty, `SUB`
+and everything under it -- `ONE.TXT`, `TWO.DAT`, `DEEP\THREE.TXT` --
+is gone.  The pool and the far heap come back where they were; the
+runner's stack low-water mark is 1199 of 2048 and the desktop's 291
+of 640, which is the walk, its dialogs and the two nested searches
+together.

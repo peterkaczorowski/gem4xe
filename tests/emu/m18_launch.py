@@ -51,7 +51,7 @@ import deskref                              # noqa: E402
 from deskref import Desktop, DROOT, GLOBES_SIZE, STACK_STRING  # noqa: E402
 from aesref import W_FULLER, FA_SUBDIR, RSRC_LOAD, Text    # noqa: E402
 from deskrsc import FILEMENU, QUITITEM      # noqa: E402
-from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE, SYMS,  # noqa: E402
+from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE,  # noqa: E402
                      F, DCLICK, drive, compare)
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
 from m11_abi import app_calls               # noqa: E402
@@ -59,7 +59,7 @@ from m12_file import Runner                 # noqa: E402
 from m13_alert import ALLOC                 # noqa: E402
 from m14_sparta import DISK as M14_DISK, boot, screen   # noqa: E402
 from m16_shell import SHELL, poll           # noqa: E402
-from m17_desktop import (DISK, DESKTOP, DESK_SYM, SHOT, PROBE, DRVBYT,  # noqa: E402
+from m17_desktop import (DISK, DESKTOP, DESK_SYM, SYMS, SHOT, PROBE, DRVBYT,  # noqa: E402
                          GCLICK, header, listing, menu)
 from demo_aes import path                   # noqa: E402
 

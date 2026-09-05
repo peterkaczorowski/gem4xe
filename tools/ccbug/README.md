@@ -147,6 +147,15 @@ unrelated memory. Switching to an incrementing pointer happened to change the
 slot allocation so `stride` no longer landed on `src`. It is root-caused now
 — `docs/phase2b.md` is updated — and `check-cc` pins it.
 
+**A decrement does it too, and the same rule covers it.** Phase 14's
+`inf_numset` wrote `WORD i = (WORD)(ted->te_txtlen - 1);` and got `dec 0,x`
+on the pointer's slot: `i` became the TEDINFO's *address* less one, and the
+loop that filled the field with spaces filled 25 KB of bank $00 instead —
+through `$D0xx`, where any write soft-resets VBXE, and through POKEY's
+`IRQEN`, which left an interrupt nothing could acknowledge. A whole machine
+frozen by one dropped load. `len = ted->te_txtlen; i = (WORD)(len - 1);`
+compiles right; `docs/phase14.md` has the account.
+
 `- 1` does it too, as `dec 0,x` on the slot: `n = ted->te_txtlen - 1` in
 `inf_sset()` (src/aes/fsel.c), with `ted` a call's return dead after the
 line, made `n` the TEDINFO's address less one — negative in bank 0 above
