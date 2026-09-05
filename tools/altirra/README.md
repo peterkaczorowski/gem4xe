@@ -2,10 +2,14 @@
 
 gem4xe's harness runs on [AltirraSDL](https://github.com/ilmenit/AltirraSDL),
 the headless/SDL front end to Altirra.  What it needed that is not
-upstream (as of b3061c7, 2026-09-01) is here as two patches that apply to
-that revision with `git apply` or `patch -p1`; the same changes are the
-commits of [pull request #88](https://github.com/ilmenit/AltirraSDL/pull/88)
-against upstream, and the patches are to be dropped once it lands.
+upstream (as of b3061c7, 2026-09-01) is here as three patches that apply
+to that revision, in the order of the build recipe below, with `git
+apply` or `patch -p1`.  The same changes are upstream pull requests
+[#88](https://github.com/ilmenit/AltirraSDL/pull/88) (the CPU core, the
+Ultimate 1MB switches and KEYRAW) and
+[#90](https://github.com/ilmenit/AltirraSDL/pull/90) (the bridge's
+65C816 debugging), and each patch is to be dropped once its request
+lands.
 
 ## altirra-65c816-native-mode.patch -- two CPU core bugs
 
@@ -54,8 +58,9 @@ describes the verbs.  `tools/a8test/bridge.py` has `key_raw()` and
 
 ## altirra-sdl-bridge-65c816-debug.patch -- a post-mortem for native mode
 
-Not in PR #88; written for the shell-loop fault in `docs/phase14.md`
-(milestone 3), on top of the two above.  Against the bridge only:
+PR #90 (2026-09-05), against the bridge only; written for the
+shell-loop fault in `docs/phase14.md` (milestone 3) and what read back
+the interrupt storm in milestone 7:
 
 - `REGS` reports the 65C816's other half when the CPU is one: `K`, `B`,
   `D`, `SH`, `AH`, `XH`, `YH` and `E`.  Without them a native-mode
@@ -73,8 +78,14 @@ Not in PR #88; written for the shell-loop fault in `docs/phase14.md`
   loop now flushes the pending tail first.
 
 `tools/a8test/bridge.py` uses none of it from a gate; the probes in
-`docs/phase14.md` did.  To go upstream as a second pull request once
-#88 has landed, so that the first stays what it was reviewed as.
+`docs/phase14.md` did, and so does every desktop gate's post-mortem
+(`tests/emu/m19_files.py`).  It went up as a *second* pull request,
+against upstream `main` rather than on top of #88, so that each is
+reviewed for what it is: the two touch `bridge_commands_write.cpp`'s
+key tables in different places, and whichever lands second wants a
+one-hunk context merge.  The copy here is the merged form -- what PR
+#90 carries, rebased onto the other two patches -- so that the three
+apply in the order below.
 
 ## Building
 
