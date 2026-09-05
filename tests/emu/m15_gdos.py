@@ -32,7 +32,7 @@ from a8test.launcher import launch          # noqa: E402
 import symfile, atr                         # noqa: E402
 from m7_form import poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE, SYMS  # noqa: E402
 from m12_file import Runner, D2, FAULT_I, FRAMES_I, SYS  # noqa: E402
-from m14_sparta import boot, screen, DISK as SPDISK      # noqa: E402
+from m14_sparta import boot, screen, sayable_free, DISK as SPDISK  # noqa: E402
 
 GDOS, RELEASE = SYS + 12, SYS + 13
 CIO_I, CALLS_I, BAD_I = 8, 9, 10            # the op's own words
@@ -330,7 +330,12 @@ def cases(g, r, check, fs, kind, b):
     b_free, b_total, secsiz, clsiz = struct.unpack("<4l", r.read(BUF, 16))
     print(f"  Dfree: {b_free} free sectors of {secsiz} (image {free0}), "
           f"{g.trips} round trip(s), {g.frames} frames")
-    check(b_free == free0, f"Dfree {b_free}, the image's bitmap says {free0}")
+    # Dfree can only be as right as the line it reads: the DOS gives the
+    # free count three characters in its directory listing, and that is
+    # all CIO offers (m14_sparta.sayable_free, src/sys/gemdos.c gd_dfree).
+    check(b_free in sayable_free(free0),
+          f"Dfree {b_free}, the image's bitmap says {free0} -- the DOS can "
+          f"say {sorted(sayable_free(free0))}")
 
     # -- the exit ----------------------------------------------------------------------
     h, _ = g.call("Fopen", L(g.string("TEST.TXT")), W(0))

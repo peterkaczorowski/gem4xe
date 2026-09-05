@@ -35,6 +35,11 @@ CFLAGS    = --code-model=large --data-model=small -O2
 LDFLAGS   = --rtattr exit=simplified --override _Div16 --override _Mod16
 
 SRC_DOS  ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['dos']['sd_dos2'])" 2>/dev/null)
+# A double-density DOS 2 disk, [dos].dd_dos2: 720 x 256 is where the DOS 2
+# product disk lives, because 707 sectors of 253 bytes hold GEM, the desktop,
+# the DOS's own shell and applications besides -- and because that DOS runs
+# AUTORUN.SYS, which is how the disk comes up in the desktop.
+SRC_DD   ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['dos']['dd_dos2'])" 2>/dev/null)
 # SpartaDOS 3.2 boot disk and the SpartaDOS X cartridge, [spartados] in
 # fixtures.toml -- the SpartaGEM gate (docs/phase13.md) boots the one and
 # then the other, with the same program.
@@ -413,25 +418,30 @@ build/m3-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt b
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM $(DISK_DENSITY) $(DISK_FILES)
 
-# The product disks: GEM.COM with the desktop beside it, one per DOS.  Its
-# own disks because GEM.COM and M3.COM are 95 KB each and neither DOS's
-# 1040 sectors hold both.  The DOS II+/D disk holds GEM.COM and the
-# desktop alone, and the fixture's demonstration programs come off it to
-# make the room: with the folder windows the three were 1,000 of its 1,010
-# sectors, and running a program from the desktop took it past them.  The
-# gate fixtures and M11.G4A are on the SpartaDOS disk only (tools/atr.py
-# knows no double density, which is where DOS II+/D would go).
-build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc
-	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
+# The product disks: the system with the desktop beside it, one per DOS,
+# and both of them boot into it with nothing typed.
+#
+# The DOS 2 one is DOUBLE density.  Single density does not hold GEM.COM
+# at all and enhanced holds it with three sectors to spare, which left no
+# room for the DOS's own shell -- and a DOS with no shell to return to
+# dies when GEM hands the machine back.  720 sectors of 253 bytes hold
+# the system, DOS.SYS, DUP.SYS and 46 KB besides, which is what makes the
+# disk a place to keep applications rather than one program.  The program
+# is named AUTORUN.SYS because that is what the DOS runs at boot, and
+# --sweep takes everything but the DOS off the fixture, which was
+# somebody's magazine disk (docs/shipping.md, section 2).
+build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a
+	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ GEM.COM $(DISK_DENSITY) \
-	    --remove XMST.COM --remove XMST.TXT --remove MEMTEST.COM --remove MEMTEST.DOC \
-	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC
+	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
+	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
+	    --add build/m11_app.g4a M11.G4A
 
 build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --name GEM.COM $(DISK_FILES) $(DESK_FILES)
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --name GEM.COM --boot GEM \
+	    $(DISK_FILES) $(DESK_FILES)
 
 # The SpartaDOS disk: a fresh SDFS volume booting the 3.2 fixture's DOS,
 # the same files as the DOS 2 disk, the shell's applications and a
@@ -479,7 +489,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-boot
 
 # The cc65816 code generation bugs gem4xe works around, run in the vendor's
 # own simulator: fails only if a workaround shape has stopped compiling
@@ -619,6 +629,12 @@ test-m18: build/m17-boot.atr build/desktop.g4a build/desktop.sym
 test-m19: build/m17-boot.atr build/desktop.g4a build/desktop.sym
 	python3 tests/emu/m19_files.py
 
+# The product disk booting into the desktop with nothing typed: the
+# batch file the SpartaDOSes run, the loader's refusal on the 6502, the
+# switch, and the desk against the model (docs/shipping.md, section 2).
+test-boot: build/gem-sp.atr build/desktop.g4a build/desktop.sym
+	python3 tests/emu/product_boot.py
+
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.
 demo: build/m3-boot.atr
@@ -651,4 +667,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 demo movie bench emu-stop clean
+.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-boot demo movie bench emu-stop clean

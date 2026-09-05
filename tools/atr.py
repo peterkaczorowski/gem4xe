@@ -5,7 +5,12 @@ predicts what the file selector will list from the same image it booted.
 
 ATRImage is adapted from /home/jfergus/dev/a8-u4r/tools/atrlib.py.  Dos2 implements the standard
 DOS 2 VTOC (sector 360), 8-entry directory (sectors 361-368) and the 3-byte per-sector file
-links used by SD/ED disks.  It does NOT handle MyDOS "big" disks or double density.
+links, in single, enhanced and double density.  Double density is the same filesystem with
+253 data bytes to a sector instead of 125: the link still lives in the last three bytes, but
+the byte count needs all eight bits of the last one, where a single-density disk leaves the
+top bit for DOS 1's use.  The directory stays eight entries to a sector and uses half of it.
+What is still NOT handled is MyDOS's extensions -- subdirectories, and the extended sector
+links a volume over 1023 sectors needs.
 
 Enhanced density is DOS 2.5's: 1040 sectors, the bitmap for sectors 720-1023 kept in a second
 VTOC at sector 1024, and a file that uses any of them flagged $03 in the directory so that a
@@ -164,13 +169,28 @@ class Dos2:
     HIGH = 720             # DOS 2.5: sectors from here up are the enhanced half
 
     def __init__(self, img):
-        if img.sector_size != 128:
-            raise ATRError("Dos2 handles 128-byte-sector disks only")
+        if img.sector_size not in (128, 256):
+            raise ATRError("Dos2 handles 128- and 256-byte sectors")
         self.img = img
-        self.data_bytes = 125  # per sector (last 3 bytes are the link)
+        self.data_bytes = img.sector_size - 3   # the link is the last three
+        # The bitmap holds a bit per sector from 0 up.  A single-density
+        # DOS 2 VTOC gives it 90 bytes (sectors 0-719, and 720 is the
+        # unusable one); a double-density disk has the whole 256-byte
+        # sector, and needs 91 for its 721st bit.
+        self.bitmap_bytes = 90 if img.sector_size == 128 else (img.sector_count + 8) // 8
         # DOS 2.5 semantics, decided the way Altirra decides them: by the
-        # geometry alone.
-        self.dos25 = img.sector_count == self.ED_SECTORS
+        # geometry alone.  A double-density disk is never DOS 2.5.
+        self.dos25 = img.sector_size == 128 and img.sector_count == self.ED_SECTORS
+        # MyDOS by Altirra's rule (diskfsdos2.cpp Init): a VTOC code above
+        # 2, more sectors than a floppy has, or the one extra free sector a
+        # MyDOS floppy has because it does not reserve 720.  It changes only
+        # what the VTOC's free count covers here; the extended links and the
+        # subdirectories a bigger MyDOS volume uses are not implemented.
+        vtoc = img.read_sector(self.VTOC)
+        total = vtoc[1] | (vtoc[2] << 8)
+        self.mydos = (not self.dos25 and
+                      (vtoc[0] > 2 or img.sector_count > self.SD_SECTORS
+                       or (img.sector_count == self.SD_SECTORS and total == 708)))
 
     # -- directory ---------------------------------------------------------
     def entries(self):
@@ -198,6 +218,16 @@ class Dos2:
         return [e.filename for e in self.entries() if e.in_use]
 
     # -- file contents -----------------------------------------------------
+    def _link(self, raw):
+        """A sector's last three bytes: the bytes it holds, the sector that
+        follows, and the directory entry it belongs to.  The count is a
+        whole byte in double density -- 253 does not fit in seven bits --
+        and seven bits in single, where DOS 1 kept the top one for itself
+        (Altirra diskfsdos2.cpp, GetSectorDataBytes and GetNextSector)."""
+        n = len(raw)
+        used = raw[n - 1] if n > 128 else raw[n - 1] & 0x7F
+        return used, ((raw[n - 3] & 0x03) << 8) | raw[n - 2], raw[n - 3] >> 2
+
     def read(self, filename):
         e = self.find(filename)
         if not e:
@@ -208,9 +238,8 @@ class Dos2:
             if sec == 0:
                 break
             raw = self.img.read_sector(sec)
-            used = raw[127] & 0x7F
+            used, sec, _ = self._link(raw)
             out += raw[:used]
-            sec = ((raw[125] & 0x03) << 8) | raw[126]
         return bytes(out)
 
     def delete(self, filename):
@@ -224,9 +253,8 @@ class Dos2:
         for _ in range(e.count + 1):
             if sec == 0:
                 break
-            raw = self.img.read_sector(sec)
-            self._set(bits, sec)
-            sec = ((raw[125] & 0x03) << 8) | raw[126]
+            here, sec = sec, self._link(self.img.read_sector(sec))[1]
+            self._set(bits, here)
         self._write_bitmap(vtoc, bits)
         e.flag = 0x80
         self._write_entry(e)
@@ -240,7 +268,7 @@ class Dos2:
     # covers the lower half only.  Sector 720 is unusable on both.
     def _bitmap(self):
         vtoc = bytearray(self.img.read_sector(self.VTOC))
-        bits = bytearray(vtoc[10:100])
+        bits = bytearray(vtoc[10:10 + self.bitmap_bytes])
         if self.dos25:
             bits += self.img.read_sector(self.VTOC2)[84:122]
         return vtoc, bits
@@ -261,8 +289,13 @@ class Dos2:
         return sum(self._bit(bits, s) for s in range(lo, hi))
 
     def _write_bitmap(self, vtoc, bits):
-        vtoc[10:100] = bits[:90]
-        n = self._count_free(bits, 0, self.HIGH)
+        nb = self.bitmap_bytes
+        vtoc[10:10 + nb] = bits[:nb]
+        # VTOC1's free count: the lower half on an enhanced disk, the whole
+        # disk otherwise -- and one sector more on a MyDOS one, which does
+        # not reserve 720 (Altirra diskfsdos2.cpp CountFreeSectors).
+        end = self.HIGH if self.dos25 else self.img.sector_count + self.mydos
+        n = self._count_free(bits, 0, end)
         vtoc[3], vtoc[4] = n & 0xFF, n >> 8
         self.img.write_sector(self.VTOC, vtoc)
         if self.dos25:
@@ -274,7 +307,7 @@ class Dos2:
 
     def _free_sectors(self, bits):
         free = []
-        for s in range(1, len(bits) * 8):
+        for s in range(1, min(len(bits) * 8, self.img.sector_count + 1)):
             if s == self.VTOC or self.DIR0 <= s < self.DIR0 + self.DIR_SECTORS:
                 continue
             if self._bit(bits, s):
@@ -285,6 +318,45 @@ class Dos2:
         """What the DOS should report: both halves on an enhanced disk."""
         _, bits = self._bitmap()
         return len(self._free_sectors(bits))
+
+    @classmethod
+    def format(cls, img, mydos=False):
+        """A blank DOS 2 filesystem on `img`: the VTOC, an empty directory,
+        every other sector free.  This is Altirra's InitNew
+        (diskfsdos2.cpp) less the boot sectors, so what it makes is a disk
+        a DOS can READ and not one it can boot -- which is why the gates'
+        disks are copies of a real one.  Single and double density; an
+        enhanced disk is made by enhance() from a single-density one,
+        because that is how the harness comes by one.  `mydos` only stops
+        sector 720 being reserved, which is the one thing MyDOS does
+        differently on a floppy."""
+        if img.sector_size == 128 and img.sector_count != cls.SD_SECTORS:
+            raise ATRError(f"format: {img!r} is not a 720-sector disk")
+        if img.sector_size == 256 and img.sector_count > 1023:
+            raise ATRError("format: a volume over 1023 sectors needs MyDOS's "
+                           "extended links, which Dos2 does not write")
+        for i in range(cls.DIR_SECTORS):
+            img.write_sector(cls.DIR0 + i, b"")
+        fs = cls(img)
+        nb = fs.bitmap_bytes
+        bits = bytearray(b"\xff" * nb)
+        spare = max(0, nb * 8 - (img.sector_count + 1))
+        if spare:                       # the bits past the last sector
+            bits[nb - 1] &= (0xFF << spare) & 0xFF
+        for s in [0, 1, 2, 3, cls.VTOC] + list(range(cls.DIR0, cls.DIR0 + cls.DIR_SECTORS)):
+            fs._clear(bits, s)
+        # DOS 2 never uses 720.  A single-density VTOC has no bit for it
+        # -- its 90 bytes stop at 719 -- which is the same thing said in
+        # less room.
+        if not mydos and cls.HIGH < nb * 8:
+            fs._clear(bits, cls.HIGH)
+        vtoc = bytearray(img.sector_len(cls.VTOC))
+        vtoc[0] = 0x02
+        total = len(fs._free_sectors(bits))
+        vtoc[1], vtoc[2] = total & 0xFF, total >> 8
+        fs.mydos = mydos
+        fs._write_bitmap(vtoc, bits)
+        return fs
 
     def add_file(self, filename, data, above=0):
         """Write `data` as `filename`.  `above` prefers sectors numbered higher
@@ -313,11 +385,12 @@ class Dos2:
         for i, s in enumerate(secs):
             chunk = data[i * self.data_bytes:(i + 1) * self.data_bytes]
             nxt = secs[i + 1] if i + 1 < nsec else 0
-            raw = bytearray(128)
+            raw = bytearray(self.img.sector_len(s))
+            n = len(raw)
             raw[:len(chunk)] = chunk
-            raw[125] = (fileno << 2) | ((nxt >> 8) & 0x03)
-            raw[126] = nxt & 0xFF
-            raw[127] = len(chunk)
+            raw[n - 3] = (fileno << 2) | ((nxt >> 8) & 0x03)
+            raw[n - 2] = nxt & 0xFF
+            raw[n - 1] = len(chunk)      # a whole byte: see _link
             self.img.write_sector(s, raw)
             self._clear(bits, s)
         self._write_bitmap(vtoc, bits)
@@ -802,10 +875,11 @@ class Sdfs:
 
 def open_fs(img):
     """The file system on `img`, by signature: SpartaDOS's byte 7 of sector 1
-    ($80, or $40 for 512-byte sectors), else DOS 2's VTOC type byte."""
+    ($80, or $40 for 512-byte sectors), else DOS 2's VTOC type byte -- 2 on
+    every disk this writes, in single, enhanced or double density."""
     if img.read_sector(1)[7] in (0x80, 0x40):
         return Sdfs(img)
-    if img.sector_size == 128 and img.sector_count >= Dos2.VTOC and img.read_sector(Dos2.VTOC)[0] == 2:
+    if img.sector_count >= Dos2.VTOC and img.read_sector(Dos2.VTOC)[0] == 2:
         return Dos2(img)
     raise ATRError("neither a DOS 2 nor a SpartaDOS disk")
 

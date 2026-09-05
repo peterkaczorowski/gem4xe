@@ -70,6 +70,17 @@ def screen(b):
     return [t[i:i + 40].rstrip() for i in range(0, 960, 40)]
 
 
+def sayable_free(n):
+    """What a SpartaDOS can put in the three characters its directory
+    listing gives the free-sector count, and the two do not agree once it
+    will not fit: 3.2g prints the low three digits (1,001 comes out as
+    "001"), SDX stops at 999.  Nothing above 999 comes back through CIO
+    at all, which is also the ceiling on GEMDOS's Dfree -- gd_dfree reads
+    that same line, because it is the only thing CIO offers
+    (src/sys/gemdos.c)."""
+    return {n} if n < 1000 else {999, n % 1000}
+
+
 def type_line(b, s, wait=60):
     for ch in s:
         name, shift = KEYS.get(ch, (ch.upper(), False))
@@ -234,7 +245,10 @@ def cio_cases(r, check, fs, syms):
         if path == "":
             m = re.match(r"^\s*(\d+) FREE", lines[-1], re.I)
             free = int(m.group(1)) if m else -1
-            check(free == fs.free_count(), f"the DOS reports {free} free sectors, the image holds {fs.free_count()}")
+            n = fs.free_count()
+            check(free in sayable_free(n),
+                  f"the DOS reports {free} free sectors, the image holds {n} "
+                  f"(three digits allow {sorted(sayable_free(n))})")
             timing["dir open"], timing["dir read"] = dt_open, dt_read
             timing["dir lines"] = len(lines)
     return timing

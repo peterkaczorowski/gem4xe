@@ -676,7 +676,15 @@ static LONG gd_getpath(LONG buf, WORD drv)
  * SECTORS" on DOS 2.5 and both SpartaDOSes, "nnn Free nn Fil" on DOS
  * II+/D -- in sectors of 128, one to a cluster.  The disk's total is
  * not in anything CIO returns, so b_total is 0: unknown, rather than
- * a guess at the density. */
+ * a guess at the density.
+ *
+ * The count is three characters wide, so this cannot answer more than
+ * 999 whatever the volume holds, and the DOSes do not even agree about
+ * what they put there when it will not fit: SpartaDOS 3.2g prints the
+ * low three digits (1,001 reads back as 1), SpartaDOS X stops at 999.
+ * Both were measured on the gates' 2048-sector disk (test-m14,
+ * test-m15).  Nothing better is reachable through CIO; a volume big
+ * enough to matter will want a DOS call this seam does not have yet. */
 #define LINEMAX 24
 
 /* Whether `word` (upper case) occurs in `s`, in any case. */

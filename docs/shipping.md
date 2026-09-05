@@ -8,59 +8,126 @@ yet; it is written down now because the decisions shape what the next
 milestones do -- particularly localization, which is cheap to design for
 and expensive to retrofit.
 
-## 1. The product does not fit on a floppy, and that is the point
+## 1. The system fills a floppy, and that is the point
 
 Measured, today:
 
     GEM.COM        92,230 bytes   the VDI, the AES, GEMDOS and the shell
-    DESKTOP.G4A    23,724         the desktop
-    DESKTOP.RSC     4,652         its resource
+    DESKTOP.G4A    23,737         the desktop
+    DESKTOP.RSC     5,082         its resource
                   --------
-                  120,606
+                  121,049
 
-against what the formats hold:
+against what the formats hold, in bytes a file system can actually use:
 
-    single density    720 x 128 =  92,160   less than GEM.COM alone
-    enhanced          1040 x 128 = 133,120  the system, and 12 KB over
-    double density    720 x 256 = 184,320   the system, and 63 KB over
+    single density    707 x 125 =  88,375   less than GEM.COM alone
+    enhanced          1009 x 125 = 126,125  the system, and 5 KB over
+    double density     707 x 253 = 178,871  the system, and 57 KB over
     SDFS, our gates   2048 x 128 = 262,144  the system, and 140 KB over
 
-The DOS 2 product disk (`build/gem-boot.atr`, enhanced density) has
-**five sectors free** with the system on it and nothing else.  It cannot
-hold an application, so the one thing a desktop is for -- launching
-several programs from one volume -- it cannot do.
+Enhanced density is where the DOS 2 product disk used to live, and it
+was too tight to be a product: the system left **three sectors free**,
+which is no room for the applications a desktop exists to launch -- and
+none for the DOS's own shell either, which is worse (section 2).
+**Double density is where it lives now**: the system, the DOS, its
+`DUP.SYS` and a demonstration application, with 42 KB still free.
 
-That is not a packing problem to be squeezed out of; it is the honest
-shape of the thing.  A 640x240 GUI with a resident AES belongs on a
-volume measured in megabytes, and the machine this project targets
-(Rapidus, VBXE, U1MB) is a machine that has one.  The floppy stays as a
-*bootstrap*: enough to start the system and reach the real volume.
+Forty-two kilobytes is room for a few programs, not for a library, and
+that is the honest shape of the thing: a 640x240 GUI with a resident AES
+belongs on a volume measured in megabytes, and the machine this project
+targets (Rapidus, VBXE, U1MB) is a machine that has one.  The floppy is
+a *bootstrap* -- enough to start the system, and to carry it to the real
+volume.
 
 ## 2. Booting straight into the desktop
 
-The convention the platform already has:
+Every DOS on this platform runs something at boot, and no two of them
+agree on its name.  What follows was read out of the DOSes themselves
+and then booted, because the received wisdom was wrong twice.
 
-- **DOS 2.x / MyDOS**: a file called `AUTORUN.SYS` is loaded and run at
-  boot.  `tools/mkdisk.py` already writes the program as `AUTORUN.SYS`
-  by default -- the gates deliberately do not use it, because the
-  Rapidus must switch to the 65C816 *before* the program loads and the
-  harness wants to type the name after the switch.  The product disk
-  names the file `GEM.COM` for the same reason today; a shipping disk
-  wants both: `AUTORUN.SYS` for the person, and the CPU already switched
-  by the boot path.
-- **SpartaDOS / SpartaDOS X**: `CONFIG.SYS` then `AUTOEXEC.BAT` on `D1:`
-  (or the cartridge's own).  A one-line `AUTOEXEC.BAT` running `GEM` is
-  all it takes; `tools/mkspdisk.py` does not write one yet.
-- **Ultimate 1MB flash / a cartridge**: the deployment story
-  flashjazzcat's GUI uses, and the one that makes gem4xe feel like part
-  of the machine rather than a program.  It is a later phase: the
-  system would live in flash and the disk would hold only documents.
+**SpartaDOS 3.2g** -- the fixture, and what the product disk boots --
+looks for `D1:AUTORUN.SYS` and for `STARTUP.BAT`: both names are in
+`X32G.DOS`, and `CHANGES.32G` on the same disk documents the batch file.
+It does *not* look for `AUTOEXEC.BAT`.  **SpartaDOS X** boots from the
+cartridge or from U1MB flash and reads `CONFIG.SYS` then `AUTOEXEC.BAT`
+off `D1:`.  A product disk cannot know which one booted it, so
+`build/gem-sp.atr` carries **both batch files**, four bytes each (`GEM`
+and an EOL), and the program keeps the name a person would type
+(`tools/mkspdisk.py --boot GEM`).  `test-boot` boots that disk with
+nothing typed and compares the desk it comes up in against the model.
 
-None of these is hard; what makes them worth writing down is the
-ordering rule that the Rapidus imposes and that every gate here already
-obeys -- **the program must arrive after the CPU switch, through the
-boot path** (`docs/phase0.md`).  An `AUTORUN.SYS` satisfies that; a
-program typed at a prompt on a machine that has not switched does not.
+**DOS II+/D 6.4** -- the DOS 2 fixture -- **has no `AUTORUN.SYS` at
+all**: the string is nowhere in its `DOS.SYS`, and a disk built with the
+program under that name boots to its `D1:` prompt and waits (measured).
+Its command processor is *inside* `DOS.SYS`, which is the only reason it
+fits on a disk beside GEM.
+
+**DOS 2.5 does run `AUTORUN.SYS`**, and its `DOS.SYS` is 37 sectors --
+one *less* than DOS II+/D's.  But its command processor is a separate
+`DUP.SYS` of 42 more, and an enhanced-density disk holds 1,009:
+`GEM.COM` (738), `DESKTOP.G4A` (190), `DESKTOP.RSC` (41) and `DOS.SYS`
+(37) leave three, so `DUP.SYS` is 39 sectors short of fitting.  Built
+without `DUP.SYS` the disk does boot GEM -- and then dies the moment GEM
+hands the machine back, because DOS 2.5 goes looking for `DUP.SYS` and
+it is not there (an illegal instruction inside DOS at `$144C`, measured;
+with `DUP.SYS` present the same disk returns to its menu).  **So on an
+enhanced-density floppy you can have a DOS shell or an auto-start, and
+not both** -- which is the argument for the density above it.
+
+### Double density, which is where the DOS 2 disk belongs
+
+A double-density disk is the same DOS 2 file system with 253 data bytes
+to a sector instead of 125: 707 sectors, 174 KB, room for the system and
+the DOS and 42 KB besides.  `tools/atr.py` writes it now.  The format is
+Altirra's `ATDiskFSDOS2` (`diskfsdos2.cpp`), read rather than
+remembered, and the one thing that is genuinely different is the byte
+count in the sector link: **a whole byte in double density**, because
+253 does not fit in the seven bits a single-density disk leaves it.  The
+directory stays eight entries to a sector and uses half of one.
+`tests/host/test_atr.py` checks both densities against those rules, and
+`test-boot` boots the result.
+
+The disk is built by sweeping a fixture down to its DOS (`mkdisk.py
+--sweep`) and writing GEM onto it as `AUTORUN.SYS`, so what ships is the
+DOS's boot sectors, `DOS.SYS`, `DUP.SYS` and ours.  The DOS is the
+German Atari **"DISK OPERATING SYSTEM II"** of 1990 (H. Barth and
+F. Bruchhäuser), which does double density and does run `AUTORUN.SYS`.
+
+**MyDOS does not work, and the reason is not known.**  It is the obvious
+choice -- double density, hard disks, subdirectories, `AUTORUN.SYS` --
+and GEM crashes under it every time, at the same place: twelve bytes of
+the far image are missing at bank `$01` offset `$20`, the first
+`gemdos_call` runs into the zeros and takes a BRK.  What is established:
+the file on the disk is byte-for-byte `build/gem.xex`; the near part of
+the program loads correctly; the staging buffer holds the right bytes
+when the load is over, so they *were* read; and it happens under MyDOS
+4.50T and 4.53/4 alike, from `AUTORUN.SYS` and from the DUP menu, while
+the same file under this DOS and under SpartaDOS arrives perfect.  So it
+is something about MyDOS's binary loader and our chunk staging
+(`tools/mkxex.py`, `src/farload.s`), and it wants an hour with a
+watchpoint that the bridge does not have yet.  It matters for the hard
+media of section 3 only if the hard-disk DOS is MyDOS; SpartaDOS X, which
+is what APT wants, is unaffected.
+
+**Ultimate 1MB flash / a cartridge**: the deployment story
+flashjazzcat's GUI uses, and the one that makes gem4xe feel like part
+of the machine rather than a program.  It is a later phase: the system
+would live in flash and the disk would hold only documents.
+
+What makes all of this worth writing down is the ordering rule the
+Rapidus imposes and that every gate here obeys -- **the program must
+arrive after the CPU switch, through the boot path** (`docs/phase0.md`).
+A start-up file satisfies it only if the machine is *already* the 65C816
+when the DOS boots, and that is not free: the switch resets the CPU, the
+OS treats that reset as a **warm** start, and a warm start is exactly
+when a DOS does not run its start-up file.  On a real machine that is
+what U1MB's Rapidus plugin is for -- it sets the CPU over the M1 signal
+before the OS runs.  The gate arranges the same thing by hand: it lets
+the 6502 pass finish (the batch runs GEM, GEM refuses through CIO, the
+prompt comes back), sets `COLDST` (`$0244`) so the OS comes up cold, and
+only then switches -- with the machine idle, because a write made while
+the DOS is mid-SIO is lost and the DOS hangs.  Two boots of a 92 KB
+program is also why that gate takes a few minutes.
 
 ## 3. Bigger volumes: partitions, APT, and hard media
 
@@ -92,6 +159,16 @@ The work this implies is in `tools/`: an image writer that lays out an
 APT table and SDFS partitions, the way `mkspdisk.py` lays out a floppy.
 It is a host-side job with a host-side model, which is the kind of thing
 this project is already good at.
+
+One thing on the target has to move with it: **`Dfree` cannot answer
+more than 999**.  It reads the free count out of the directory
+listing's trailer, which is three characters wide and all CIO offers,
+and the DOSes do not even agree what they put there when it overflows
+(SpartaDOS 3.2g prints the low three digits, SDX stops at 999 --
+measured on the gates' 2048-sector disk).  The desktop shows that
+number in a window's information line, so on a volume worth having it
+is wrong today.  A megabyte of disk needs a DOS call this seam does not
+have yet (`src/sys/gemdos.c`, `gd_dfree`).
 
 ## 4. An install layout
 
@@ -184,9 +261,13 @@ are cheapest now and dear later:
 
 1. ~~The eleven strings out of the C and into `DESKTOP.RSC`'s free
    strings~~ -- done, above.
-2. **`AUTOEXEC.BAT` on the SpartaDOS product disk and `AUTORUN.SYS` on
-   the DOS 2 one**, so the disks that already exist boot into the
-   desktop rather than to a prompt.
+2. ~~`AUTOEXEC.BAT` on the SpartaDOS product disk and `AUTORUN.SYS` on
+   the DOS 2 one~~ -- done.  Both product disks boot into the desktop
+   with nothing typed and `make test-boot` requires it.  The SpartaDOS
+   one runs `STARTUP.BAT` (3.2) or `AUTOEXEC.BAT` (X); the DOS 2 one had
+   to become **double density** first, which `tools/atr.py` writes now.
+   Section 2 has the measurements, the names each DOS actually looks
+   for, and the one DOS that still will not do it.
 
 After those, in the order they unlock things: the APT/CF image writer in
 `tools/` and a gate that boots one; the install layout on it;

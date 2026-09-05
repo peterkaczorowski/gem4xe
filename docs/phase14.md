@@ -372,7 +372,10 @@ polled while it is inside the loop, and afterwards the pool back where
 it was and the far heap higher by exactly the desktop's file.  GEM.COM
 was then driven the same way by hand on both product disks
 (`build/gem-sp.atr`, SpartaDOS 3.2; `build/gem-boot.atr`, DOS II+/D):
-GEM, R, Q, the `D1:` prompt back and a DIR working after it.  The
+GEM, R, Q, the `D1:` prompt back and a DIR working after it.  Neither
+is driven by hand any more: `make test-boot` boots both with nothing
+typed and requires the desk, and the DOS 2 one is double density now
+(`docs/shipping.md`, sections 1 and 2).  The
 disks are built by `make` now -- so is `m6split-boot.atr`, after a
 gate run by hand against it compared a stale disk with a fresh linker
 map and reported two bytes wrong in bank `$01`.  A gate's disk must be

@@ -12,7 +12,7 @@ loads -- which means the program must arrive via the boot path, after the
 switch, not before it.
 
   python3 tools/mkdisk.py <source.atr> <program.xex> <out.atr> [NAME]
-                          [--enhanced] [--high] [--add FILE NAME]...
+                          [--enhanced] [--high] [--sweep] [--add FILE NAME]...
                           [--remove NAME]...
 
 The default name is HELLO.COM: the fixture DOS is DOS II+/D 6.4, which boots to
@@ -24,7 +24,10 @@ name to launch it.  That is an advantage here -- it means the program is started
 layer's gate reads back through CIO (tests/emu/m12_file.py).  --remove
 deletes a file the source image carries first: the fixture DOS disk has
 the DOS's demonstration programs on it, and the product disk has no room
-for them beside GEM.
+for them beside GEM.  --sweep deletes every file except the DOS's own
+(DOS.SYS and DUP.SYS), which is what the double-density product disk
+does: its fixture is somebody's game disk, and all we want off it is the
+DOS that boots and the shell to come back to.
 
 --enhanced makes the disk DOS 2.5 enhanced density (1040 sectors) before
 anything is written: the runner outgrew a single-density disk's 620 free
@@ -40,13 +43,22 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from atr import ATRImage, Dos2, enhance  # noqa: E402
 
 
+# What a DOS 2 disk needs to boot and to have somewhere to come back to:
+# the DOS, and the command processor if it is a separate file.  --sweep
+# keeps these and deletes the rest.
+DOS_FILES = ("DOS.SYS", "DUP.SYS")
+
+
 def build(src_atr, xex, out_atr, name="HELLO.COM", extra=(), enhanced=False, high=False,
-          remove=()):
+          remove=(), sweep=False):
     os.makedirs(os.path.dirname(os.path.abspath(out_atr)), exist_ok=True)
     img = ATRImage.load(src_atr)
     if enhanced:
         img = enhance(img)
     dos = Dos2(img)
+    if sweep:
+        remove = [f for f in dos.list()
+                  if f.upper() not in DOS_FILES] + list(remove)
     for dname in remove:
         dos.delete(dname)
         print(f"{out_atr}: {dname} removed")
@@ -74,7 +86,7 @@ def main(argv):
         elif argv[i] == "--remove":
             remove.append(argv[i + 1])
             i += 2
-        elif argv[i] in ("--enhanced", "--high"):
+        elif argv[i] in ("--enhanced", "--high", "--sweep"):
             flags.add(argv[i])
             i += 1
         else:
@@ -83,7 +95,7 @@ def main(argv):
     if len(args) < 3:
         raise SystemExit(__doc__.strip().splitlines()[-1])
     build(*args[:4], extra=extra, enhanced="--enhanced" in flags, high="--high" in flags,
-          remove=remove)
+          remove=remove, sweep="--sweep" in flags)
 
 
 if __name__ == "__main__":

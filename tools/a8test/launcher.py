@@ -43,8 +43,17 @@ XLROM = os.environ.get("ATARIXL_ROM", "/opt/altirra/roms/ATARIXL.ROM")
 # leave it on for every run after.  Pinned off here; an extra_args
 # --u1mbrom comes later on the line and wins.  Only the patched emulator
 # (tools/altirra/) knows the switch; the installed one logs it and goes on.
+#
+# --diskemu generic: the drive the gates run.  This said "fastestpossible"
+# for thirteen phases, which is not one of the emulator's names for a mode
+# (disk.cpp's enum table says "fastest") -- it was rejected with one line
+# in the log and every gate ran the generic drive anyway.  Asking for
+# "fastest" properly does not work either: the SpartaDOS disk then does not
+# boot at all, where under "generic" it is up in 400 frames.  So the gates
+# say what they have always actually run, and a 92 KB load costs its five
+# thousand frames.
 BASE_ARGS = ["--pal", "--hardware", "800xl", "--kernel", "xl", "--nobasic",
-             "--diskemu", "fastestpossible", "--siopatch", "--nofastboot",
+             "--diskemu", "generic", "--siopatch", "--nofastboot",
              "--noultimate1mb"]
 VBXE_DEVICE = "vbxe,version=126,alt_page=false,shared_mem=false"
 RAPIDUS_DEVICE = "rapidus"

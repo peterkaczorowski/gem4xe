@@ -11,7 +11,13 @@ Under SpartaDOS X the cartridge boots instead and this is just D1:, which
 is why the tree, not the boot code, is the point of the disk.
 
   python3 tools/mkspdisk.py <sparta32.atr> <m3.xex> <out.atr> [--name M3.COM] [--sectors N]
-                            [--add FILE NAME]...
+                            [--add FILE NAME]... [--boot GEM]
+
+--boot writes the batch files that run a command at boot, which is how the
+product disk comes up in the desktop rather than at a prompt (BOOT_FILES
+below, docs/shipping.md).  The gates' disks do not use it: they type the
+program's name after switching the CPU, and a disk that ran it first would
+run it on the 6502.
 
 tests/emu/m14_sparta.py predicts the listing from the image itself
 (tools/atr.py), not from TREE below.
@@ -23,6 +29,16 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from atr import ATRImage, Sdfs  # noqa: E402
 
+# The batch files a SpartaDOS boot runs, both carrying the one command
+# --boot names.  Which one runs depends on which DOS booted, and a
+# product disk cannot know: SpartaDOS 3.2 from this disk looks for
+# STARTUP.BAT (the name is in X32G.DOS beside D1:AUTORUN.SYS, and
+# CHANGES.32G documents it), while SpartaDOS X boots from the cartridge
+# or U1MB flash and reads CONFIG.SYS then AUTOEXEC.BAT off D1:.  So the
+# disk carries both, four bytes each, and the program keeps its name.
+BOOT_FILES = ("STARTUP.BAT", "AUTOEXEC.BAT")
+EOL = 0x9B
+
 # (path, contents); a path with no contents is a directory
 TREE = [
     ("SUB", None),
@@ -33,7 +49,8 @@ TREE = [
 ]
 
 
-def build(src_atr, xex, out_atr, sectors=1040, adds=(), volname="GEM4XE", name="M3.COM"):
+def build(src_atr, xex, out_atr, sectors=1040, adds=(), volname="GEM4XE", name="M3.COM",
+          boot=None):
     os.makedirs(os.path.dirname(os.path.abspath(out_atr)), exist_ok=True)
     img = ATRImage(128, sectors)
     fs = Sdfs.format(img, volname)
@@ -43,6 +60,9 @@ def build(src_atr, xex, out_atr, sectors=1040, adds=(), volname="GEM4XE", name="
     for path, name in adds:
         with open(path, "rb") as f:
             fs.add_file(name, f.read())
+    if boot:
+        for batch in BOOT_FILES:
+            fs.add_file(batch, boot.encode("ascii") + bytes([EOL]))
     for path, data in TREE:
         if data is None:
             fs.mkdir(path)
@@ -62,8 +82,10 @@ def main(argv=None):
     ap.add_argument("--name", default="M3.COM", help="the program's name on the disk")
     ap.add_argument("--sectors", type=int, default=1040)
     ap.add_argument("--add", nargs=2, action="append", default=[], metavar=("FILE", "NAME"))
+    ap.add_argument("--boot", metavar="CMD",
+                    help="a command line for STARTUP.BAT and AUTOEXEC.BAT")
     a = ap.parse_args(argv)
-    build(a.src, a.xex, a.out, a.sectors, a.add, name=a.name)
+    build(a.src, a.xex, a.out, a.sectors, a.add, name=a.name, boot=a.boot)
     return 0
 
 
