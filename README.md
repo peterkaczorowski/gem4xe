@@ -224,6 +224,23 @@ the gate's post-mortem -- which call the target is inside, what the
 delete had counted, the CPU's last thirty-two instructions -- is how
 that was read back.
 
+**What is not built yet, and is written down so it shapes what is**
+(`docs/shipping.md`). The system is 120 KB — more than a single-density
+floppy holds, and the enhanced-density product disk has five sectors
+free with nothing but GEM on it, so it cannot hold the applications a
+desktop exists to launch. The volume gem4xe belongs on is a CF card or a
+hard disk with APT partitions, which SpartaDOS X drives and Altirra
+emulates (`side2`, `side3`, `kmkjzide`, `myide`); the floppy becomes a
+bootstrap, and the disks that exist should at least come up in the
+desktop (`AUTORUN.SYS` on DOS 2, `AUTOEXEC.BAT` under SpartaDOS) rather
+than at a prompt. And **no string a person reads belongs in the C**:
+eleven of the desktop's alerts still are, where the donor keeps them as
+free strings in the resource, which is the seam a translation needs. The
+plan is a `LANG.RSC` for what the system says — far-resident, copied a
+string at a time into a near buffer, since bank $00 is the scarce thing
+— beside a per-language resource for each application, because a GEM
+dialog's geometry travels with its text.
+
 ## Verification
 
 Every gate compares the target against a **host reference model** —
