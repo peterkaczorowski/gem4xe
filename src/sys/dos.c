@@ -10,6 +10,8 @@ DOS_INFO dos;
 #define MEMTOP   (*(uint16_t *)0x02E5)
 #define MEMLO    (*(uint16_t *)0x02E7)
 
+extern uint8_t _exit_dosvec;        /* src/crt_atari.s */
+
 void dos_ident(void)
 {
     const uint8_t *comtab = DOSVEC;
@@ -29,6 +31,12 @@ void dos_ident(void)
         dos.caps = DOS_CAP_DIRS | DOS_CAP_RAWDIR | DOS_CAP_STAMPS;
         dos.dirsep = '>';
     }
+    /* How to leave (src/crt_atari.s).  A SpartaDOS keeps its command
+     * processor resident and is waiting for its loader to return, so a
+     * return is what it wants.  An Atari DOS 2 may keep its in DUP.SYS,
+     * at $1D00-$3306 -- memory gem4xe runs in -- so it is asked to come
+     * back through DOSVEC, which reloads it. */
+    _exit_dosvec = (uint8_t)(dos.kind == DOS_2);
 }
 
 /* SpartaDOS X: ':' in the second flag column (Programming Guide 4.50,

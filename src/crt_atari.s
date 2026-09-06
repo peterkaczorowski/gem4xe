@@ -37,12 +37,13 @@
               .rtmodel core, "*"
 
               .extern __program_start, _fl_ok
-              .public _atari_entry, _sys_exit, _exit_msg
+              .public _atari_entry, _sys_exit, _exit_msg, _exit_dosvec
               .public ae_sp, ae_pokmsk  ; for the CIO trampoline, src/sys/cio.s
 
 #define NMIEN  0xD40E                 /* ANTIC: VBI / DLI enable */
 #define IRQEN  0xD20E                 /* POKEY: IRQ enable */
 #define POKMSK 0x0010                 /* OS shadow of IRQEN */
+#define DOSVEC 0x000A                 /* DOS's own re-entry point */
 #define ICCOM  0x0342                 /* IOCB #0: command */
 #define ICBAL  0x0344                 /*          buffer address */
 #define ICBLL  0x0348                 /*          buffer length */
@@ -146,8 +147,24 @@ _sys_exit:
               lda     #0
               sta     ICBLL+1
               jsr     CIOV
+;;; Back to DOS.  A plain return goes to whatever loaded the program, and
+;;; that is right for a DOS whose command processor is resident -- both
+;;; SpartaDOSes, where the CP is waiting for its loader to return and a
+;;; re-entry through DOSVEC would set it reading the disk again.  It is
+;;; wrong for an Atari DOS 2 whose CP is a separate file: DUP.SYS lives at
+;;; $1D00-$3306, which is memory gem4xe has been running in, so the return
+;;; address points into wreckage.  There, DOSVEC -- the vector every DOS
+;;; keeps pointing at its own re-entry -- reloads the CP first.
+;;;
+;;; _exit_dosvec says which, and src/sys/dos.c sets it from the DOS it
+;;; identified.  Zero (nobody asked) keeps the return, which is what
+;;; every phase before this one did.
 ae_out:
-              rts                     ; to DOS
+              lda     _exit_dosvec
+              beq     ae_rts
+              jmp     (DOSVEC)
+ae_rts:       rts                     ; to DOS's own loader
 
 ae_edev:      .byte   "E:", 0x9b
 _exit_msg:    .word   0               ; set from C: a line to print on the way out
+_exit_dosvec: .byte   0               ; set from C: leave through DOSVEC

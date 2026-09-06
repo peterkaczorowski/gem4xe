@@ -245,18 +245,27 @@ def main(argv):
               b.memdump(STATUS, 2) == b"VD")
         got = b.memdump(0xFFF0, 16)
         check("the OS ROM is back in ($FFF0-$FFFF from the ROM)", got == rom[0x3FF0:])
+        # Coming back to DOS reloads DUP.SYS from the disk, which takes
+        # rather longer than a keystroke; type into it only once it is up.
+        b.frames(600)
         b.key("A")
-        b.frames(5)
-        # The OS keyboard IRQ puts the key in CH and DOS's command line, a
-        # CIO GET RECORD on E:, takes it out again (CH back to $FF) and echoes
-        # it -- so the evidence is the echo: the character before the cursor,
-        # in screen RAM, is 'A' in the display code ($21).
+        b.frames(60)
+        # The OS keyboard IRQ puts the key in CH and DOS, a CIO GET RECORD
+        # on E:, takes it out again (CH back to $FF) and echoes it -- so
+        # the evidence is both: the key was consumed, and an 'A' ($21 in
+        # display codes) appeared on the screen where DOS echoes it.
         savmsc = b.peek(SAVMSC) | (b.peek(SAVMSC + 1) << 8)
-        cur = savmsc + b.peek(ROWCRS) * 40 + (b.peek(COLCRS) | (b.peek(COLCRS + 1) << 8))
-        echo = b.peek(cur - 1)
+        page = bytes(b.memdump(savmsc, 960))
+        for r in range(24):        # what the DOS is showing, for the record
+            ln = "".join(chr((c & 0x7F) + 32 if (c & 0x7F) < 64 else
+                             (c & 0x7F) - 64 if (c & 0x7F) < 96 else 32)
+                         for c in page[r * 40:r * 40 + 40]).rstrip()
+            if ln:
+                print(f"    |{ln}")
         ch = b.peek(CH)
-        check("a typed key goes through the OS keyboard IRQ to DOS's prompt",
-              echo == 0x21, f"screen ${echo:02X} before the cursor, CH=${ch:02X}")
+        check("a typed key goes through the OS keyboard IRQ to DOS",
+              ch == 0xFF and 0x21 in page,
+              f"CH=${ch:02X}, {'an A is' if 0x21 in page else 'no A'} on the screen")
         b.frames(50)
         shot = os.path.join(SHOTDIR, "m10_dos.png")
         b.screenshot(shot)

@@ -226,13 +226,22 @@ def one(name, progname, how, echo, keep, check):
         # a prompt on SpartaDOS, the menu on a DOS 2.  The switch has to
         # wait for it, because a write made while the DOS is mid-SIO is
         # lost and the DOS hangs.
+        #
+        # SIX quiet samples, not three.  A DOS that has to read its
+        # command processor back in does it AFTER printing the prompt, so
+        # the screen is settled while the drive is still going -- and
+        # COLDST poked into the middle of that is a hung machine.
         refused, last, same = lines, None, 0
         for t in range(0, 20000, 100):
             b.frames(100)
             now = [ln for ln in screen(b) if ln.strip()]
-            same = same + 1 if now == last else 0
+            # CRITIC ($42) is the OS's critical-I/O flag: non-zero while
+            # SIO has the machine.  A screen that has not changed AND a
+            # drive that is not running is what "the DOS has it back"
+            # means; the screen alone said so in the middle of the load.
+            same = same + 1 if (now == last and not b.peek(0x42)) else 0
             last = now
-            if now != refused and same >= 3:
+            if now != refused and same >= 6:
                 break
         else:
             check(False, f"{name}: the DOS never took the machine back")

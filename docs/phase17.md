@@ -130,5 +130,40 @@ So the runner's disk is now built from the double-density fixture, whose
 DOS boots its own disk and gives the DOS 2 menu.  `L` is that menu's
 BINARY LOAD, and the file is called `M3` with no extension so the three
 keys after it are the ones every gate already typed.  190 sectors free,
-48 KB to grow into, and the gates that read the disk (`test-m12`) now
-exercise 256-byte sectors as well.
+48 KB to grow into, and the gates that read the disk (`test-m12`,
+`test-m15d`) now exercise 256-byte sectors as well.
+
+### And it found a real bug in the way back to DOS
+
+That DOS keeps its command processor in a separate file, `DUP.SYS`, at
+$1D00-$3306 -- which is memory gem4xe runs in.  `_sys_exit` used to
+RETURN to whatever loaded the program, and what loaded it was DUP: the
+`rts` landed in wreckage and the machine sat there with a blank screen
+(`make test-m10`, "a typed key goes through the OS keyboard IRQ to
+DOS").  The single-density fixture's DOS had never shown it, because its
+command processor is resident inside `DOS.SYS` and always survived.
+
+`src/crt_atari.s` now ends with `jmp (DOSVEC)` -- the vector every Atari
+DOS keeps pointing at its own re-entry, which reloads the command
+processor if it has to.  This was a real defect in gem4xe, not in the
+gate: a GEM session on any DOS 2 with a menu would have ended in a hung
+machine.
+
+But not for every DOS.  Doing it unconditionally broke `make test-boot`
+three times out of three: a SpartaDOS keeps its command processor
+resident and is *waiting for its loader to return*, and asking it to
+re-enter through DOSVEC sends it back to the disk -- while the gate,
+seeing a settled screen, pokes COLDST into the middle of the SIO and
+hangs the machine.  So `src/sys/dos.c` sets `_exit_dosvec` from the DOS
+it has already identified: DOSVEC for an Atari DOS 2, a plain return for
+either SpartaDOS.
+
+The gate learned something too.  It waited for the screen to stop
+changing and took that for "the DOS has the machine back" -- but the
+refusal is printed early and the rest of the program is read in silence
+afterwards, so a settled screen can mean a drive that is still running,
+and COLDST poked into the middle of an SIO hangs the machine.  It now
+wants six quiet samples AND `CRITIC` ($42) clear at every one of them.
+With that, the wait comes out at the same 3,600 frames run after run
+instead of anywhere between 1,000 and 3,600 -- which is what a
+measurement rather than a race looks like.

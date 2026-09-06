@@ -559,10 +559,12 @@ build/m6split.elf: $(M3_OBJS) src/gem4xe.scm
 build/m6split.xex: build/m6split.elf
 	python3 tools/mkxex.py $< $@ --entry _atari_entry --syms build/m6split.sym
 
+# Same program, same disk shape as the runner's: double density, called
+# M3, started from the DOS menu's BINARY LOAD.
 build/m6split-boot.atr: build/m6split.xex
-	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
+	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM $(DISK_DENSITY)
+	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ M3 --sweep
 
 build/m2-boot.atr: build/m2.xex
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }

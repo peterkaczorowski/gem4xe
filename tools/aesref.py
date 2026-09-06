@@ -4401,6 +4401,8 @@ def encode(script, tree_base, mfdb_addr=0):
             c7 = (rec[3] if len(rec) > 3 else tree_base) & 0xFFFF
         elif len(rec) > 3 and rec[3] is not None:
             c7, c8 = mfdb_addr & 0xFFFF, (mfdb_addr >> 16) & 0xFFFF
-        out += [op, len(pts) // 2, len(ints), c7, c8, 0, 0] + pts + ints
+        # the eighth header word is contrl[5], the sub-opcode: no AES call
+        # has one, but the runner reads it for v_gdp (tools/vdiref.py)
+        out += [op, len(pts) // 2, len(ints), c7, c8, 0, 0, 0] + pts + ints
     out.append(0)
     return out
