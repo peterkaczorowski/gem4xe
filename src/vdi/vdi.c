@@ -8,6 +8,7 @@
  */
 #include "vdi.h"
 #include "pointer.h"
+#include "font.h"
 #include "../vbxe/vbxe.h"
 #include "../sys/irq.h"
 #include "../sys/zwin.h"
@@ -760,7 +761,8 @@ void vdi_font_expand(void)
     for (page = 0; page < 2; page++) {
         volatile uint8_t *p = vram_win(VR_FONT + (uint32_t)page * 0x1000);
         for (row = (WORD)(page * 4); row < (WORD)(page * 4 + 4); row++) {
-            const uint8_t __far *sr = &font8x8[row * FONT_STRIDE];
+            const uint8_t __far *sr =
+                (const uint8_t __far *)(vdi_font + (uint32_t)row * FONT_STRIDE);
             for (ch = 0; ch < 256; ch++) {
                 uint8_t b = sr[ch];
                 *p++ = nib2[(b >> 6) & 3];
@@ -778,7 +780,8 @@ void vdi_font_expand(void)
         volatile uint8_t *p = vram_win(a);
         uint16_t left = (uint16_t)(MEMAC_WIN_SIZE - (a & (MEMAC_WIN_SIZE - 1)));
         for (row = 0; row < FONT_H; row++) {
-            const uint8_t __far *sr = &font8x8[row * FONT_STRIDE];
+            const uint8_t __far *sr =
+                (const uint8_t __far *)(vdi_font + (uint32_t)row * FONT_STRIDE);
             for (ch = 0; ch < 256; ch++) {
                 uint8_t b = sr[ch];
                 uint8_t out[FONT_OBYTES];
@@ -1147,7 +1150,8 @@ static void draw_glyph_cpu(WORD ch, WORD cx, WORD cy)
     WORD row, mode = (WORD)(vwk.wrt_mode + 1);
     uint8_t ink = (uint8_t)HW(vwk.text_color);
     for (row = 0; row < FONT_H; row++)
-        g[row] = font8x8[row * FONT_STRIDE + (ch & 0xFF)];
+        g[row] = *(const uint8_t __far *)
+                  (vdi_font + (uint32_t)row * FONT_STRIDE + (ch & 0xFF));
     raster_1bpp(g, 1, 0, 0, FONT_W, FONT_H, cx, cy, mode, ink,
                 (uint8_t)(mode == MD_ERASE ? ink : HW(0)));
 }
@@ -2127,6 +2131,52 @@ static void vdi_vst_height(void)
     contrl[2] = 2;                  /* two POINTS */
 }
 
+/* vst_font: choose a face.  There are at most two -- the one linked in and
+ * the one a .FNT loaded (src/vdi/font.c) -- so the answer is one of two ids,
+ * and as everywhere in the VDI the caller must use what comes back rather
+ * than what it asked for. */
+static void vdi_vst_font(void)
+{
+    intout[0] = vdi_font_select(intin[0]);
+    contrl[4] = 1;
+}
+
+/* vst_load_fonts: GDOS's call, doing here what GDOS does -- read what the
+ * system knows about and say how many faces that added.  There is one place
+ * to look, SYSTEM.FNT beside the program, so the answer is 0 or 1.  The
+ * system loads it at start-up as well; this is how an application asks for
+ * it after putting one there, and how it finds out whether there is one. */
+static void vdi_vst_load_fonts(void)
+{
+    intout[0] = (WORD)(vdi_font_load() ? 1 : 0);
+    contrl[4] = 1;
+}
+
+/* vst_unload_fonts: back to the face that is linked in.  The far memory the
+ * loaded strip took stays taken -- far_alloc gives none back -- so a load
+ * after this reuses it. */
+static void vdi_vst_unload_fonts(void)
+{
+    vdi_font_default();
+}
+
+/* vqt_name: a face's id and its name, one character to a word, which is how
+ * the VDI has always answered it.  Face 1 is the system's, 2 the loaded one;
+ * an index this driver does not have answers with the system's. */
+static void vdi_vqt_name(void)
+{
+    const char *nm = vdi_font_name(intin[0]);
+    WORD i, end = 0;
+
+    intout[0] = vdi_font_id(intin[0]);
+    for (i = 0; i < 32; i++) {
+        if (!end && !nm[i])
+            end = 1;
+        intout[i + 1] = (WORD)(end ? 0 : (uint8_t)nm[i]);
+    }
+    contrl[4] = 33;
+}
+
 /* vqt_attributes -- the AES asks for the current text settings before drawing
  * a string, rather than tracking them itself. */
 static void vdi_vqt_attributes(void)
@@ -2217,7 +2267,7 @@ static const VDI_OP jmptb1[] = {
     vdi_vsl_type,    /* 15 */                   vdi_vsl_width,   /* 16 */
     vdi_vsl_color,   /* 17 */                   v_nop,           /* 18 vsm_type */
     v_nop,           /* 19 vsm_height */        v_nop,           /* 20 vsm_color */
-    v_nop,           /* 21 vst_font */          vdi_vst_color,   /* 22 */
+    vdi_vst_font,    /* 21 */                   vdi_vst_color,   /* 22 */
     vdi_vsf_interior,/* 23 */                   vdi_vsf_style,   /* 24 */
     vdi_vsf_color,   /* 25 */                   v_nop,           /* 26 vq_color */
     v_nop,           /* 27 vq_cellarray (nop)*/ vdi_v_locator,   /* 28 */
@@ -2249,8 +2299,8 @@ static const VDI_OP jmptb2[] = {
     v_nop,           /* 116 vqt_extent */
     v_nop,           /* 117 vqt_width */
     vdi_vex_timv,    /* 118 */
-    v_nop,           /* 119 vst_load_fonts */
-    v_nop,           /* 120 vst_unload_fonts */
+    vdi_vst_load_fonts,  /* 119 */
+    vdi_vst_unload_fonts,/* 120 */
     vdi_vrt_cpyfm,   /* 121 */
     vdi_v_show_c,    /* 122 */
     vdi_v_hide_c,    /* 123 */
@@ -2259,7 +2309,8 @@ static const VDI_OP jmptb2[] = {
     vdi_vex_motv,    /* 126 */
     vdi_vex_curv,    /* 127 */
     vdi_vq_key_s,    /* 128 */
-    vdi_vs_clip      /* 129 */
+    vdi_vs_clip,     /* 129 */
+    vdi_vqt_name     /* 130 */
 };
 
 #define N1 ((WORD)(sizeof jmptb1 / sizeof jmptb1[0]))

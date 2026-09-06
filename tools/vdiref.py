@@ -30,6 +30,9 @@ VSC_FORM, V_SHOW_C, V_HIDE_C, VQ_MOUSE = 111, 122, 123, 124
 VSIN_MODE, VQIN_MODE, VEX_TIMV, VSL_UDSTY = 33, 115, 118, 113
 VEX_BUTV, VEX_MOTV = 125, 126
 VST_HEIGHT, VQT_ATTRIBUTES, V_ESCAPE = 12, 38, 5
+VST_FONT, VST_LOAD_FONTS, VST_UNLOAD_FONTS, VQT_NAME = 21, 119, 120, 130
+FONT_ID_SYS, FONT_SYSTEM, FONT_LOADED = 1, 1, 2
+FONT_SYSNAME = "gem4xe system 8x8"    # what vqt_name(1) answers
 V_LOCATOR = 28
 V_STRING, VQ_KEY_S = 31, 128
 VSF_UDPAT = 112
@@ -151,6 +154,20 @@ class VDI:
     WK_FIELDS = ("clip", "xmn", "ymn", "xmx", "ymx", "wrt_mode", "line_width",
                  "line_index", "line_color", "text_color",
                  "fill_style", "fill_index", "fill_color", "ud_patrn", "ud_ls")
+
+    # The face in use, and the one a .FNT would load: a gate that puts a
+    # font on the disk calls load_font() with the same file's bytes, so
+    # the two sides draw from the same strip (src/vdi/font.c).
+    font = FONT
+    font_file = None            # the loaded strip, or None
+    font_name = ""
+    font_id = FONT_ID_SYS
+
+    def load_font(self, strip, name, font_id):
+        """What the disk's SYSTEM.FNT holds.  The system loads it at
+        start-up, so the model starts with it in use as well."""
+        self.font_file, self.font_name, self.font_id = strip, name, font_id
+        self.font = strip
 
     def reset(self):
         # v_opnwk: the physical workstation, handle 1, and every virtual
@@ -505,7 +522,7 @@ class VDI:
         for i, code in enumerate(ints):
             cx = x + i * FONT_W
             for row in range(FONT_H):
-                b = FONT[row * FONT_STRIDE + (code & 0xFF)]
+                b = self.font[row * FONT_STRIDE + (code & 0xFF)]
                 for col in range(FONT_W):
                     self._paint_pixel(cx + col, cy + row, self.text_color,
                                       b & (0x80 >> col))
@@ -737,6 +754,29 @@ class VDI:
             self.intout = [1, self.text_color, 0, 0, 0, self.wrt_mode + 1]
             self.ptsout = [FONT_W, FONT_TOP, FONT_W, FONT_H]
             self.contrl2, self.contrl4 = 2, 6
+        elif op == VST_FONT:
+            # the face now drawn with: the system's, or the loaded one when
+            # its id is asked for (src/vdi/font.c's vdi_font_select)
+            got = ints[0] if (self.font_file and ints[0] == self.font_id
+                              and ints[0] != FONT_ID_SYS) else FONT_ID_SYS
+            self.font = self.font_file if got != FONT_ID_SYS else FONT
+            self.intout[0] = got
+            self.contrl4 = 1
+        elif op == VST_LOAD_FONTS:
+            # SYSTEM.FNT, if the disk the gate built has one: the model is
+            # told what that file holds (VDI.load_font)
+            self.font = self.font_file or FONT
+            self.intout[0] = 1 if self.font_file else 0
+            self.contrl4 = 1
+        elif op == VST_UNLOAD_FONTS:
+            self.font = FONT
+        elif op == VQT_NAME:
+            loaded = self.font_file and ints[0] == FONT_LOADED
+            name = self.font_name if loaded else FONT_SYSNAME
+            self.intout = [self.font_id if loaded else FONT_ID_SYS]
+            self.intout += [ord(c) for c in name[:32]]
+            self.intout += [0] * (33 - len(self.intout))
+            self.contrl4 = 33
         elif op == VEX_TIMV:
             self.intout[0] = 20          # 50 Hz PAL frame, in ms
             self.contrl4 = 1

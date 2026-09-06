@@ -1,0 +1,172 @@
+/* lang.c -- LANG.RSC: everything the system says, kept in far memory --
+ * and, since a translation is no use in a character set that cannot
+ * spell it, the SYSTEM.FNT beside it (src/vdi/font.c).  lang_init()
+ * reads both, because they are the two files a translation ships.
+ *
+ * The rule the project set itself is that no string a person reads is in
+ * the C (docs/shipping.md, section 5).  The desktop's went into its own
+ * resource in Phase 14; the SYSTEM's -- form_error's alerts, the shell's
+ * two failures -- are here, as free strings of a resource that
+ * tools/langrsc.py builds and a translator replaces.
+ *
+ * Far, and copied a string at a time.  The application pool is 14 KB and
+ * an application's resource has to fit in it beside the desktop's, so a
+ * kilobyte of alert text cannot live there; the resource sits in far
+ * memory as the file's own bytes, unfixed (there are no trees in it to
+ * fix), and lang_str() copies the one string being used into a near
+ * buffer, which is what fm_alert wants.  ONE buffer: an alert is modal,
+ * so no two of these are alive at once, and a caller that wants to keep
+ * one past the next call must copy it.
+ *
+ * The file is optional.  A disk without LANG.RSC gets the same English
+ * from build/lang_rsc.c -- the identical bytes, linked into the far
+ * image -- because a system that cannot say "this application cannot be
+ * found" because its language file is missing is worse than one that
+ * says it in English.  So the file OVERRIDES; it is not required.
+ *
+ * What it will not do is fix up trees.  The file selector's dialog is
+ * still built into the far image (tools/fselrsc.py) for the pool reason
+ * in tools/langrsc.py's header, so a translation cannot widen it yet.
+ */
+#include <string.h>
+#include "aes/aes.h"
+#include "sys/cio.h"
+#include "sys/farmem.h"
+#include "vdi/font.h"
+#include "lang_rsc.h"
+
+/* The .RSC header, by offset rather than by struct: every word in the
+ * file is big-endian, so it is read a byte at a time anyway, and this
+ * file has no business knowing the rest of the layout.  (aes.h's RSHDR
+ * is the same fields in the 65816's order, for a resource already
+ * loaded and swapped.) */
+#define RSH_VRSN     0          /* UWORD: 4 set means the colour format */
+#define RSH_FRSTR   10          /* UWORD: offset of the free-string table */
+#define RSH_NSTRING 30          /* WORD:  how many strings are in it      */
+#define RSH_RSSIZE  34          /* UWORD: the whole file                  */
+#define RSH_SIZE    36
+
+#define LANG_CHUNK 256          /* the near bounce buffer for the read */
+
+static uint32_t lang_base;      /* far address of the resource image */
+static uint16_t lang_frstr;     /* the free-string table, from its start */
+static WORD     lang_n;         /* strings in it */
+
+static uint16_t be16(const uint8_t *p)
+{
+    return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
+}
+
+/* The English in the far image, which is where every run starts. */
+static void lang_builtin(void)
+{
+    uint8_t hdr[RSH_SIZE];
+
+    lang_base = (uint32_t)(const uint8_t __far *)lang_rsc;
+    far_get(hdr, lang_base, RSH_SIZE);
+    lang_frstr = be16(&hdr[RSH_FRSTR]);
+    lang_n = (WORD)be16(&hdr[RSH_NSTRING]);
+}
+
+/* Read `size` bytes of an open file into far memory through a near
+ * buffer, the header already read and handed back in.  0 unless all of
+ * it arrived. */
+static WORD lang_read(int16_t fd, uint32_t dst, const uint8_t *hdr, uint16_t size)
+{
+    uint16_t left = (uint16_t)(size - RSH_SIZE), got;
+    uint8_t buf[LANG_CHUNK], st;
+
+    far_put(dst, hdr, RSH_SIZE);
+    dst += RSH_SIZE;
+    while (left) {
+        uint16_t want = left > LANG_CHUNK ? LANG_CHUNK : left;
+        st = cio_read(fd, buf, want, &got);
+        if ((st != CIO_OK && st != CIO_OK_EOF) || got != want)
+            return 0;
+        far_put(dst, buf, got);
+        dst += got;
+        left = (uint16_t)(left - got);
+    }
+    return 1;
+}
+
+/* The other half of a translation: the character set.  LANG.RSC in Polish
+ * is unreadable in the Atari ST's set, so a translation ships SYSTEM.FNT
+ * beside it and the system takes it if it is there (src/vdi/font.c).  The
+ * VDI is told where to look either way, so vst_load_fonts can go back for
+ * it later. */
+static void lang_font(void)
+{
+    char cio[CIO_NAME_MAX + 1];
+
+    sh_cioname(FONT_FILE, cio);
+    vdi_font_where(cio);
+    vdi_font_load();
+}
+
+void lang_init(void)
+{
+    static WORD done;           /* the files are read once a run */
+    uint8_t hdr[RSH_SIZE];
+    char cio[CIO_NAME_MAX + 1];
+    uint16_t size, got;
+    uint32_t mem;
+    int16_t fd;
+
+    if (done)
+        return;
+    done = 1;
+    lang_builtin();
+    sh_cioname(LANG_FILE, cio);
+    fd = cio_open(cio, CIO_A_READ, 0);
+    if (fd < 0) {
+        lang_font();
+        return;
+    }
+    if (cio_read(fd, hdr, RSH_SIZE, &got) != CIO_OK || got != RSH_SIZE) {
+        cio_close(fd);
+        lang_font();
+        return;
+    }
+    size = be16(&hdr[RSH_RSSIZE]);
+    /* Refuse what cannot be read rather than half-read it: the colour
+     * format, a file that does not hold its own header, and one with
+     * fewer strings than the system asks for by index. */
+    if ((be16(&hdr[RSH_VRSN]) & NEW_FORMAT_RSC) || size < RSH_SIZE
+        || (WORD)be16(&hdr[RSH_NSTRING]) < LANG_NSTRING) {
+        cio_close(fd);
+        lang_font();
+        return;
+    }
+    mem = far_alloc(size);
+    if (!mem) {
+        cio_close(fd);
+        lang_font();
+        return;
+    }
+    if (lang_read(fd, mem, hdr, size)) {
+        lang_base = mem;
+        lang_frstr = be16(&hdr[RSH_FRSTR]);
+        lang_n = (WORD)be16(&hdr[RSH_NSTRING]);
+    }
+    cio_close(fd);
+    /* A read that failed leaves the far memory taken and the built-in in
+     * use, which is the safe way round: far_alloc never gives it back. */
+    lang_font();
+}
+
+const char *lang_str(WORD n)
+{
+    static char buf[LANG_MAXLEN + 1];
+    uint8_t off[4];
+
+    if (n < 0 || n >= lang_n) {         /* a string this build does not have */
+        buf[0] = '\0';
+        return buf;
+    }
+    far_get(off, lang_base + lang_frstr + (uint32_t)((uint16_t)n << 2), 4);
+    far_strget(buf, lang_base + (((uint32_t)off[0] << 24) | ((uint32_t)off[1] << 16)
+                                 | ((uint32_t)off[2] << 8) | off[3]),
+               sizeof buf);
+    return buf;
+}

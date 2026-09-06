@@ -46,6 +46,8 @@ full-screen repaints.
 | `make test-m17` | PASS | the GEM Desktop: DESKTOP.G4A's menu bar, drive icons and trash, an icon clicked, Desk -> About and its dialog, a drive opened into a folder window, a folder opened in it and closed back out, the fuller, the arrows, the closer, File -> Quit -- driven at the mouse and checked against `tools/deskref.py`, the desktop itself transcribed against the AES model, its directory listings answered from the disk image: thirteen screens, the desktop's 1984 bytes of globals byte for byte at nine of them, 252 calls on both sides, the pool and far heap back, the runner's and the desktop's stack low-water marks (1223 of 2048, 292 of 640) |
 | `make test-m18` | PASS | a program run from the desktop: drive A opened, the window full, M11.G4A double-clicked -- the desktop puts its window's place in the shell buffer as DESKTOP.INF text and exits, the shell runs the program, the desktop comes back and opens the window where it was, File -> Quit -- the desktop transcribed twice against one AES model with the program's calls counted between: six screens, `G` at four waits, 275 calls over the three programs, the pool and far heap back, each run's stack low-water mark (425 and 268 of 640) |
 | `make test-m19` | PASS | the desktop's first writes to a disk: File -> New folder, the name typed into its dialog, `Dcreate`, the folder in the listing; the same name again, refused, and the alert -- text and all -- out of DESKTOP.RSC's free strings; the SUB folder selected and File -> Delete, counted first (three files, two folders, the walk a DTA deep per level), confirmed in a dialog whose counts tick down, and the tree gone -- eight screens, `G` at five waits, 289 calls on both sides, and the disk image itself read back afterwards |
+| `make test-m20` | PASS | what the system says comes off the disk: `form_error` on three disks — the product's `LANG.RSC`, a German translation of it, and no file at all — each compared with the model given the strings that disk carries, so the first and third draw the same screen and the second draws the translation |
+| `make test-m21` | PASS | a loadable font: the system font inverted so every glyph differs, read as `SYSTEM.FNT` at start-up off one disk and absent from another, with `vqt_name`, `vst_font` and GDOS's `vst_load_fonts`/`vst_unload_fonts` answering for the right face either way |
 | `make test-boot` | PASS | both product disks booting into the desktop with nothing typed: `build/gem-sp.atr` (SpartaDOS, `STARTUP.BAT` for 3.2 and `AUTOEXEC.BAT` for X) and `build/gem-boot.atr` (a double-density DOS 2, the system named `AUTORUN.SYS`, `DUP.SYS` still on it and 42 KB free); the 6502 boot runs GEM by itself and ends in the loader's refusal; `COLDST` and the Rapidus switch bring the machine up cold as a 65C816, the DOS starts GEM again, and the far image is spot-checked against the linker's output before the desk is compared pixel for pixel with the desktop model at its first wait |
 | `make test-cf` | PASS | the product **CF card** booting into the desktop: `build/gem-cf.img`, an APT table and two SDFS partitions, on a SIDE 2's IDE bus, with SpartaDOS X *and* the PBI BIOS that mounts those partitions coming from a real Ultimate 1MB flash image. The gate walks the U1MB BIOS setup itself (PBI BIOS on, hard disk on, an ID that is not the Rapidus's) from a fresh profile of its own, keeps the SIDE's SDX bank unmapped so the PBI BIOS will touch the disk, and then runs the same boot as `test-boot` -- refusal, switch, desk against the model. Needs the U1MB fixture and the patched emulator, so not in `make test` |
 | `make test-m14u` `test-m15u` | PASS | the same two on SpartaDOS X 4.49b booted from a real Ultimate 1MB flash image, U1MB switched on -- needs the patched emulator in `tools/altirra/`, so not in `make test` |
@@ -253,10 +255,22 @@ old DOS, turns out not to have at all. **No string a person
 reads belongs in the C**, and none does now: the desktop's eleven alerts are nine free strings of DESKTOP.RSC,
 asked for by index (`fun_alert`, the donor's shape), and the gate puts
 one on the screen and compares it. The one exception is the alert that
-says the resource is missing, which cannot come from the resource. Next
-is a `LANG.RSC` for what the *system* says — far-resident, copied a
-string at a time into a near buffer, since bank $00 is the scarce thing
-— beside a per-language resource for each application, because a GEM
+says the resource is missing, which cannot come from the resource.
+
+**A translation is two files** (`docs/phase15.md`). `LANG.RSC` is what
+the *system* says — `form_error`'s alerts, the shell's failures — kept
+far-resident and copied a string at a time into a near buffer, since bank
+$00 is the scarce thing, with the same bytes linked in as the English a
+disk without the file falls back on. `SYSTEM.FNT` is the character set it
+says it in: the 8x8 strip is loadable, so Latin-2, Cyrillic, Greek or
+Turkish (all of which EmuTOS ships, and `make fonts` writes out) replace
+the Atari ST set the system links. `make test-m20` boots three disks —
+the English, a German one, and no file — and `make test-m21` two, with
+and without a font; both are compared with the models given what that
+disk carries. The calls are GDOS's own (`vst_load_fonts`,
+`vst_unload_fonts`, `vst_font`, `vqt_name`) and none of the rest of GDOS:
+with 14 MB the memory was never the constraint, the AES's fixed character
+cell is. An application's own `.RSC` stays the third file, because a GEM
 dialog's geometry travels with its text.
 
 ## Verification

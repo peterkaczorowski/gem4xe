@@ -3228,6 +3228,35 @@ class AES:
             alert = alert[1:]
         return alert[1:], min(i + 1, maxnum), longest
 
+    lang = None          # what LANG.RSC says, when a gate hands it over
+
+    # form_error's map from a DOS error to a string of LANG.RSC
+    # (src/aes/alert.c's fm_error, the donor's gemfmlib.c).
+    FM_ERRSTR = {2: "ERRFILE", 3: "ERRFILE", 18: "ERRFILE", 4: "ERRDOCS",
+                 5: "ERREXIST", 15: "ERRDRIVE", 8: "ERRMEM", 10: "ERRMEM",
+                 11: "ERRMEM"}
+
+    def fm_error(self, n, strings=None):
+        """form_error: the alert for a DOS error number.  The texts are
+        the system's, not the application's, so they come from what
+        tools/langrsc.py describes -- or from `strings`/`self.lang`, when
+        a gate is proving that a LANG.RSC on the disk is the one being
+        read.  The number is written over the two characters after the
+        '#', which is what the target does."""
+        if n > 63:
+            return False
+        texts = dict(strings) if strings else self.lang
+        if texts is None:
+            import langrsc
+            texts = dict(langrsc.STRINGS)
+        name = self.FM_ERRSTR.get(n, "ERRTOS")
+        s = texts[name]
+        if name == "ERRTOS":
+            h = s.find("#")
+            if h >= 0 and len(s) >= h + 3:
+                s = s[:h + 1] + "%02d" % n + s[h + 3:]
+        return self.fm_alert(1, s) != 1
+
     def fm_alert(self, defbut, alstr):
         """form_alert: the string parsed into a ten-object tree, built in
         character cells, drawn, and the button pressed returned (1..3).
@@ -3979,6 +4008,10 @@ class AES:
             # address slot (self.fs_strings, what the harness staged)
             io[0] = self.fm_alert(ints[0], self.fs_strings[self.rec_addr])
             c4 = 1
+        elif n == 53:
+            # form_error: the number; the text is the system's own
+            io[0] = 1 if self.fm_error(ints[0]) else 0
+            c4 = 1
         elif n == 54:
             io[0], io[1], io[2], po[0] = self.center()
             c4, c2 = 3, 1
@@ -4227,7 +4260,7 @@ OBJC_EDIT, OBJC_CHANGE, FORM_CENTER = 1046, 1047, 1054
 EVNT_KEYBD, EVNT_BUTTON, EVNT_MOUSE, EVNT_TIMER = 1020, 1021, 1022, 1024
 EVNT_MULTI, EVNT_DCLICK = 1025, 1026
 FORM_DO, FORM_DIAL, FORM_KEYBD, FORM_BUTTON = 1050, 1051, 1055, 1056
-FORM_ALERT = 1052
+FORM_ALERT, FORM_ERROR = 1052, 1053
 GRAF_RUBBOX, GRAF_DRAGBOX = 1070, 1071
 GRAF_GROWBOX, GRAF_SHRINKBOX, GRAF_WATCHBOX = 1073, 1074, 1075
 GRAF_MKSTATE = 1079
@@ -4255,7 +4288,7 @@ GD_EPTHNF, GD_EACCDN, GD_EFILNF, GD_ENMFIL = -34, -36, -33, -49
 
 
 def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None,
-        dirs=None, pool=None, buffers=None, dirsep=""):
+        dirs=None, pool=None, buffers=None, dirsep="", lang=None):
     """Run a mixed VDI/AES script against fresh models; returns
     (vdi, aes, results) with one result record per script record, the
     way vdiref.VDI.run() does for a pure VDI script.
@@ -4290,6 +4323,7 @@ def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None,
     a.dos_dirsep = dirsep       # the DOS seam's: "" on DOS 2, ">" on a SpartaDOS
     a.pool_mark = pool
     a.fs_strings = dict(buffers or {})
+    a.lang = dict(lang) if lang else None    # what LANG.RSC says, if not English
     return v, a, resume(v, a, script, plan)
 
 

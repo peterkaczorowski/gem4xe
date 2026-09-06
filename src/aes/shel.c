@@ -33,6 +33,7 @@
 #include "sys/cio.h"
 #include "sys/dos.h"
 #include "sys/farmem.h"
+#include "lang_rsc.h"
 
 #define SH_CMDLEN   128         /* MAXPATHLEN: the command, NUL-terminated */
 #define SH_TAILLEN  128         /* CMDTAILSIZE: architectural              */
@@ -256,8 +257,8 @@ WORD sh_main(void)
         ob_draw(gl_wtree, ROOT, 0);         /* the desk, edge to edge */
         if (rc)
             fm_alert(1, rc == APP_E_FILE
-                        ? "[1][This application|cannot be found.][ OK ]"
-                        : "[1][This application|cannot be loaded.][ OK ]");
+                        ? lang_str(LS_APPNOTFOUND)
+                        : lang_str(LS_APPNOTLOAD));
         rc = sh_ldapp();
     } while (sh_doexec != 4);
     return rc ? rc : sh_runs;

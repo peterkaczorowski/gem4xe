@@ -36,6 +36,7 @@ EOL = 0x9B
 SYSTEM = [("build/gem.xex", "GEM>GEM.COM"),
           ("build/desktop.g4a", "GEM>DESKTOP.G4A"),
           ("build/desktop.rsc", "GEM>DESKTOP.RSC"),
+          ("build/lang.rsc", "GEM>LANG.RSC"),
           ("build/m11_app.g4a", "APPS>M11.G4A")]
 DIRS = ["GEM", "APPS"]
 BOOT = ["CD >GEM", "GEM"]

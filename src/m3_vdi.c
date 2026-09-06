@@ -33,6 +33,7 @@
  */
 #include "vdi/vdi.h"
 #include "vdi/pointer.h"
+#include "vdi/font.h"
 #include "aes/aes.h"
 #include "sys/farmem.h"
 #include "sys/rapidus.h"
@@ -470,6 +471,7 @@ static void run_script(void)
                 wm_init();
                 mn_init();
                 sh_init();                  /* far buffers: before any app_load */
+                lang_init();                /* LANG.RSC, or the English in the image */
                 fs_start();                 /* the selector's name slots, too */
                 break;
             case 12:                        /* appl_write: id, len, msg[8] */
@@ -611,6 +613,12 @@ static void run_script(void)
             case 52:                        /* form_alert: default button,
                                              * the string in the tree slot */
                 intout[0] = fm_alert(intin[0], (const char *)tree);
+                c4 = 1;
+                break;
+            case 53:                        /* form_error: the DOS error
+                                             * number; the text is the
+                                             * system's own (LANG.RSC) */
+                intout[0] = fm_error(intin[0]);
                 c4 = 1;
                 break;
             case 54:                        /* form_center (ob_center) */
@@ -924,7 +932,7 @@ __task void main(void)
      * "next" bit is always set.  Clear the control region before first use. */
     vram_fill(VR_XDL, 0x00, 0x1000);
     vbxe_xdl_hr(VR_SCREEN0);
-    vdi_font_expand();          /* 1bpp GEM font -> 4bpp masks in VRAM */
+    vdi_font_default();         /* the linked 8x8 into VRAM */
     vdi_init();
     /* No pointing device: the harness IS the pointer.  It writes ptr_state
      * directly (position and buttons), and PTR_NONE keeps ptr_poll() from
@@ -953,6 +961,12 @@ __task void main(void)
         STATUS[23] = (unsigned char)(a >> 16);
     }
     gemdos_init();              /* its far state below any application's */
+    /* The system's own two files, as GEM.COM reads them at start-up
+     * (src/aes/lang.c): LANG.RSC for what it says, SYSTEM.FNT for the
+     * character set it says it in.  Here as well as in the gsx_start op,
+     * because a pure VDI script never reaches that one -- test-m21 is
+     * exactly such a script. */
+    lang_init();
 
     /* Which bank is this code actually executing in?  src/farload.s copies it
      * up at load time and nothing else can confirm that it landed: the bridge

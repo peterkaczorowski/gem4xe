@@ -614,6 +614,14 @@ WORD rs_saddr(UWORD rtype, UWORD rindex, uint32_t addr);
 void rs_obfix(OBJECT *tree, WORD obj);
 void rs_fixit(RSHDR *h);            /* the loader's fix-up, on any image */
 
+/* ---- what the system says: LANG.RSC (src/aes/lang.c) ------------------ */
+/* The file a translator replaces, looked for where the program was
+ * started.  lang_str answers a NEAR string good until the next call --
+ * one buffer, which is enough because alerts are modal. */
+#define LANG_FILE "LANG.RSC"
+void lang_init(void);                            /* before the first alert */
+const char *lang_str(WORD n);                    /* LS_*, build/lang_rsc.h */
+
 /* fsel.c -- the file selector (docs/phase11.md) */
 extern WORD gl_drvbits;             /* which drive buttons are live, A = bit 0 */
 void fs_start(void);                /* at AES start-up: the far name slots */

@@ -81,6 +81,8 @@ DOS_2 = 0                       # src/sys/dos.h
 REFUSAL = "gem4xe:"             # src/farload.s msg_no816
 FARMEM_BRK = 8                  # the cursor's offset in FARMEM (src/sys/farmem.h)
 SEAM = 8                        # bytes checked either side of a chunk seam
+STEP = 20                       # frames between screen reads while waiting for
+                                # the refusal: see the poll in one()
 HEAD = 64                       # and at the head of every chunk: where a DOS
                                 # that loses part of one shows up
 
@@ -191,18 +193,28 @@ def one(name, progname, how, echo, keep, check):
     shot = os.path.join(SHOTDIR, f"product-{name.split('.')[0]}.png")
     try:
         # -- 1. the 6502 pass, hands off ------------------------------------
-        for t in range(0, 12000, 100):
-            b.frames(100)
+        # A FINE poll, because the refusal is not on the screen for long:
+        # GEM prints it, returns to the DOS, and a DOS 2 clears the screen
+        # for its menu a moment later.  At a hundred frames a poll this
+        # gate missed the window about one run in ten and reported that
+        # the DOS never started GEM, with the menu on the screen as its
+        # evidence -- which was true and not the point.  Twenty frames is
+        # a third of a second and costs a screen read, not a frame.
+        seen = None
+        for t in range(0, 12000, STEP):
+            b.frames(STEP)
             lines = [ln for ln in screen(b) if ln.strip()]
             if any(REFUSAL in ln for ln in lines):
+                seen = lines
                 break
-        else:
+        if seen is None:
             check(False, f"{name}: the DOS did not start GEM on the 6502")
             for ln in screen(b):
                 if ln.strip():
                     print("   |" + ln)
             return
-        print(f"  the DOS started GEM and GEM refused, {t + 100} frames in")
+        lines = seen
+        print(f"  the DOS started GEM and GEM refused, {t + STEP} frames in")
         if echo:
             check(any(ln.rstrip().endswith(echo) for ln in lines),
                   f"{name}: no {echo!r} on the screen: the DOS did not run the batch")

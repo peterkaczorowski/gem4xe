@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include "vdi/vdi.h"
 #include "vdi/pointer.h"
+#include "vdi/font.h"
 #include "aes/aes.h"
 #include "sys/farmem.h"
 #include "sys/rapidus.h"
@@ -52,7 +53,7 @@ __task void main(void)
      * the "next" bit is always set.  Clear the control region first. */
     vram_fill(VR_XDL, 0x00, 0x1000);
     vbxe_xdl_hr(VR_SCREEN0);
-    vdi_font_expand();
+    vdi_font_default();         /* the linked 8x8 into VRAM */
     vdi_init();
     ptr_init(GEM_POINTER, SCR_W / 2, SCR_H / 2);
     farmem_probe();
@@ -65,6 +66,7 @@ __task void main(void)
     wm_init();
     mn_init();
     sh_init();                  /* far buffers: before any app_load */
+    lang_init();                /* LANG.RSC, or the English in the image */
     fs_start();
     sh_main();
 

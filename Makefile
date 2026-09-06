@@ -51,7 +51,7 @@ SRC_U1MB ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures
 
 HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
 M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o
 
 # GEM.COM, the product (src/gem.c): the runner's objects with the runner
 # itself and its compiled-in test application taken out, linked on the
@@ -116,7 +116,7 @@ build/grlib.o: src/aes/grlib.c src/aes/aes.h src/vdi/vdi.h build/gemdata.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -I build -o $@ $<
 
-build/alert.o: src/aes/alert.c src/aes/aes.h src/sys/app.h build/gemdata.h
+build/alert.o: src/aes/alert.c src/aes/aes.h src/sys/app.h build/gemdata.h build/lang_rsc.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -I build -o $@ $<
 
@@ -210,6 +210,43 @@ build/gemdata.c build/gemdata.h: tools/gemdata.py
 build/gemdata.o: build/gemdata.c src/aes/aes.h
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
+# LANG.RSC: what the system says.  One description makes three things --
+# the file a translator replaces, the same bytes as the far fallback, and
+# the indices the C uses (tools/langrsc.py).
+build/lang.rsc build/lang_rsc.c build/lang_rsc.h: tools/langrsc.py tools/rsc.py
+	@mkdir -p build
+	python3 tools/langrsc.py build/lang.rsc build/lang_rsc.c build/lang_rsc.h
+build/lang_rsc.o: build/lang_rsc.c
+	@mkdir -p build
+	$(CC) $(CFLAGS) -o $@ $<
+build/font.o: src/vdi/font.c src/vdi/font.h src/vdi/vdi.h src/sys/cio.h src/sys/farmem.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+# The character sets a translation can ship as SYSTEM.FNT, written out of
+# an EmuTOS checkout in the format the VDI reads (tools/mkfnt.py).  Not
+# built by `all`: the product's font is the one linked in, and these are
+# for whoever is translating.  `make fonts` writes them.
+FONTS = build/l2.fnt build/ru.fnt build/gr.fnt build/tr.fnt
+fonts: $(FONTS)
+build/l2.fnt: tools/mkfnt.py ; @mkdir -p build && python3 tools/mkfnt.py $(EMUTOS)/bios/fnt_l2_8x8.c $@
+build/ru.fnt: tools/mkfnt.py ; @mkdir -p build && python3 tools/mkfnt.py $(EMUTOS)/bios/fnt_ru_8x8.c $@
+build/gr.fnt: tools/mkfnt.py ; @mkdir -p build && python3 tools/mkfnt.py $(EMUTOS)/bios/fnt_gr_8x8.c $@
+build/tr.fnt: tools/mkfnt.py ; @mkdir -p build && python3 tools/mkfnt.py $(EMUTOS)/bios/fnt_tr_8x8.c $@
+
+# The system font as a file, and the same font inverted: what test-m21
+# loads, built from the strip that is checked in so the gate needs no
+# EmuTOS checkout.
+build/st.fnt: tools/mkfnt.py src/vdi/font8x8.c
+	@mkdir -p build
+	python3 tools/mkfnt.py --from-strip src/vdi/font8x8.c $@
+build/inv.fnt: tools/mkfnt.py build/st.fnt
+	python3 tools/mkfnt.py --invert build/st.fnt $@
+
+build/lang.o: src/aes/lang.c src/aes/aes.h src/sys/cio.h src/sys/farmem.h src/vdi/font.h build/lang_rsc.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -I build -o $@ $<
+
 build/fsel_rsc.c build/fsel_rsc.h: tools/fselrsc.py tools/rsc.py tools/aesref.py
 	@mkdir -p build
 	python3 tools/fselrsc.py build/fsel_rsc.c build/fsel_rsc.h
@@ -218,9 +255,9 @@ build/fsel_rsc.o: build/fsel_rsc.c
 build/fsel.o: src/aes/fsel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/dos.h src/sys/farmem.h build/fsel_rsc.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -I build -o $@ $<
-build/shel.o: src/aes/shel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/dos.h src/sys/farmem.h
+build/shel.o: src/aes/shel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/dos.h src/sys/farmem.h build/lang_rsc.h
 	@mkdir -p build
-	$(CC) $(CFLAGS) -I src -o $@ $<
+	$(CC) $(CFLAGS) -I src -I build -o $@ $<
 
 # A .G4A program (src/app/*: the startup and the bindings, plus its own
 # body) is linked three times -- at its placeholder addresses, with the
@@ -386,6 +423,13 @@ DISK_DENSITY = --enhanced --high
 # listing is predicted from the image.  A file that is already there is
 # overwritten, so the directory the selector reads is the one the host
 # read -- with the name on both sides rather than neither.
+# NOT LANG.RSC.  The runner's disks are what test-m12's file selector
+# lists and what its far-heap accounting counts, and a tenth file
+# overflows the selector's nine lines while the language resource in far
+# memory moves the heap cursor by its own size -- both of which that gate
+# measures.  test-m20 makes its own copies of this disk with the file
+# added, removed and translated, which is the point there; every other
+# gate runs on the English linked into the image (src/aes/lang.c).
 DISK_FILES = --add tests/fixtures/test.txt TEST.TXT --add build/test.rsc TEST.RSC \
              --add tests/fixtures/out.txt OUT.TXT
 
@@ -431,18 +475,18 @@ build/m3-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt b
 # is named AUTORUN.SYS because that is what the DOS runs at boot, and
 # --sweep takes everything but the DOS off the fixture, which was
 # somebody's magazine disk (docs/shipping.md, section 2).
-build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a
+build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc
 	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
 	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
-	    --add build/m11_app.g4a M11.G4A
+	    --add build/m11_app.g4a M11.G4A --add build/lang.rsc LANG.RSC
 
-build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
+build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc build/lang.rsc $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --name GEM.COM --boot GEM \
-	    $(DISK_FILES) $(DESK_FILES)
+	    $(DISK_FILES) $(DESK_FILES) --add build/lang.rsc LANG.RSC
 
 # The CF card: an APT table and two SDFS partitions, with the system in
 # \GEM\ and the demonstration application in \APPS\ -- the install
@@ -454,7 +498,7 @@ build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt b
 # tools/apt.py writes the table, tests/host/test_apt.py checks it against
 # the rules Altirra's own parser applies, and test-cf boots it.
 build/gem-cf.img: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a \
-                  tools/mkcf.py tools/apt.py tools/atr.py
+                  build/lang.rsc tools/mkcf.py tools/apt.py tools/atr.py
 	@rm -f $@
 	python3 tools/mkcf.py $@
 
@@ -504,7 +548,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-boot
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-boot
 
 # The cc65816 code generation bugs gem4xe works around, run in the vendor's
 # own simulator: fails only if a workaround shape has stopped compiling
@@ -644,6 +688,20 @@ test-m18: build/m17-boot.atr build/desktop.g4a build/desktop.sym
 test-m19: build/m17-boot.atr build/desktop.g4a build/desktop.sym
 	python3 tests/emu/m19_files.py
 
+# What the system says, and where it says it from (docs/shipping.md,
+# section 5): form_error on three disks -- the product's LANG.RSC, a
+# translation of it, and no file at all -- each compared with the model
+# given the strings that disk carries.
+test-m20: build/m3-boot.atr build/lang.rsc
+	python3 tests/emu/m20_lang.py
+
+# A loadable font (docs/shipping.md, section 5): the system font as a
+# file, inverted so every glyph differs, loaded at start-up off one disk
+# and absent from another -- with vqt_name, vst_font and the GDOS pair
+# either way.
+test-m21: build/m3-boot.atr build/inv.fnt
+	python3 tests/emu/m21_font.py
+
 # The product disk booting into the desktop with nothing typed: the
 # batch file the SpartaDOSes run, the loader's refusal on the 6502, the
 # switch, and the desk against the model (docs/shipping.md, section 2).
@@ -690,4 +748,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-boot test-cf demo movie bench emu-stop clean

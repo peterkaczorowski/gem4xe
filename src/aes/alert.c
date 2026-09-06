@@ -37,6 +37,7 @@
 #include "sys/app.h"
 #include "sys/farmem.h"
 #include "gemdata.h"
+#include "lang_rsc.h"
 
 #define MAX_LINENUM  5
 #define MAX_LINELEN  40
@@ -299,59 +300,41 @@ WORD fm_alert(WORD defbut, const char *palstr)
 /* form_error: the alert for a DOS error number (the donor's fm_error,
  * gemfmlib.c, and its strings from gem_rsc.c).  TRUE when the user
  * pressed anything but the first button, as the donor answers; an
- * error past 63 shows nothing.  The number itself goes into the last
- * alert's text by hand, there being no sprintf in an AES with no libc.
+ * error past 63 shows nothing.
  *
- * The five texts are half a kilobyte, which bank $00's constant data
- * cannot spare (src/gem4xe.scm: WHAT GOES FAR AND WHAT MUST NOT), so
- * they live in far memory and the one wanted is copied into the pool
- * for the length of the call -- fm_alert reads its string near. */
-static const char __far al02err[] =
-    "[2][This application cannot|find the folder or file|"
-    "you just tried to access.][  OK  ]";
-static const char __far al04err[] =
-    "[1][This application does not|have room to open another|"
-    "document.  To make room,|close any document that|"
-    "you do not need.][  OK  ]";
-static const char __far al05err[] =
-    "[1][An item with this name|already exists in the|"
-    "directory, or this item|is set to Read Only status.][  OK  ]";
-static const char __far al15err[] =
-    "[1][The drive you specified|does not exist.][Cancel]";
-static const char __far al08err[] =
-    "[1][There is not enough memory|in your computer for the|"
-    "application you just tried|to run.][  OK  ]";
-
+ * The texts are LANG.RSC's, copied out of far memory a string at a time
+ * (src/aes/lang.c); they were half a kilobyte of C literals until that
+ * file existed, which is half a kilobyte bank $00 could not spare
+ * either (src/gem4xe.scm: WHAT GOES FAR AND WHAT MUST NOT).
+ *
+ * The number itself goes into the last alert's text by hand, there
+ * being no sprintf in an AES with no libc -- written over the two
+ * characters after the '#' rather than at a counted offset, so a
+ * translation may put the phrase where it likes as long as it keeps one
+ * `#` and two digits after it (tools/langrsc.py says so to whoever
+ * translates it). */
 WORD fm_error(WORD n)
 {
-    static char xxerr[] = "[3][TOS error #00.][Cancel]";
-    const char __far *f;
     char *s;
-    uint16_t len, mark;
-    WORD ret;
+    WORD which;
 
     if (n > 63)
         return FALSE;
     switch (n) {
-    case 2: case 3: case 18:        f = al02err; break;
-    case 4:                         f = al04err; break;
-    case 5:                         f = al05err; break;
-    case 15:                        f = al15err; break;
-    case 8: case 10: case 11:       f = al08err; break;
-    default:
-        xxerr[15] = (char)('0' + n / 10);
-        xxerr[16] = (char)('0' + n % 10);
-        return fm_alert(1, xxerr) != 1;
+    case 2: case 3: case 18:        which = LS_ERRFILE;  break;
+    case 4:                         which = LS_ERRDOCS;  break;
+    case 5:                         which = LS_ERREXIST; break;
+    case 15:                        which = LS_ERRDRIVE; break;
+    case 8: case 10: case 11:       which = LS_ERRMEM;   break;
+    default:                        which = LS_ERRTOS;   break;
     }
-
-    for (len = 0; f[len]; len++)
-        ;
-    mark = pool_mark();
-    s = pool_alloc(len + 1, 1);
-    if (!s)
-        return FALSE;
-    far_get((uint8_t *)s, (uint32_t)f, len + 1);
-    ret = fm_alert(1, s) != 1;
-    pool_release(mark);
-    return ret;
+    s = (char *)lang_str(which);
+    if (which == LS_ERRTOS) {
+        char *hash = strchr(s, '#');
+        if (hash && hash[1] && hash[2]) {
+            hash[1] = (char)('0' + n / 10);
+            hash[2] = (char)('0' + n % 10);
+        }
+    }
+    return fm_alert(1, s) != 1;
 }

@@ -31,6 +31,7 @@ Read in order if you want the argument; jump if you want an answer.
 | [phase12.md](phase12.md) | Alerts, icons, and the pointer's shape. |
 | [phase13.md](phase13.md) | SpartaGEM: gem4xe under SpartaDOS 3.2 and SpartaDOS X, where a DOS keeps its own RAM banked in behind the program. |
 | [phase14.md](phase14.md) | GEMDOS and the desktop, in seven milestones — plus two Altirra 65C816 core bugs found and patched (`../tools/altirra/`), and the Ultimate 1MB, whose flash turned out to hold the disk driver as well as the DOS. |
+| [phase15.md](phase15.md) | What the system says, and what it says it in: `LANG.RSC` far-resident with the English as its fallback, and a loadable 8x8 `.FNT` so a translation can bring its own alphabet — GDOS's four font calls, and none of the rest of GDOS. Also the reason a gate's disk is a fixture: adding one file to it broke two measurements in another gate. | GEMDOS and the desktop, in seven milestones — plus two Altirra 65C816 core bugs found and patched (`../tools/altirra/`), and the Ultimate 1MB, whose flash turned out to hold the disk driver as well as the DOS. |
 
 ## Across the phases
 

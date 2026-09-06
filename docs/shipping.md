@@ -302,25 +302,82 @@ The split, once they are out of the C:
   language, and why the split above puts the layout with the text
   rather than the text on its own.
 
-Two mechanisms have to exist before either file can:
+**`LANG.RSC` exists, and `make test-m20` proves a translation is a
+file.**  `tools/langrsc.py` describes what the system says -- eight
+strings today: `form_error`'s five alerts, the one carrying a DOS error
+number, and the shell's two failures -- and builds three things from
+that one description, because the three must not disagree: the file
+itself, the same bytes as a `__far` array in the image, and the indices
+the C uses.  `src/aes/lang.c` reads the file at start-up into far memory,
+and `lang_str()` copies the string being used into one near buffer, which
+is what `form_alert` wants.  The built-in copy is what a disk without the
+file falls back on, because a system that cannot say "this application
+cannot be found" *because its language file is missing* is worse than one
+that says it in English.  **The file overrides; it is not required.**
 
-1. **Strings must be reachable without spending bank $00.**  The pool
-   that holds a resident resource is 12.5 KB in the gates and 14 KB
-   under `GEM.COM`, and the desktop and its own resource already take
-   8.7 KB of it.  So `LANG.RSC` should live in *far* memory with a
-   helper that copies the string being used into a small near buffer --
-   `form_alert` wants a bank-$00 string, and one 128-byte scratch
-   buffer serves every call.  That keeps the language file as large as
-   a language needs.
-2. **The character set has to survive the round trip.**  The 8x8 system
-   font is EmuTOS's, extracted by `tools/fontconv.py`: the Atari ST
-   character set, whose high half carries the accented Latin letters
-   (and a little Greek).  That covers Western Europe.  It does not
-   cover Polish, Czech, Cyrillic or Greek properly, and those want a
-   *loadable* font -- which the VDI has no path for yet (the font is
-   linked in, `build/font8x8.o`).  A `.FNT` loader and a font in the
-   resource are the natural next step after `LANG.RSC`, and the AES's
-   `vst_font`/`vqt_attributes` seam is already where it would go.
+The gate runs `form_error` -- the call that takes a number and no string,
+so every character that reaches the screen came from the system -- on
+three disks: the product's `LANG.RSC`, a German one whose every string
+differs and is longer, and no file at all.  Each is compared pixel for
+pixel with `tools/aesref.py` given the strings that disk carries.  The
+first and the third draw the same screen; the second draws the
+translation, which is what says the file is being read rather than
+ignored.
+
+Two rules a translation must keep, and the gate holds one to both:
+`form_alert`'s grammar (`[icon][text|lines][buttons]`), and one `#` with
+two characters after it in the string that carries an error number --
+the number is written over them, found by searching for the `#` rather
+than by counting, so the phrase may move.
+
+What is not in `LANG.RSC`, and why:
+
+1. ~~Strings must be reachable without spending bank $00~~ -- done, as
+   above.  But the file selector's **tree** is still in the far image
+   (`tools/fselrsc.py`) rather than in `LANG.RSC`, because the selector
+   copies its whole resource into the application pool each time it
+   opens: a kilobyte of alert text there would be a kilobyte less for
+   the application's own resource, every time (`docs/phase11.md` has
+   that budget).  So a translation cannot widen the selector's boxes
+   yet.  The desktop's "`DESKTOP.RSC` is not on the disk" alert stays a
+   literal for the reason above it; `LANG.RSC` could serve it once the
+   application ABI has a call for a system string, which it has not.
+2. ~~**The character set has to survive the round trip.**~~ Done, and
+   `make test-m21` boots it.  The 8x8 face gem4xe links is EmuTOS's
+   Atari ST set, whose high half is the accented Latin letters of
+   Western Europe; Polish, Czech, Greek and Cyrillic need a different
+   set, so **the strip is loadable**.  `SYSTEM.FNT` beside `GEM.COM` is
+   read at start-up (`src/vdi/font.c`, from `lang_init`, so a
+   translation's two files are read together), and 2 KB of glyphs
+   replace the linked ones in far memory and in the VRAM masks.
+
+   EmuTOS ships exactly the sets that are wanted, all GPL: `make fonts`
+   writes `l2.fnt` (Latin-2), `ru.fnt` (Cyrillic), `gr.fnt` (Greek) and
+   `tr.fnt` (Turkish) out of a checkout in DRI's own `.FNT` format
+   (`tools/mkfnt.py`).  The gate uses none of them -- a gate should not
+   need a checkout -- but the *system font inverted*, built from the
+   strip that is committed, so every glyph differs and "the file is what
+   is being drawn from" is a screenshot rather than a matter of trust.
+
+   **The cell stays 8x8, and that is a decision.**  The AES asks for the
+   character cell once, at start-up, and lays the desktop out with the
+   answer; the blitter has no shifter, so every glyph is also a
+   pre-shifted second copy in VRAM; and the host reference draws the
+   same cells.  A face of another SIZE is all of that again and earns
+   its place only when there is something to do with it.  A face of
+   another ALPHABET is 2 KB and a file.  So the loader refuses -- and
+   keeps the face it had -- a form that is not 256x8, a character range
+   that is not 0..255, a `top` that is not the linked font's, and the
+   colour or word-swapped variants of the format.
+
+   **GDOS's own calls do this**, since they are the ones an application
+   would use: `vst_load_fonts` (119) reads `SYSTEM.FNT` and answers how
+   many faces that added (0 or 1, there being one place to look),
+   `vst_unload_fonts` (120) goes back to the linked face, `vst_font`
+   (21) chooses between them and `vqt_name` (130) names them.  That is
+   the font half of GDOS and not the rest of it: no `ASSIGN.SYS`, no
+   NDC, no Bezier, no metafile.  With 14 MB of RAM the memory was never
+   the constraint -- the geometry is.
 
 Two more things a translator will ask for, recorded so they are not
 forgotten: **the keyboard** (gem4xe reads POKEY scan codes directly,
@@ -355,5 +412,9 @@ are cheapest now and dear later:
    SDX distribution disk needed after all.  Section 3 says why, and what
    three things about that machine had to be measured first.
 
-After that, in the order they unlock things: `LANG.RSC` and the
-far-string helper; a loadable font.
+4. ~~`LANG.RSC` and the far-string helper; a loadable font~~ -- done,
+   both, in section 5: `make test-m20` proves a translation of what the
+   system says is a file, and `make test-m21` proves the character set
+   it says it in is another.  What a translator still cannot change is
+   the file selector's dialog (its tree is in the image, for the pool
+   reason in section 5), the keyboard layout, and the date format.
