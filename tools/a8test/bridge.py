@@ -10,7 +10,7 @@ Addresses inside verbs MUST be `$`- or `0x`-prefixed — bare numbers parse as D
 
 Library:  b = Bridge(addr, token); b.cmd("REGS"); b.frames(60); b.memdump(0x9C00, 1024)
 CLI:      bridge.py --token-dir DIR cmd "VERB ARGS" ...
-(derived from /home/jfergus/dev/a8-u4r/.claude/skills/altirra-bridge/bridge.py)
+(derived from the a8-u4r project's altirra-bridge skill)
 """
 import base64
 import glob

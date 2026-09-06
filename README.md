@@ -282,12 +282,30 @@ fixed upstream so its workaround can go.
 ## Building
 
 Needs [Calypsi](https://github.com/hth313/Calypsi-tool-chains) 5.18+ for the
-65816, Python 3, and AltirraSDL for the emulated gates. There is no Atari target
-in Calypsi, so this tree carries its own board support: `src/crt_atari.s`,
-`src/gem4xe.scm` and `tools/mkxex.py`.
+65816 and Python 3. There is no Atari target in Calypsi, so this tree carries
+its own board support: `src/crt_atari.s`, `src/gem4xe.scm` and
+`tools/mkxex.py`. The GEM system font is extracted from an
+[EmuTOS](https://emutos.sourceforge.io/) checkout at build time rather than
+committed here, so point `EMUTOS=` at one; `CALYPSI=` finds the tool chain.
+Both default to `~/dev/…`.
 
     make            # build
-    make test       # host tests + every emulated gate
+    make test-host  # the host tests: no emulator, no fixtures, no toolchain
+
+The emulated gates need [AltirraSDL](https://github.com/ilmenit/AltirraSDL),
+and the ones that put an Ultimate 1MB in the machine need the patches in
+`tools/altirra/` as well — two are open pull requests upstream, so run those
+with `ALTIRRASDL=/path/to/patched/AltirraSDL`.
+
+They also need Atari disk images, and **none is distributed here**: a DOS 2
+disk, a double-density DOS 2 disk, a SpartaDOS 3.2 disk, an SDX cartridge
+image, a U1MB flash image. Copy `fixtures.toml.example` to `fixtures.toml`
+(gitignored) and put your own paths in it; the harness copies an image into
+`build/` before it touches it, and a gate whose fixture is missing says so and
+stops.
+
+    make test       # host tests + the emulated gates
+    make test-cf    # the CF card on the U1MB machine (needs [u1mb].flash)
 
 ## Licence
 
@@ -295,5 +313,14 @@ GPLv2 or later — see `COPYING`. The lineage is EmuTOS, which *is* the
 Caldera-GPL'd Digital Research GEM source carried forward in C, so the licence
 position is inherited rather than chosen.
 
-The Atari Corp VDI/AES corpus is used as a **specification only** and no line of
-it appears here.
+Where a file follows EmuTOS, its header names the donor file it follows, and
+the two trees are read side by side deliberately — this is a port, not a clean
+room. Two provenance rules hold everywhere else:
+
+- **The Atari Corp VDI/AES corpus is a specification only.** It settles what a
+  real ROM does; no line of it appears here.
+- **Nothing that is not ours to give is in the tree.** No ROM images, no disk
+  images, no fonts, no firmware: the GEM font comes out of an EmuTOS checkout
+  at build time, the disk images are the user's own (`fixtures.toml`), and the
+  Altirra patches in `tools/altirra/` are diffs against a GPLv2 project that
+  are also filed upstream.

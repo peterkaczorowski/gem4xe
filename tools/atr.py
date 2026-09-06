@@ -3,7 +3,7 @@
 test harness: it writes the runtime .xex onto a DOS floppy to prove the loader path, and it
 predicts what the file selector will list from the same image it booted.
 
-ATRImage is adapted from /home/jfergus/dev/a8-u4r/tools/atrlib.py.  Dos2 implements the standard
+ATRImage is adapted from the a8-u4r project's tools/atrlib.py.  Dos2 implements the standard
 DOS 2 VTOC (sector 360), 8-entry directory (sectors 361-368) and the 3-byte per-sector file
 links, in single, enhanced and double density.  Double density is the same filesystem with
 253 data bytes to a sector instead of 125: the link still lives in the last three bytes, but

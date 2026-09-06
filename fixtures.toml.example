@@ -1,0 +1,40 @@
+# fixtures.toml -- where the gates find the disk images they boot.
+#
+# Copy this to fixtures.toml (which is gitignored) and put your own paths
+# in it.  Nothing here is distributed with gem4xe: every fixture is a
+# commercial or shareware Atari image you already have, and the harness
+# COPIES it into build/ before it touches it, so the original is never
+# written to.  Without a fixture the gates that need one say so and stop;
+# `make` and `make test-host` need none.
+
+[dos]
+# A bootable single-density DOS 2 disk (720 x 128).  Most milestone gates
+# put their program on a copy of this as AUTORUN.SYS.
+sd_dos2 = "/path/to/some-dos2-disk.atr"
+
+# A bootable DOUBLE-density DOS 2 disk (720 x 256), for the DOS 2 product
+# disk: the DOS has to run AUTORUN.SYS and keep its DUP.SYS, and only the
+# boot sectors, DOS.SYS and DUP.SYS are taken from it (tools/mkdisk.py
+# --sweep).  docs/shipping.md section 2 says which DOSes qualify --
+# notably DOS II+/D has no AUTORUN.SYS at all, and MyDOS mangles the far
+# image.
+dd_dos2 = "/path/to/some-double-density-dos2-disk.atr"
+
+[spartados]
+# A bootable SpartaDOS 3.2 disk (SDFS, 720 x 128).  The harness copies its
+# boot sectors and DOS file onto a fresh SDFS image carrying the program.
+disk_32 = "/path/to/spartados-32.atr"
+
+# SpartaDOS X as a cartridge image.  The vendor's build for emulators
+# (sdx.atari8.info, "Altirra and Atari800 emulators") is self-describing,
+# so no --cartmapper is needed.
+sdx_cart = "/path/to/SDX450_maxflash1.car"
+
+[u1mb]
+# An Ultimate 1MB flash image (512 KB) carrying the U1MB BIOS, the PBI
+# BIOS, the SIDE Loader and SpartaDOS X -- flashjazzcat's firmware plus
+# SDX, as a real machine is flashed.  test-m14u, test-m15u and test-cf
+# need it, and the patched emulator in tools/altirra/ to read it
+# (--u1mbrom).  The PBI BIOS is what mounts a CF card's APT partitions:
+# docs/shipping.md section 3.
+flash = "/path/to/ultfull.rom"

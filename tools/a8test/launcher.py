@@ -9,8 +9,10 @@
 Differences from the vbxetxtadv launcher this is derived from:
   * adds the Rapidus 65C816 accelerator (--adddevice rapidus)
   * memsize defaults to 1088K so PORTB banking is present for MEMAC coexistence tests
-  * U1MB is NOT enabled -- AltirraSDL exposes no switch or bridge verb for it.
-    See docs/phase0-u1mb.md.  Nothing in the VDI work needs it.
+  * U1MB is off by default and pinned off in BASE_ARGS (see --noultimate1mb
+    below); a gate that wants it passes --u1mbrom, which the patched
+    emulator in tools/altirra/ understands (docs/phase14.md, and
+    tests/emu/cf_boot.py for the machine that needs all of it).
 
 Never opens a window.  Never uses `pkill -f`: the emulator is stopped by pid.
 

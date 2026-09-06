@@ -133,6 +133,14 @@ being overridden at `$4000-$7FFF`, is already designed around by using MEMAC A.
 The harness runs `--memsize 1088K` so PORTB banking is at least present.
 
 When U1MB does become necessary (deployment as a flash ROM image, and the RTC),
-the options are: patch AltirraSDL to add a switch (source is at
-`/usr/src/debug/altirrasdl-git`), or capture a savestate with it enabled and
-load that through `STATE_LOAD`.
+the options are: patch AltirraSDL to add a switch, or capture a savestate with
+it enabled and load that through `STATE_LOAD`.
+
+**Settled in Phase 14, the first way** (`docs/phase14.md`): the core emulates
+U1MB and always did — what the SDL front end lacked was a way to reach it, so
+`tools/altirra/` adds `--ultimate1mb`, `--u1mbrom <file>` and the bridge's
+`CONFIG u1mb`, and the gates that need the real machine (`test-m14u`,
+`test-m15u`, `test-cf`) run on a user's own flash image. The flash turned out
+to matter for more than the RTC: it is where SpartaDOS X, the PBI BIOS that
+mounts a CF card's APT partitions, and the SIDE Loader all live
+(`docs/shipping.md`, section 3).
