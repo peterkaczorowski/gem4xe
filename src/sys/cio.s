@@ -60,7 +60,7 @@
               .extern ae_sp, ae_pokmsk      ; src/crt_atari.s
               .extern irq_frames, irq_kput  ; src/sys/irq.c, irq.s
               .extern irq_cio_swap          ; src/sys/irq.c
-              .public cio_call, cio_env
+              .public cio_call, dsk_call, cio_env
 
 #define POKMSK 0x0010                 /* OS shadow of IRQEN */
 #define RTCLOK 0x0012                 /* three bytes, high first */
@@ -70,6 +70,7 @@
 #define IRQEN  0xD20E
 #define PORTB  0xD301
 #define CIOV   0xE456
+#define SIOV   0xE459                 /* the DCB in page 3, not an IOCB */
 #define RAP_MCR 0xFF0080              /* src/sys/rapidus.h */
 #define MCR_SLOW3 0x08
 #define IRQ_SWAP_ROM  0x01            /* src/sys/irq.h */
@@ -82,10 +83,26 @@ cio_env:      .space  1               ; bisection knobs: 1 = leave CRITIC alone
 cio_iocb:     .space  1               ; iocb * 16, for X
 cio_pokmsk:   .space  1               ; gem4xe's POKMSK across the call
 cio_stat:     .space  2               ; the OS's Y, zero-extended
+cio_which:    .space  1               ; 0 = CIOV, 1 = SIOV (dsk_call)
 
               .section code, root
+;;; Two ways in, one round trip.  cio_call takes an IOCB number in A and
+;;; ends at CIOV; dsk_call takes nothing, the DCB in page 3 being the
+;;; argument, and ends at SIOV -- which is the entry a PBI hard disk is
+;;; served through as well as a floppy, so one sector read reaches every
+;;; drive gem4xe can see (src/sys/gemdos.c, gd_dfree).
 cio_call:     php
-              sei
+              sep     #0x20
+              stz     abs:cio_which
+              rep     #0x20
+              bra     os_call
+dsk_call:     php
+              sep     #0x20
+              lda     #1
+              sta     abs:cio_which
+              rep     #0x20
+              lda     ##0             ; no IOCB to index
+os_call:      sei
               phb
               phd
               asl     a
@@ -138,8 +155,12 @@ cio_nocrit:   stz     ATRACT
               sta     long:RAP_MCR
 cio_go:       cli
               ldx     abs:cio_iocb
+              lda     abs:cio_which
+              bne     cio_sio
               jsr     CIOV
-              sei
+              bra     cio_back
+cio_sio:      jsr     SIOV
+cio_back:     sei
               sty     abs:cio_stat
               lda     abs:irq_cio_swap
               beq     cio_took

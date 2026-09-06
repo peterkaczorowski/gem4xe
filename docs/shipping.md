@@ -234,15 +234,15 @@ Two findings from the same afternoon, so nobody repeats them:
   said the emulated SIDE 2 and its IDE bus were fine long before the
   APT path ran.
 
-One thing on the target has to move with it: **`Dfree` cannot answer
-more than 999**.  It reads the free count out of the directory
-listing's trailer, which is three characters wide and all CIO offers,
-and the DOSes do not even agree what they put there when it overflows
-(SpartaDOS 3.2g prints the low three digits, SDX stops at 999 --
-measured on the gates' 2048-sector disk).  The desktop shows that
-number in a window's information line, so on a volume worth having it
-is wrong today.  A megabyte of disk needs a DOS call this seam does not
-have yet (`src/sys/gemdos.c`, `gd_dfree`).
+~~One thing on the target has to move with it: `Dfree` cannot answer
+more than 999.~~ **Fixed** (`docs/phase16.md`): `Dfree` reads the file
+system's own count now -- the VTOC on a DOS 2 disk, the superblock on a
+SpartaDOS one, one sector through the OS's SIO, which is the path a PBI
+hard disk answers on as well as a floppy -- instead of the three
+characters CIO's directory trailer gives it.  `make test-m15` reports
+1489 free against an image's 1489, where the old ceiling would have said
+999, and the card's 16116 is no longer a problem waiting to be found.
+The listing is still the fallback for a drive that will not answer SIO.
 
 ## 4. An install layout
 

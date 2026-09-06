@@ -13,6 +13,7 @@
 #include "cio.h"
 #include "dos.h"
 #include "farmem.h"
+#include "clock.h"
 #include "app.h"
 
 typedef int16_t  WORD;
@@ -23,6 +24,8 @@ typedef int32_t  LONG;
 #define GD_DIRMAX   64          /* a drive's current directory, NUL in */
 #define GD_PATHMAX  128         /* a composed path, NUL in */
 #define GD_NAMEMAX  13          /* NAME.EXT, NUL in */
+#define GD_KEEPNAME (CIO_NAME_MAX + 1)  /* the CIO name a handle was opened
+                                         * with, kept for a seek backwards */
 #define GD_SLOTS    7
 #define GD_CACHE    1024        /* a search's read-ahead, in bytes */
 #define GD_RAWENT   23          /* an SDFS directory entry */
@@ -49,6 +52,27 @@ static uint32_t gd_dta;         /* the current one */
 static uint32_t gd_slots;       /* GD_SLOTS x SL_SIZE */
 static uint8_t  gd_drive;       /* the current drive, 0 = A */
 static uint8_t  gd_owned;       /* the IOCBs Fopen has out, bit n */
+/* Where each open file is, and how to get back to its start.  GEMDOS
+ * counts a file in BYTES from the beginning and CIO does not count at
+ * all, so the count is kept here, one per IOCB: every Fread and Fwrite
+ * adds what it moved, and Fseek is the only thing that reads it.  The
+ * name and the mode go with it, because a seek BACKWARDS on a DOS whose
+ * POINT is not byte-addressable is a reopen (gd_seek).
+ *
+ * All of it FAR, in one record per IOCB.  Eight of these are 552 bytes
+ * and bank $00 has none to give: putting the position alone in near
+ * memory -- 32 bytes -- was enough to make the linker refuse the
+ * program (src/gem4xe.scm: WHAT GOES FAR AND WHAT MUST NOT).  The cost
+ * is two far accesses per transfer, against a CIO round trip. */
+#define FH_AT    0              /* LONG  bytes from the start */
+#define FH_MODE  4              /* BYTE  the aux1 it was opened with */
+#define FH_NAME  5              /* the GEMDOS path it was opened by:
+                                 * a reopen maps it as an open does, and
+                                 * Fdatime looks it up in the directory */
+#define FH_SIZE  (FH_NAME + GD_KEEPNAME)
+static uint32_t gd_files;               /* CIO_IOCBS x FH_SIZE, far */
+static uint32_t gd_scratch;             /* a DTA and a path, for Fdatime */
+
 static uint8_t  gd_ateof;       /* ...and those a read has taken to the end.
                                  * GEMDOS says 0 at the end, every time; DOS
                                  * II+/D 6.4 says it once, and on the read
@@ -64,6 +88,21 @@ static UWORD rd16(uint32_t a) { return *(const UWORD __far *)a; }
 static LONG  rd32(uint32_t a) { return *(const LONG __far *)a; }
 static void  wr16(uint32_t a, UWORD v) { *(UWORD __far *)a = v; }
 static void  wr32(uint32_t a, LONG v) { *(LONG __far *)a = v; }
+
+static uint32_t gd_file(uint8_t iocb)
+{
+    return gd_files + (uint32_t)iocb * FH_SIZE;
+}
+
+static uint32_t gd_where(uint8_t iocb)
+{
+    return (uint32_t)rd32(gd_file(iocb) + FH_AT);
+}
+
+static void gd_moved(uint8_t iocb, uint32_t by)
+{
+    wr32(gd_file(iocb) + FH_AT, (LONG)(gd_where(iocb) + by));
+}
 
 /* The block's arguments, at the ST's offsets plus four. */
 static WORD arg_w(uint8_t off) { return *(const WORD __far *)(gd_pb + off); }
@@ -492,6 +531,9 @@ static LONG gd_open(LONG fname, uint8_t aux1)
         return gd_err((uint8_t)-iocb, 0);
     gd_owned |= (uint8_t)(1 << iocb);
     gd_ateof &= (uint8_t)~(1 << iocb);
+    wr32(gd_file(iocb) + FH_AT, 0);
+    far_write8(gd_file(iocb) + FH_MODE, aux1);
+    far_strput(gd_file(iocb) + FH_NAME, gw->full, GD_KEEPNAME);
     return iocb + GD_HANDLE_BASE;
 }
 
@@ -579,9 +621,158 @@ static LONG gd_xfer(WORD h, LONG count, LONG buf, WORD write)
         gd_ateof |= (uint8_t)(1 << iocb);
     if (slice && slice != small)
         pool_release(mark);
+    gd_moved(iocb, done);               /* what Fseek counts (gd_seek) */
     if (done == 0 && st != CIO_OK && st != CIO_OK_EOF && st != CIO_E_EOF)
         return gd_err((uint8_t)st, 0);
     return (LONG)done;
+}
+
+/* ---- Fseek ---------------------------------------------------------------
+ * GEMDOS counts a file in bytes from its start.  CIO does not count at
+ * all: its POINT takes a sector and an offset within it, which is a
+ * position in the FILE only if you know the sector chain -- so this does
+ * not use POINT.  It keeps the count itself (gd_at, moved by every
+ * transfer) and gets where it is going the way a program with no seek
+ * would:
+ *
+ *   forward     read and throw away, which is what it costs
+ *   backward    reopen the file on ITS OWN IOCB (cio_reopen: the handle
+ *               is the IOCB, so it must come back on the same one) and
+ *               read forward from the start
+ *   from the end   read to the end first, which is also how the size is
+ *               learned, then treat it as any other target
+ *
+ * A target past the end is GD_ERANGE with the position left at the end,
+ * which is a legal GEMDOS answer and better than pretending: nothing
+ * here can make a file longer without writing to it.
+ *
+ * Cheap where it matters -- Fseek(0, h, 0) rewinds, Fseek(0, h, 2) is
+ * "how big is it" -- and honest where it does not. */
+/* Read `bytes` away, or as many as there are.  NEVER PAST THE END: a
+ * DOS 2 that has already reported EOF answers the next read with the
+ * last sector's bytes again -- measured, on a 149-byte file whose last
+ * sector holds 24, which came back as 24 more bytes and put the count
+ * 24 ahead of the file.  So the end is remembered (gd_ateof, which
+ * Fread keeps as well) and a skip that reaches it stops there. */
+static LONG gd_skip(uint8_t iocb, uint32_t bytes, uint32_t *moved)
+{
+    uint8_t small[64], *slice = 0;
+    uint16_t mark = pool_mark(), room = pool_room(), n = 0, got = 0, m = 0;
+    uint32_t done = 0;
+    WORD st = CIO_OK;
+
+    *moved = 0;
+    if (gd_ateof & (1 << iocb))         /* nothing left to read */
+        return 0;
+    n = room > 512 ? 512 : (uint16_t)(room & ~1);
+    if (n >= 64)
+        slice = pool_alloc(n, 2);
+    if (!slice) {
+        slice = small;
+        n = sizeof small;
+    }
+    while (done < bytes) {
+        m = (bytes - done) > n ? n : (uint16_t)(bytes - done);
+        st = cio_read(iocb, slice, m, &got);
+        done += got;
+        if (got < m || (st != CIO_OK && st != CIO_OK_EOF))
+            break;
+    }
+    if (slice != small)
+        pool_release(mark);
+    if (got < m || st == CIO_OK_EOF || st == CIO_E_EOF)
+        gd_ateof |= (uint8_t)(1 << iocb);
+    *moved = done;
+    gd_moved(iocb, done);
+    if (st != CIO_OK && st != CIO_OK_EOF && st != CIO_E_EOF && !done)
+        return gd_err((uint8_t)st, 0);
+    return 0;
+}
+
+/* ---- Fdatime -------------------------------------------------------------
+ * The stamp a file carries, which is in its DIRECTORY ENTRY and not in
+ * anything CIO will tell you about an open file -- so this looks the
+ * file up by the path it was opened with (kept per handle, FH_NAME) and
+ * takes the stamp out of the search's answer.
+ *
+ * The search would land in the application's DTA and break a
+ * Fsfirst/Fsnext walk it might be in the middle of, so it runs against a
+ * DTA of gemdos's own and puts the caller's back.
+ *
+ * SETTING a stamp is EINVFN: neither DOS here has a call for it.  A DOS
+ * 2 disk has no stamps at all, and answers with zeros, which is what the
+ * ST answers for a file system without them. */
+static LONG gd_datime(LONG buf, WORD h, WORD set)
+{
+    uint8_t iocb = gd_iocb(h);
+    uint32_t save = gd_dta, sl;
+    LONG r;
+
+    if (!iocb)
+        return GD_EIHNDL;
+    if (set)
+        return GD_EINVFN;
+    far_copy(gd_scratch + DTA_SIZE, gd_file(iocb) + FH_NAME, GD_KEEPNAME);
+    gd_dta = gd_scratch;
+    r = gd_fsfirst((LONG)(gd_scratch + DTA_SIZE), 0);
+    if (r == 0) {
+        wr16((uint32_t)buf, rd16(gd_dta + DTA_TIME));
+        wr16((uint32_t)buf + 2, rd16(gd_dta + DTA_DATE));
+    }
+    sl = gd_slot_of_dta();              /* the search this took */
+    if (sl)
+        gd_slot_free(sl);
+    gd_dta = save;
+    return r;
+}
+
+static LONG gd_seek(LONG offset, WORD h, WORD mode)
+{
+    uint8_t iocb = gd_iocb(h);
+    uint32_t at, target, moved = 0;
+    LONG here, r;
+
+    if (!iocb)
+        return GD_EIHNDL;
+    if (mode == 2) {                    /* the end, which is also its size */
+        r = gd_skip(iocb, 0x7FFFFFFFUL, &moved);
+        if (r < 0)
+            return r;
+    }
+    /* One reading of where the file is, kept in a local: the position
+     * lives in far memory and this walks it forwards. */
+    at = gd_where(iocb);
+    if (mode == 0) {
+        if (offset < 0)                 /* before the start of the file */
+            return GD_ERANGE;
+        target = (uint32_t)offset;
+    } else {
+        here = (LONG)at + offset;
+        if (here < 0)
+            return GD_ERANGE;
+        target = (uint32_t)here;
+    }
+    if (target < at) {                  /* back to the start, then forward */
+        char name[GD_KEEPNAME];
+        far_strget(name, gd_file(iocb) + FH_NAME, sizeof name);
+        dos_cioname(name, gw->cio);     /* A:\X -> D1:X, as the open did */
+        if (cio_reopen(iocb, gw->cio, far_read8(gd_file(iocb) + FH_MODE), 0) < 0) {
+            gd_owned &= (uint8_t)~(1 << iocb);
+            return GD_EFILNF;
+        }
+        wr32(gd_file(iocb) + FH_AT, 0);
+        at = 0;
+        gd_ateof &= (uint8_t)~(1 << iocb);   /* a fresh open is not at the end */
+    }
+    if (target > at) {
+        r = gd_skip(iocb, target - at, &moved);
+        if (r < 0)
+            return r;
+        at += moved;
+        if (at != target)               /* the end came first: gd_skip knows */
+            return GD_ERANGE;
+    }
+    return (LONG)at;
 }
 
 /* An XIO on a path: delete, mkdir, rmdir, lock. */
@@ -700,6 +891,99 @@ static WORD has_word(const char *s, const char *word)
     return 0;
 }
 
+/* ---- Dfree, out of the file system --------------------------------------
+ * What a volume has left is a number the file system keeps, and until now
+ * this asked the DIRECTORY LISTING for it: the trailer's "nnn FREE
+ * SECTORS", which is three characters wide and all CIO offers.  Three
+ * characters cannot say 16116, and the two DOSes do not even agree what
+ * they put there when it overflows -- SpartaDOS 3.2g prints the low three
+ * digits, SDX stops at 999 -- so on anything bigger than a floppy the
+ * answer was wrong.  The CF card made that visible (docs/shipping.md,
+ * section 3).
+ *
+ * So read the file system's own count, one sector through the OS's SIO
+ * (src/sys/cio.c, dsk_read) -- the path a PBI hard disk answers on as
+ * well as a floppy, so it reaches the card's partitions too:
+ *
+ *   DOS 2     the VTOC, sector 360: bytes 3-4 the free count, 1-2 the
+ *             total.  On an ENHANCED disk (128-byte sectors, 1040 of
+ *             them) that count covers the lower half only and DOS 2.5
+ *             keeps the upper half's in VTOC2, sector 1024, bytes
+ *             122-123 -- Altirra's diskfsdos2.cpp and tools/atr.py both
+ *             say so, and test-m15d boots such a disk.
+ *   SDFS      the superblock, sector 1: byte 7 is $80 or $40, bytes
+ *             13-14 the free count, 11-12 the total.
+ *
+ * The geometry comes from the drive itself (PERCOM), because the sector
+ * size decides how much to read and, for a DOS 2 disk, whether there is a
+ * second VTOC at all.
+ *
+ * A drive that will not answer SIO -- a DOS's own virtual drive, which is
+ * what SDX's are -- falls back to the listing, which is why that code is
+ * still here.  It is the slow path in both senses: it reads the whole
+ * directory. */
+#define VTOC_SECTOR    360
+#define VTOC2_SECTOR  1024
+#define SDFS_SUPER       1
+#define ED_SECTORS    1040      /* an enhanced-density floppy */
+#define SDFS_SIGN_A   0x80      /* superblock byte 7 */
+#define SDFS_SIGN_B   0x40
+
+/* The drive's own geometry: bytes per sector, and how many there are.
+ * PERCOM is big-endian in its words.  0 for a drive that does not
+ * answer. */
+static uint16_t gd_geometry(uint8_t unit, uint32_t *total)
+{
+    uint8_t percom[12];
+
+    *total = 0;
+    if (dsk_percom(unit, percom) != SIO_OK)
+        return 0;
+    *total = (uint32_t)percom[0] * (uint32_t)(percom[4] + 1)
+             * (uint32_t)(((uint16_t)percom[2] << 8) | percom[3]);
+    return (uint16_t)(((uint16_t)percom[6] << 8) | percom[7]);
+}
+
+/* TRUE and the counts filled in, or FALSE and the caller reads the
+ * listing instead. */
+static WORD gd_dfree_fs(WORD d, uint32_t *pfree, uint32_t *ptotal,
+                        uint16_t *psecsize)
+{
+    uint8_t unit = (uint8_t)(d + 1);        /* A: is D1: */
+    uint32_t geom = 0;
+    uint16_t secsize = gd_geometry(unit, &geom);
+    uint16_t mark = pool_mark();
+    uint8_t *sec;
+    WORD ok = 0;
+
+    if (!secsize || secsize > GD_SECMAX)
+        return 0;
+    sec = pool_alloc(secsize, 2);
+    if (!sec)
+        return 0;
+    if (dos.kind == DOS_2) {
+        if (dsk_read(unit, VTOC_SECTOR, sec, secsize) == SIO_OK) {
+            *pfree = (uint32_t)sec[3] | ((uint32_t)sec[4] << 8);
+            *ptotal = (uint32_t)sec[1] | ((uint32_t)sec[2] << 8);
+            ok = 1;
+            /* the upper half of an enhanced disk, counted apart */
+            if (secsize == 128 && geom == ED_SECTORS
+                && dsk_read(unit, VTOC2_SECTOR, sec, secsize) == SIO_OK) {
+                *pfree += (uint32_t)sec[122] | ((uint32_t)sec[123] << 8);
+                *ptotal = geom;
+            }
+        }
+    } else if (dsk_read(unit, SDFS_SUPER, sec, secsize) == SIO_OK
+               && (sec[7] == SDFS_SIGN_A || sec[7] == SDFS_SIGN_B)) {
+        *pfree = (uint32_t)sec[13] | ((uint32_t)sec[14] << 8);
+        *ptotal = (uint32_t)sec[11] | ((uint32_t)sec[12] << 8);
+        ok = 1;
+    }
+    pool_release(mark);
+    *psecsize = secsize;
+    return ok;
+}
+
 static LONG gd_dfree(LONG buf, WORD drv)
 {
     char *full = gw->full, *cio = gw->cio, *line = gw->in, *in = gw->in + 32;
@@ -712,6 +996,17 @@ static LONG gd_dfree(LONG buf, WORD drv)
 
     if (d < 0 || d >= GD_DRIVES)
         return GD_EDRIVE;
+    {   /* the file system's own count, when the drive will say */
+        uint32_t nfree = 0, ntotal = 0;
+        uint16_t secsize = 0;
+        if (gd_dfree_fs(d, &nfree, &ntotal, &secsize)) {
+            wr32((uint32_t)buf, (LONG)nfree);
+            wr32((uint32_t)buf + 4, (LONG)ntotal);
+            wr32((uint32_t)buf + 8, secsize);
+            wr32((uint32_t)buf + 12, 1);
+            return 0;
+        }
+    }
     full[0] = (char)('A' + d);
     strcpy(full + 1, ":\\*.*");
     dos_cioname(full, cio);
@@ -819,6 +1114,8 @@ void gemdos_init(void)
     gd_dirs = far_alloc(GD_DRIVES * GD_DIRMAX);
     gd_dta0 = far_alloc(DTA_SIZE);
     gd_slots = far_alloc((uint32_t)GD_SLOTS * SL_SIZE);
+    gd_files = far_alloc((uint32_t)CIO_IOCBS * FH_SIZE);
+    gd_scratch = far_alloc(DTA_SIZE + GD_KEEPNAME);
     for (i = 0; i < GD_DRIVES; i++)
         far_write8(gd_dirs + (uint32_t)i * GD_DIRMAX, 0);
     for (i = 0; i < GD_SLOTS; i++) {
@@ -943,7 +1240,28 @@ void gemdos_call(uint32_t pb)
     case GD_FRENAME:
         r = gd_rename(arg_l(8), arg_l(12));
         break;
-    default:                            /* Fseek, Fdatime, Tget*: not yet */
+    case GD_FSEEK:
+        r = gd_seek(arg_l(6), arg_w(10), arg_w(12));
+        break;
+    case GD_TGETDATE: {
+        /* The machine's clock, if it has one (src/sys/clock.c): the
+         * Ultimate 1MB's DS1305.  Without one this is the ST's epoch,
+         * 1 January 1980, which is what a TOS with a dead clock says. */
+        CLOCK now;
+        clock_read(&now);
+        r = (LONG)(UWORD)(((now.year - 1980) << 9) | (now.month << 5) | now.day);
+        break;
+    }
+    case GD_TGETTIME: {
+        CLOCK now;
+        clock_read(&now);
+        r = (LONG)(UWORD)((now.hour << 11) | (now.minute << 5) | (now.second >> 1));
+        break;
+    }
+    case GD_FDATIME:
+        r = gd_datime(arg_l(6), arg_w(10), arg_w(12));
+        break;
+    default:                            /* Tset*, Fforce, Pexec: not here */
         gemdos_bad++;
         r = GD_EINVFN;
         break;

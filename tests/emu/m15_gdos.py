@@ -21,6 +21,7 @@ is one open and one read whatever its length.
     python3 tests/emu/m15_gdos.py --u1mb=ROM SpartaDOS X from an Ultimate 1MB flash image
     python3 tests/emu/m15_gdos.py --dos2     a DOS 2 (the fixture is DOS II+/D 6.4), build/m3-boot.atr
 """
+import datetime
 import os
 import struct
 import sys
@@ -32,7 +33,7 @@ from a8test.launcher import launch          # noqa: E402
 import symfile, atr                         # noqa: E402
 from m7_form import poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE, SYMS  # noqa: E402
 from m12_file import Runner, D2, FAULT_I, FRAMES_I, SYS  # noqa: E402
-from m14_sparta import boot, screen, sayable_free, DISK as SPDISK  # noqa: E402
+from m14_sparta import boot, screen, DISK as SPDISK  # noqa: E402
 
 GDOS, RELEASE = SYS + 12, SYS + 13
 CIO_I, CALLS_I, BAD_I = 8, 9, 10            # the op's own words
@@ -42,10 +43,14 @@ FIXTURE = os.path.join(ROOT, "tests", "fixtures", "test.txt")
 # src/sys/gemdos.h
 FN = dict(Dsetdrv=0x0E, Dgetdrv=0x19, Fsetdta=0x1A, Tgetdate=0x2A, Fgetdta=0x2F,
           Sversion=0x30, Dfree=0x36, Dcreate=0x39, Ddelete=0x3A, Dsetpath=0x3B,
+          Tgettime=0x2C, Tsetdate=0x2B,
           Fcreate=0x3C, Fopen=0x3D, Fclose=0x3E, Fread=0x3F, Fwrite=0x40,
-          Fdelete=0x41, Fattrib=0x43, Dgetpath=0x47, Malloc=0x48, Mfree=0x49,
+          Fdelete=0x41, Fseek=0x42, Fattrib=0x43, Dgetpath=0x47, Malloc=0x48,
+          Fdatime=0x57,
+          Mfree=0x49,
           Fsfirst=0x4E, Fsnext=0x4F, Frename=0x56)
 EINVFN, EFILNF, EPTHNF, EACCDN, EIHNDL, ENMFIL = -32, -33, -34, -36, -37, -49
+ERANGE = -64                          # a seek past the end
 FA_RDONLY, FA_SUBDIR = 0x01, 0x10
 DATE0 = 0x0021
 HANDLE_BASE = 6
@@ -149,7 +154,7 @@ def compare_listing(check, what, got, want, dirs=True):
 
 
 # -- the cases -------------------------------------------------------------------
-def cases(g, r, check, fs, kind, b):
+def cases(g, r, check, fs, kind, b, clock=False):
     fixture = open(FIXTURE, "rb").read()
     tree = kind != DOS_2
     free0 = fs.free_count()
@@ -163,8 +168,10 @@ def cases(g, r, check, fs, kind, b):
     ret, _ = g.call("Dsetdrv", W(0))
     check(ret & 1, f"Dsetdrv's map {ret:#x} lacks A")
     print(f"  drive map {ret:#04x}")
-    ret, rec = g.call("Tgetdate")
-    check(ret == EINVFN and rec[BAD_I] == 1, f"Tgetdate {ret}, refused {rec[BAD_I]}")
+    # A call this seam does not have: the counter of refusals is what
+    # says so, and Tsetdate is one -- nothing here can set a clock.
+    ret, rec = g.call("Tsetdate", W(0))
+    check(ret == EINVFN and rec[BAD_I] == 1, f"Tsetdate {ret}, refused {rec[BAD_I]}")
     dta = r.sc + DTA
     ret, _ = g.call("Fsetdta", L(dta))
     ret, _ = g.call("Fgetdta")
@@ -235,8 +242,104 @@ def cases(g, r, check, fs, kind, b):
     print(f"  Fread of {len(fixture)} into bank $00: {g.trips} round trip(s), {g.frames} frames")
     ret, _ = g.call("Fread", W(h), L(BUF_ROOM), L(r.sc + BUF))
     check(ret == 0, f"Fread at the end {ret}")
+
+    # -- Fseek: the count GEMDOS keeps, and where the bytes come from -------------------
+    # The file is at its end after the reads above, so this walks back
+    # through every mode.  A seek backwards reopens the file on its own
+    # IOCB (src/sys/gemdos.c, gd_seek), which the handle staying valid
+    # is the visible proof of.
+    n = len(fixture)
+    ret, _ = g.call("Fseek", L(0), W(h), W(1))
+    check(ret == n, f"Fseek(0, h, 1) at the end says {ret}, not {n}")
+    ret, _ = g.call("Fseek", L(0), W(h), W(0))
+    check(ret == 0, f"Fseek(0, h, 0) says {ret}, not 0")
+    ret, _ = g.call("Fread", W(h), L(4), L(r.sc + BUF))
+    check(ret == 4 and r.read(BUF, 4) == fixture[:4],
+          f"after a rewind: {ret} bytes {r.read(BUF, 4)!r}, not {fixture[:4]!r}")
+    ret, _ = g.call("Fseek", L(5), W(h), W(0))
+    check(ret == 5, f"Fseek(5, h, 0) says {ret}, not 5")
+    ret, _ = g.call("Fread", W(h), L(4), L(r.sc + BUF))
+    check(ret == 4 and r.read(BUF, 4) == fixture[5:9],
+          f"at 5: {r.read(BUF, 4)!r}, not {fixture[5:9]!r}")
+    ret, _ = g.call("Fseek", L(-2), W(h), W(1))     # back two, within the file
+    check(ret == 7, f"Fseek(-2, h, 1) says {ret}, not 7")
+    ret, _ = g.call("Fseek", L(0), W(h), W(2))
+    check(ret == n, f"Fseek(0, h, 2) says {ret}, not the {n} the file is")
+    ret, _ = g.call("Fseek", L(-4), W(h), W(2))
+    check(ret == n - 4, f"Fseek(-4, h, 2) says {ret}, not {n - 4}")
+    ret, _ = g.call("Fread", W(h), L(4), L(r.sc + BUF))
+    check(ret == 4 and r.read(BUF, 4) == fixture[-4:],
+          f"the last four: {r.read(BUF, 4)!r}, not {fixture[-4:]!r}")
+    ret, _ = g.call("Fseek", L(1), W(h), W(2))
+    check(ret == ERANGE, f"a seek past the end says {ret}, not ERANGE")
+    ret, _ = g.call("Fseek", L(-1), W(h), W(0))
+    check(ret == ERANGE, f"a seek before the start says {ret}, not ERANGE")
+    print(f"  Fseek through all three modes: {g.trips} round trip(s), {g.frames} frames")
+
+    # -- Fdatime: the stamp out of the directory, without disturbing a search --------
+    # A DOS 2 disk has no stamps and answers zeros, which is what the ST
+    # answers for a file system without them; a SpartaDOS carries them,
+    # and the image says what they are.
+    want = None
+    for e in fs.entries("") if tree else fs.entries():
+        if e.filename.upper() == "TEST.TXT":
+            want = e
+    g.call("Fsfirst", L(g.string("A:\\*.*")), W(FA_SUBDIR))    # a walk to disturb
+    first = r.read(DTA + 30, 14)
+    ret, _ = g.call("Fdatime", L(r.sc + BUF), W(h), W(0))
+    check(ret == 0, f"Fdatime {ret}")
+    t, d = struct.unpack("<2H", r.read(BUF, 4))
+    if tree:
+        y = 2000 + want.year if want.year < 80 else 1900 + want.year
+        wd = ((y - 1980) << 9) | (want.month << 5) | want.day
+        wt = (want.hour << 11) | (want.minute << 5) | (want.second >> 1)
+        check((t, d) == (wt, wd),
+              f"Fdatime says {t:#06x}/{d:#06x}, the image says {wt:#06x}/{wd:#06x}")
+    else:
+        # No stamps on the disk: the same epoch Fsfirst reports for one,
+        # 1 January 1980, so the two answers agree about the same file.
+        check((t, d) == (0, DATE0),
+              f"Fdatime on a DOS with no stamps says {t:#06x}/{d:#06x}, "
+              f"not the 0/{DATE0:#06x} its directory reports")
+    check(r.read(DTA + 30, 14) == first,
+          "Fdatime moved the application's DTA: a search would lose its place")
+    ret, _ = g.call("Fsnext")
+    check(ret == 0, f"Fsnext after Fdatime {ret}: the search did not survive")
+    print(f"  Fdatime: {t:#06x}/{d:#06x}, the search kept its place")
+
+    # -- Tgetdate and Tgettime: the machine's clock ----------------------------------
+    # The Atari has none; the Ultimate 1MB does, a DS1305 bit-banged
+    # through $D3E2 (src/sys/clock.c).  A machine without one reads a
+    # register nothing drives, fails the check that what came back is a
+    # plausible time, and answers the ST's epoch -- which is what a TOS
+    # with a dead clock answers too.  `clock` is what this machine has.
+    date, _ = g.call("Tgetdate")
+    time, _ = g.call("Tgettime")
+    y, mo, dd = 1980 + (date >> 9), (date >> 5) & 15, date & 31
+    hh, mi, ss = time >> 11, (time >> 5) & 63, (time & 31) * 2
+    print(f"  Tgetdate/Tgettime: {y:04d}-{mo:02d}-{dd:02d} {hh:02d}:{mi:02d}:{ss:02d}"
+          + ("" if clock else "  (no clock: the epoch)"))
+    if clock:
+        now = datetime.datetime.now()
+        check((y, mo, dd) == (now.year, now.month, now.day),
+              f"Tgetdate says {y:04d}-{mo:02d}-{dd:02d}, the host says "
+              f"{now.year:04d}-{now.month:02d}-{now.day:02d}")
+        near = abs((hh * 3600 + mi * 60 + ss)
+                   - (now.hour * 3600 + now.minute * 60 + now.second))
+        check(near < 120 or near > 86280,
+              f"Tgettime says {hh:02d}:{mi:02d}:{ss:02d}, the host says "
+              f"{now.hour:02d}:{now.minute:02d}:{now.second:02d}")
+    else:
+        check((date, time) == (DATE0, 0),
+              f"with no clock Tgetdate/Tgettime say {date:#06x}/{time:#06x}, "
+              f"not the epoch {DATE0:#06x}/0")
+
     ret, _ = g.call("Fclose", W(h))
     check(ret == 0, f"Fclose {ret}")
+    ret, _ = g.call("Fseek", L(0), W(h), W(0))
+    check(ret == EIHNDL, f"Fseek on a closed handle {ret}, not EIHNDL")
+    ret, _ = g.call("Fdatime", L(r.sc + BUF), W(h), W(0))
+    check(ret == EIHNDL, f"Fdatime on a closed handle {ret}, not EIHNDL")
     ret, _ = g.call("Fclose", W(h))
     check(ret == EIHNDL, f"Fclose twice {ret}, not EIHNDL")
     ret, _ = g.call("Fclose", W(3))
@@ -330,12 +433,20 @@ def cases(g, r, check, fs, kind, b):
     b_free, b_total, secsiz, clsiz = struct.unpack("<4l", r.read(BUF, 16))
     print(f"  Dfree: {b_free} free sectors of {secsiz} (image {free0}), "
           f"{g.trips} round trip(s), {g.frames} frames")
-    # Dfree can only be as right as the line it reads: the DOS gives the
-    # free count three characters in its directory listing, and that is
-    # all CIO offers (m14_sparta.sayable_free, src/sys/gemdos.c gd_dfree).
-    check(b_free in sayable_free(free0),
-          f"Dfree {b_free}, the image's bitmap says {free0} -- the DOS can "
-          f"say {sorted(sayable_free(free0))}")
+    # EXACT, and it did not use to be.  Dfree reads the file system's own
+    # count now -- the VTOC on a DOS 2 disk, the superblock on a SpartaDOS
+    # one, one sector through SIO -- rather than the three characters a
+    # directory listing gives it, which could not say more than 999 and
+    # which the two DOSes spell differently when it overflows (the old
+    # rule is m14_sparta.sayable_free, and the listing is still the
+    # fallback for a drive that will not answer SIO).
+    check(b_free == free0,
+          f"Dfree says {b_free} free, the image's bitmap says {free0}")
+    check(secsiz == fs.img.sector_size,
+          f"Dfree says {secsiz}-byte sectors, the image has {fs.img.sector_size}")
+    check(b_total >= free0,
+          f"Dfree says {b_total} sectors in all, fewer than the {free0} free")
+    check(clsiz == 1, f"Dfree says {clsiz} sectors to a cluster, not 1")
 
     # -- the exit ----------------------------------------------------------------------
     h, _ = g.call("Fopen", L(g.string("TEST.TXT")), W(0))
@@ -416,7 +527,7 @@ def main(argv):
         r = Runner(b, syms)
         g = Gdos(r, check)
         print("GEMDOS on CIO, against the image:")
-        cases(g, r, check, fs, kind, b)
+        cases(g, r, check, fs, kind, b, clock=bool(flash))
     finally:
         emu.stop()
 

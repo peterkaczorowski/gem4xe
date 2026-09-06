@@ -85,6 +85,9 @@ typedef struct {
  * ICAX1 = aux1, ICAX2 = aux2.  Returns the IOCB number, 1..7, or the
  * status negated: -CIO_E_INUSE when no IOCB is free. */
 int16_t  cio_open(const char *name, uint8_t aux1, uint8_t aux2);
+/* The same file on the IOCB it was on: how a seek backwards is done
+ * (src/sys/gemdos.c, gd_seek). */
+int16_t  cio_reopen(int16_t iocb, const char *name, uint8_t aux1, uint8_t aux2);
 uint8_t  cio_close(int16_t iocb);
 
 /* Up to `len` bytes into `buf`; *got is how many arrived, which is fewer
@@ -113,6 +116,23 @@ uint8_t  cio_xio(uint8_t cmd, const char *name, uint8_t aux1, uint8_t aux2);
 
 /* The bare call: the IOCB is filled in already.  src/sys/cio.s. */
 __attribute__((simple_call)) uint16_t cio_call(uint16_t iocb);
+
+/* ---- the disk, under the file system ---------------------------------- */
+/* One sector, read through the OS's SIO with the DCB in page 3 -- which is
+ * the path a PBI hard disk answers on as well as a floppy, so this reaches
+ * every drive gem4xe can see.  It is how Dfree learns what a volume has
+ * left: the file system's own count, rather than three characters of a
+ * directory listing (src/sys/gemdos.c).
+ *
+ * `buf` must be in bank $00, where the OS can write it.  The answer is the
+ * SIO status: 1 is success, and anything else means the drive did not
+ * answer -- a virtual drive of the DOS's own, most likely, which is why
+ * the caller keeps a path that does not need this. */
+#define SIO_OK        0x01
+#define SIO_PERCOM_LEN 12       /* the drive's geometry, as it reports it */
+uint8_t dsk_read(uint8_t unit, uint16_t sector, void *buf, uint16_t len);
+uint8_t dsk_percom(uint8_t unit, void *buf);   /* SIO_PERCOM_LEN bytes */
+__attribute__((simple_call)) uint16_t dsk_call(uint16_t unused);
 
 extern uint16_t cio_calls;      /* round trips made */
 extern uint8_t  cio_env;        /* bisection knobs (src/sys/cio.s): 1 = leave CRITIC alone */

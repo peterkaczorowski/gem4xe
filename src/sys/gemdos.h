@@ -79,6 +79,7 @@
 #define GD_ENSMEM   -39L        /* no memory */
 #define GD_EDRIVE   -46L        /* no such drive */
 #define GD_ENMFIL   -49L        /* no more files */
+#define GD_ERANGE   -64L        /* a seek past the end of the file */
 
 /* File attributes, in Fsfirst's mask and the DTA. */
 #define FA_RDONLY   0x01
@@ -108,6 +109,10 @@
 
 /* The call block's size, the largest argument list being Fread's. */
 #define GD_PB_SIZE  16
+
+/* The largest sector gd_dfree will read into the pool: SDFS on a CF card
+ * (tools/apt.py) is 512, and nothing gem4xe mounts is bigger. */
+#define GD_SECMAX   512
 
 /* Once, after dos_ident and farmem_probe and before any application is
  * loaded: the search slots and the per-drive directories are far

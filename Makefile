@@ -51,7 +51,7 @@ SRC_U1MB ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures
 
 HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
 M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
 
 # GEM.COM, the product (src/gem.c): the runner's objects with the runner
 # itself and its compiled-in test application taken out, linked on the
@@ -193,7 +193,7 @@ build/dos.o: src/sys/dos.c src/sys/dos.h src/sys/cio.h
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
 # GEMDOS for the applications: the ST's trap #1 on CIO, through the seam.
-build/gemdos.o: src/sys/gemdos.c src/sys/gemdos.h src/sys/dos.h src/sys/cio.h src/sys/farmem.h src/sys/app.h
+build/gemdos.o: src/sys/gemdos.c src/sys/clock.h src/sys/gemdos.h src/sys/dos.h src/sys/cio.h src/sys/farmem.h src/sys/app.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -219,6 +219,10 @@ build/lang.rsc build/lang_rsc.c build/lang_rsc.h: tools/langrsc.py tools/rsc.py
 build/lang_rsc.o: build/lang_rsc.c
 	@mkdir -p build
 	$(CC) $(CFLAGS) -o $@ $<
+build/clock.o: src/sys/clock.c src/sys/clock.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
 build/font.o: src/vdi/font.c src/vdi/font.h src/vdi/vdi.h src/sys/cio.h src/sys/farmem.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
@@ -508,7 +512,11 @@ build/gem-cf.img: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_ap
 # 128: SpartaDOS loads M3.COM's 100 KB from anywhere, where DOS 2.5 could
 # not go past sector 720 -- and 1040 no longer hold it with the desktop
 # beside it.  The gates size everything from the image, not from here.
-SP_SECTORS = --sectors 2048
+# 2560 sectors, which is bigger than a floppy on purpose: it leaves more
+# than 999 free, and 999 is what a directory listing's three characters
+# could say.  Dfree reads the file system's own count now (src/sys/gemdos.c),
+# so test-m15 proves the old ceiling is gone rather than describing it.
+SP_SECTORS = --sectors 2560
 build/m14-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(SHELL_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
@@ -705,7 +713,11 @@ test-m21: build/m3-boot.atr build/inv.fnt
 # The product disk booting into the desktop with nothing typed: the
 # batch file the SpartaDOSes run, the loader's refusal on the 6502, the
 # switch, and the desk against the model (docs/shipping.md, section 2).
-test-boot: build/gem-sp.atr build/desktop.g4a build/desktop.sym
+# BOTH product disks: the gate boots both, and naming only one here left
+# the other stale whenever GEM.COM was rebuilt -- which looked exactly
+# like the far image being mangled by the DOS, and cost an afternoon
+# twice (docs/phase16.md).
+test-boot: build/gem-sp.atr build/gem-boot.atr build/desktop.g4a build/desktop.sym
 	python3 tests/emu/product_boot.py
 
 # The same boot off the product CF card, on the machine this project is

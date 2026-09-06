@@ -53,12 +53,17 @@ static int16_t free_iocb(void)
     return -1;
 }
 
-int16_t cio_open(const char *name, uint8_t aux1, uint8_t aux2)
+/* Open on the IOCB the caller names, rather than the first free one.
+ * GEMDOS's handles ARE its IOCBs (src/sys/gemdos.c: handle = iocb +
+ * GD_HANDLE_BASE), so a file that has to be reopened -- which is how a
+ * seek backwards is done on a DOS with no byte-addressable POINT -- must
+ * come back on the IOCB it went out on, or the handle would change under
+ * the application. */
+static int16_t open_on(int16_t n, const char *name, uint8_t aux1, uint8_t aux2)
 {
     volatile IOCB *io;
-    int16_t n = free_iocb();
 
-    if (n < 0)
+    if (n < 1 || n >= CIO_IOCBS)
         return -(int16_t)CIO_E_INUSE;
     put_name(name);
     io = &CIO_IOCB[n];
@@ -79,6 +84,24 @@ int16_t cio_open(const char *name, uint8_t aux1, uint8_t aux2)
     }
     return n;
 }
+
+int16_t cio_open(const char *name, uint8_t aux1, uint8_t aux2)
+{
+    int16_t n = free_iocb();
+
+    if (n < 0)
+        return -(int16_t)CIO_E_INUSE;
+    return open_on(n, name, aux1, aux2);
+}
+
+/* The same file on the same IOCB, from the beginning: close and open.
+ * A close of an IOCB that is already free is a status, not a fault. */
+int16_t cio_reopen(int16_t iocb, const char *name, uint8_t aux1, uint8_t aux2)
+{
+    cio_close(iocb);
+    return open_on(iocb, name, aux1, aux2);
+}
+
 
 uint8_t cio_close(int16_t iocb)
 {
@@ -144,4 +167,61 @@ uint8_t cio_xio(uint8_t cmd, const char *name, uint8_t aux1, uint8_t aux2)
     if (io->ichid != 0xFF)
         cio_close(n);
     return st;
+}
+
+/* ---- the disk, under the file system ----------------------------------
+ * The DCB in page 3, then SIOV.  Filling it here rather than in the
+ * assembly keeps the round trip (src/sys/cio.s) the one thing that knows
+ * how to become the machine DOS was running on.
+ *
+ * DTIMLO is the OS's own for a disk read; DSTATS $40 says the drive
+ * sends.  The unit is 1-based, as D1: is.  */
+#define DCB_DDEVIC 0x0300
+#define DCB_DUNIT  0x0301
+#define DCB_DCOMND 0x0302
+#define DCB_DSTATS 0x0303
+#define DCB_DBUFLO 0x0304
+#define DCB_DTIMLO 0x0306
+#define DCB_DBYTLO 0x0308
+#define DCB_DAUX1  0x030A
+
+#define SIO_DISK   0x31         /* DDEVIC for D1: .. D8: */
+#define SIO_READ   0x52         /* 'R' */
+#define SIO_PERCOM 0x4E         /* 'N': the drive's own geometry */
+#define SIO_FROM   0x40         /* DSTATS: the drive sends */
+#define SIO_TIME   0x0F         /* DTIMLO, as the OS uses for a disk */
+
+static uint8_t sio(uint8_t unit, uint8_t cmd, uint16_t aux, void *buf,
+                   uint16_t len)
+{
+    volatile uint8_t *d = (volatile uint8_t *)DCB_DDEVIC;
+    volatile uint16_t *w;
+
+    d[DCB_DDEVIC - DCB_DDEVIC] = SIO_DISK;
+    d[DCB_DUNIT - DCB_DDEVIC] = unit;
+    d[DCB_DCOMND - DCB_DDEVIC] = cmd;
+    d[DCB_DSTATS - DCB_DDEVIC] = SIO_FROM;
+    w = (volatile uint16_t *)DCB_DBUFLO;
+    *w = (uint16_t)buf;
+    d[DCB_DTIMLO - DCB_DDEVIC] = SIO_TIME;
+    w = (volatile uint16_t *)DCB_DBYTLO;
+    *w = len;
+    w = (volatile uint16_t *)DCB_DAUX1;
+    *w = aux;
+    cio_calls++;
+    return (uint8_t)dsk_call(0);
+}
+
+uint8_t dsk_read(uint8_t unit, uint16_t sector, void *buf, uint16_t len)
+{
+    return sio(unit, SIO_READ, sector, buf, len);
+}
+
+/* The drive's own geometry: tracks, sectors a track, sides and the sector
+ * size, the words big-endian.  What the caller wants it for is the sector
+ * size (bytes 6-7) and how many sectors there are, which decides whether a
+ * DOS 2 disk has a second VTOC (src/sys/gemdos.c). */
+uint8_t dsk_percom(uint8_t unit, void *buf)
+{
+    return sio(unit, SIO_PERCOM, 0, buf, SIO_PERCOM_LEN);
 }
