@@ -20,15 +20,41 @@ trash is a delete, which is the delete that was already there.  Dropped
 in its own window on nothing, or on itself, it is the click it started
 as.
 
-**SHIFT, and not CONTROL, and here is why.**  Newer GEM moves with
-CONTROL held (EmuTOS's `deskfun.c`: `op = (keystate & MODE_CTRL) ?
-OP_MOVE : OP_COPY`), and this machine cannot answer the question.
-POKEY reports the SHIFT key on a line of its own -- `SKSTAT` bit 3,
-live, whether or not another key is down -- and reports CONTROL only in
-bit 7 of the code of a key that is *being held*.  A hand holding CONTROL
-and nothing else is invisible to the hardware.  So the modifier is the
-one the machine can be asked about while the mouse button is down, and
-the Atari key is no better off than CONTROL.
+### What TOS 2.06 does, measured
+
+Not read out of EmuTOS and not remembered: driven, on the ROM, in
+Hatari.  A GEMDOS drive holding `SRC.TXT` and a `DEST` folder, the
+desktop's hard-disk window opened over Hatari's control socket
+(`--control-socket` takes `mousemove`, `leftdown`/`leftup` and
+`keydown`/`keyup`), `SRC.TXT` dragged onto `DEST` four times, and the
+host directory read back afterwards -- GEMDOS emulation writes straight
+through, so the directory IS the answer.  The dialog each drop put up
+was screenshotted and read glyph by glyph.
+
+| drag | the dialog says | what happened |
+|---|---|---|
+| plain | `COPY ITEM(S)` | copied; the original stays |
+| **CONTROL** | `MOVE ITEM(S)` | **moved**; the original is gone |
+| SHIFT | `COPY ITEM(S)` -- pixel for pixel the plain one | copied |
+| **ALT** | **`COPY AND RENAME ITEM(S)`** | copied under a name you may change |
+
+So all three modifiers are not distinct: CONTROL moves, ALT copies under
+a new name, and SHIFT does nothing a drag can see (its job on the
+desktop is extending a selection).  EmuTOS agrees about CONTROL
+(`deskfun.c`: `op = (keystate & MODE_CTRL) ? OP_MOVE : OP_COPY`) and
+has no ALT drag at all.
+
+**And here, it has to be SHIFT.**  POKEY reports the SHIFT key on a line
+of its own -- `SKSTAT` bit 3, live, whether or not another key is down
+-- and reports CONTROL only in bit 7 of the code of a key that is
+*being held*.  A hand holding CONTROL and nothing else is invisible to
+this hardware, the Atari key is no better off, and there is no ALT key
+on the machine at all.  So the one modifier that can be asked about
+while the mouse button is down is the one that carries the move, and
+TOS's meaning for it -- nothing -- is the one we are free to take.
+`COPY AND RENAME` has to arrive by another road: the name a copy is
+given is worth asking for when the destination already holds that name,
+which is what the donor's `get_new_name()` does and needs no modifier.
 
 ## The operation
 
