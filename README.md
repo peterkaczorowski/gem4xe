@@ -324,7 +324,11 @@ room. Two provenance rules hold everywhere else:
 - **The Atari Corp VDI/AES corpus is a specification only.** It settles what a
   real ROM does; no line of it appears here.
 - **Nothing that is not ours to give is in the tree.** No ROM images, no disk
-  images, no fonts, no firmware: the GEM font comes out of an EmuTOS checkout
-  at build time, the disk images are the user's own (`fixtures.toml`), and the
-  Altirra patches in `tools/altirra/` are diffs against a GPLv2 project that
-  are also filed upstream.
+  images, no firmware: the disk images are the user's own (`fixtures.toml`),
+  and the Altirra patches in `tools/altirra/` are diffs against a GPLv2
+  project that are also filed upstream. What *is* here from elsewhere is
+  GPL'd and says so in its own header: the GEM 8×8 font and the standard fill
+  patterns, extracted from EmuTOS by `tools/fontconv.py` and
+  `tools/patconv.py` and checked in — so the host reference reads the same
+  bytes the target links, and an EmuTOS checkout is needed only to regenerate
+  them.
