@@ -51,7 +51,7 @@ SRC_U1MB ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures
 
 HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
 M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
 
 # GEM.COM, the product (src/gem.c): the runner's objects with the runner
 # itself and its compiled-in test application taken out, linked on the
@@ -361,6 +361,16 @@ build/fillpat.o: src/vdi/fillpat.c src/vdi/vdi.h
 src/vdi/fillpat.c:
 	python3 tools/patconv.py $(EMUTOS)/vdi/vdi_fill.c $@
 
+# The VDI's sine table, from EmuTOS's vdi_gdp.c by sinconv.py: the GDPs
+# draw every curve out of it, and tools/vdiref.py reads the generated file
+# so the reference and the driver cannot disagree about a circle.
+build/sintbl.o: src/vdi/sintbl.c src/vdi/vdi.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+src/vdi/sintbl.c:
+	python3 tools/sinconv.py $(EMUTOS)/vdi/vdi_gdp.c $@
+
 build/hello.elf: $(HELLO_OBJS) src/gem4xe.scm
 	$(LD) src/gem4xe.scm $(HELLO_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/hello.map
 
@@ -458,16 +468,22 @@ build/m12-d2.atr: tools/mkfsdisk.py tools/atr.py
 	@rm -f $@
 	python3 tools/mkfsdisk.py "$(SRC_DOS)" $@
 
-# The runner's DOS 2 disk has no room for the shell's applications: DOS
-# II+/D's 1040 sectors hold M3.COM's 900-odd and the fixtures, and little
-# more -- --sweep takes the fixture's own demonstration programs off it,
-# which is where the last of the room came from.
+# The runner's disk is DOUBLE density, and that is why the gates type an
+# L before the name.  The single-density fixture's DOS boots to a command
+# prompt (nicer to drive) but its 1040 enhanced sectors held the runner
+# with nothing to spare -- 117 KB of program on a 128 KB disk -- and the
+# boot code it carries cannot read a double-density disk at all: written
+# onto one, it stops at BOOT ERROR.  The double-density fixture's DOS
+# boots its own disk, gives the familiar DOS 2 menu, and leaves 190
+# sectors free, so the runner has 48 KB to grow into.  L is that menu's
+# BINARY LOAD, and the file is called M3 with no extension so that the
+# three keys after it are the ones every gate already typed.
 # The shell gate (test-m16) runs on the SpartaDOS disk, whose size is
 # ours to choose (tools/mkspdisk.py --sectors).
 build/m3-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc
-	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
+	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM $(DISK_DENSITY) --sweep $(DISK_FILES)
+	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ M3 --sweep $(DISK_FILES)
 
 # The product disks: the system with the desktop beside it, one per DOS,
 # and both of them boot into it with nothing typed.

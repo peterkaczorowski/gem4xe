@@ -15,6 +15,7 @@
  *     WORD n_pts         number of POINTS in ptsin (so 2*n words follow)
  *     WORD n_int         number of words in intin
  *     WORD contrl[7..10] four words: the two MFDB pointers, 0 when unused
+ *     WORD sub           contrl[5], the sub-opcode (v_gdp's GDP), else 0
  *     WORD ptsin[2*n_pts]
  *     WORD intin[n_int]
  *
@@ -437,6 +438,7 @@ static void run_script(void)
         contrl[8]  = vdi_script[i++];
         contrl[9]  = vdi_script[i++];
         contrl[10] = vdi_script[i++];
+        contrl[5]  = vdi_script[i++];   /* the sub-opcode: v_gdp's GDP */
         for (k = 0; k < npts * 2 && k < PTSIN_SIZE; k++)
             ptsin[k] = vdi_script[i++];
         for (k = 0; k < nint && k < INTIN_SIZE; k++)

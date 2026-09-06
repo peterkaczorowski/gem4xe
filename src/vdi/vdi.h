@@ -80,6 +80,10 @@ typedef struct {
     WORD fill_index;        /* vsf_style's index MINUS ONE, as the donor keeps it */
     WORD fill_per;          /* outline fill area */
     WORD text_color;
+    /* vsl_ends: LE_SQUARED / LE_ARROWED / LE_ROUNDED at each end of a
+     * polyline.  Only an arrow is drawn -- a rounded end on a one-pixel
+     * line is the same pixel a squared one puts there. */
+    WORD line_beg, line_end;
     /* markers (vsm_*): the shape 0..5, its colour, the height asked for and
      * the whole-number scale that height rounds to. */
     WORD mark_index, mark_color, mark_height, mark_scale;
@@ -105,6 +109,37 @@ typedef struct {
 /* The physical workstation's handle, by specification; v_opnvwk hands
  * out the ones above it. */
 #define VDI_PHYS_HANDLE 1
+
+/* The VDI's sine table (src/vdi/sintbl.c, from EmuTOS by
+ * tools/sinconv.py): sines of 0 to 89.6 degrees in 0.8 degree steps,
+ * normalised to 0..65536, with no entry for exactly 90.  The GDPs are
+ * the only caller. */
+#define VDI_SIN_ANGLE_MAX 896
+#define VDI_SIN_SIZE      ((VDI_SIN_ANGLE_MAX / 8) + 1)
+extern const UWORD __far vdi_sin_tbl[VDI_SIN_SIZE];
+
+/* A curve is drawn as this many segments, from the larger radius over
+ * four and clamped -- fewer than the donor's 32..128, because ptsin
+ * holds the points and ours is 64 of them. */
+#define MIN_ARC_CT 16
+#define MAX_ARC_CT 48
+
+/* v_gdp's sub-opcodes, in contrl[5] */
+#define GDP_BAR       1
+#define GDP_ARC       2
+#define GDP_PIE       3
+#define GDP_CIRCLE    4
+#define GDP_ELLIPSE   5
+#define GDP_ELLARC    6
+#define GDP_ELLPIE    7
+#define GDP_RBOX      8
+#define GDP_RFBOX     9
+#define GDP_JUSTIFIED 10
+
+/* vsl_ends */
+#define LE_SQUARED 0
+#define LE_ARROWED 1
+#define LE_ROUNDED 2
 
 /* markers (vsm_type / vsm_height).  The nominal cell is the ST's, so that
  * an application's idea of a "standard" marker is the familiar one. */

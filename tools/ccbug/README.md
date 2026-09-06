@@ -1,6 +1,6 @@
 # tools/ccbug — the cc65816 bugs gem4xe works around
 
-Eleven defects in Calypsi cc65816 **5.18** — eight in code generation, two
+Fourteen defects in Calypsi cc65816 **5.18** — eight in code generation, two
 crashes and one in the front end's arithmetic — each reproduced from a shape
 lifted out of gem4xe, each with the shape the sources use instead. `make check-cc` builds `bugs.c` with the
 vendor's minimal linker script and C library, runs it under `db65816`, and
@@ -60,6 +60,19 @@ What the sources do, in one line each. The reasons follow.
 11. **Never assign a struct of more than 8 bytes between a near object and
     a far one.** Copy it byte by byte (`fn_copy`, src/desk/deskwin.c), or
     keep both sides far — far-to-far copies of any size compile.
+12. **Never right-shift a signed 16-bit value.** Shift an unsigned copy
+    (`(UWORD)v >> n`) when it cannot be negative, and use `asr()`
+    (src/vdi/vdi.c) when it can. A shift by one emits a plain `lsr`, which
+    is right only for a non-negative value; by more than one the value is
+    mangled outright, positive or negative.
+13. **Never combine two elements of the same array in one expression**
+    when either index is computed. `q = pt[j]; dx = pt[0] - q;`, not
+    `dx = pt[0] - pt[i * inc * 2];` — B1 again, and it reaches pointer
+    parameters, not only stack arrays.
+14. **Never index an array from a pointer into its middle with a
+    negative index.** Pass the base and an index, so that every subscript
+    is non-negative: `draw_arrow(pt, n, (n-1)*2, -1)`, not
+    `draw_arrow(&pt[(n-1)*2], n, -1)` with `pt[-2]` inside.
 
 ## B1 — stack-array element plus operand compiles to a load
 
@@ -328,3 +341,68 @@ failed at once; bisected to the one statement with a delta-minimiser (the
 three-function "minimal failing set" it first reported was an artefact of
 unused statics being dropped: the function alone, `static` and unreferenced,
 compiles because it is never translated).
+
+
+## B12 — a signed 16-bit `>>` is not an arithmetic shift
+
+    UWORD i = angle >> 3;               /* Isin(), src/vdi/vdi.c */
+
+emits three logical shifts and then a sign extension **from the wrong bit** --
+`eor ##4 / and ##7 / sec / sbc ##4`, which keeps three bits and discards the
+rest. So `900 >> 3` is 0 rather than 112, `900 >> 4` is -8 rather than 56,
+and `-900 >> 3` is -1 rather than -113. A shift by ONE emits a plain `lsr`,
+correct only when the value cannot be negative. 32-bit shifts, signed or
+not, are right, and so are unsigned 16-bit ones.
+
+The same compiler emits the correct `cmp ##-32768 / ror a` for the same
+source shape elsewhere in the same file (`nf >> 2` in `raster_1bpp`), so
+reading one listing proves nothing either way -- which is why this one is in
+`bugs.c` and checked in the simulator.
+
+    static WORD asr(WORD v, WORD n)     /* src/vdi/vdi.c */
+    {
+        if (v >= 0)
+            return (WORD)((UWORD)v >> n);
+        return (WORD)(-(WORD)(((UWORD)(-v) + (UWORD)((1u << n) - 1u)) >> n));
+    }
+
+Found by `make test-m3`: every GDP curve -- circle, ellipse, arc, pie --
+drew nothing at all, because `Isin` returned `sin_tbl[0]` for every angle
+and each point of the curve landed on its centre.  A sweep of the whole
+tree's generated assembly for the broken idiom found no other site.
+
+
+## B13 and B14 — an arrowhead's two ends
+
+    dx = pt[0] - pt[i * inc * 2];       /* draw_arrow(), src/vdi/vdi.c */
+
+reads the second element as **zero**. It is B1's shape reaching further
+than B1 says: through a pointer parameter rather than a stack array, and
+with a product of two variables as the index. Neither the index
+arithmetic on its own nor the subtraction on its own is wrong -- lifted
+into a small test program with the same types, the same expression
+compiles correctly -- so this, like B12, is checked by running it rather
+than by reading a listing.
+
+    WORD j = (WORD)(i * inc * 2), q = pt[j];
+    dx = (WORD)(pt[0] - q);
+
+The head at the OTHER end of the line was wrong for a second reason.  The
+donor reaches it with a pointer into the middle of the array and walks
+backwards:
+
+    draw_arrow(vwk, point+count-1, count, -1);      /* pt[-2] inside */
+
+and compiled here `pt[-2]` reads neither point -- it came back as -8417
+for a coordinate that is 48.  The sources pass the base and the tip's
+INDEX, so every subscript inside is non-negative.
+
+Neither shape reproduces on its own: lifted into a small function with
+the same types, both compile correctly, and `bugs.c` therefore carries
+the whole calculation -- the square root, the rounding and the loop -- to
+get the same register pressure.  That is also why neither could have been
+found by reading a listing.
+
+Found by `make test-m3`: every arrowhead `vsl_ends` drew pointed at the
+origin (B13), and the one at the far end of the line pointed off the
+screen (B14).

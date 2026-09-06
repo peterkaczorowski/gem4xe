@@ -190,24 +190,24 @@ def cio_cases(r, check):
     # first, the word after -- what src/aes/fsel.c goes by too.
     check(names and re.match(r"^\s*\d+ FREE", names[-1], re.I),
           "the listing does not end in the free-sector line")
-    for fn in ("M3      COM", "TEST    TXT"):
+    for fn in ("M3         ", "TEST    TXT"):
         check(any(fn in ln for ln in names), f"{fn!r} is not in the listing")
-    # The disk is DOS 2.5 enhanced density with the runner written into
-    # the upper half (tools/mkdisk.py --enhanced --high): getting this far
-    # means the fixture DOS loaded it from there.  Its free count must be
-    # the one tools/atr.py computed over BOTH VTOCs, and the runner's size
-    # the sectors it was given -- a DOS reading the disk as single density
-    # would show neither.
+    # The disk is DOUBLE density (tools/mkdisk.py, and the Makefile's note
+    # about why): getting this far means the fixture DOS read 256-byte
+    # sectors to load the runner.  Its free count must be the one
+    # tools/atr.py computed, and the runner's size the sectors it was
+    # given -- a DOS reading the disk as single density would show
+    # neither.
     disk = atr.Dos2(atr.ATRImage.load(DISK))
-    m3 = disk.find("M3.COM")
+    m3 = disk.find("M3")
     want_free = disk.free_count()
     m = re.match(r"^\s*(\d+) FREE", names[-1], re.I)
     got_free = int(m.group(1)) if m else -1
     check(got_free == want_free,
           f"the DOS reports {got_free} free sectors, the image holds {want_free}")
-    check(any(re.search(rf"M3      COM\s*0*{m3.count}\b", ln) for ln in names),
-          f"M3.COM is not listed with its {m3.count} sectors")
-    print(f"  {disk.img!r}: M3.COM {m3.count} sectors from {m3.start}, flag ${m3.flag:02X}; "
+    check(any(re.search(rf"M3\s+0*{m3.count}\b", ln) for ln in names),
+          f"M3 is not listed with its {m3.count} sectors")
+    print(f"  {disk.img!r}: M3 {m3.count} sectors from {m3.start}, flag ${m3.flag:02X}; "
           f"{got_free} free, as the image says")
 
     # -- write, then read back -------------------------------------------------
@@ -769,9 +769,9 @@ def main(argv):
         b.poke(0xD1FF, 0x01)
         b.poke(0xD191, 0x00)
         b.frames(500)
-        for k in ("M", "3", "RETURN"):
+        for k in ("L", "M", "3", "RETURN"):
             b.key(k)
-            b.frames(6)
+            b.frames(10)
         b.frames(200)
         # "VD" says the runner is alive; STATUS[2] == 1 says it is
         # ready for scripts, which is what staging one needs.

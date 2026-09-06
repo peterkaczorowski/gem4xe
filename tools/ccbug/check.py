@@ -42,6 +42,13 @@ RESULTS = {
     "r_b9_fix": (20,  "fix", "B9 tested, then assigned plainly"),
     "r_b10_bug": (207, "bug", "B10 parameters clamped in place, inlined"),
     "r_b10_fix": (207, "fix", "B10 clamped into fresh locals"),
+    "r_b12_bug": (112, "bug", "B12 signed 16-bit >> 3"),
+    "r_b12_fix": (112, "fix", "B12 an unsigned copy shifted"),
+    "r_b12_neg": (-113, "fix", "B12 asr(), negative"),
+    "r_b13_bug": (48,  "bug", "B13 two elements in one expression"),
+    "r_b13_fix": (48,  "fix", "B13 the far one through a scalar"),
+    "r_b14_bug": (192, "bug", "B14 a negative index into an array"),
+    "r_b14_fix": (192, "fix", "B14 indexed from the base instead"),
 }
 B2 = ("r_b2_eq", "r_b2_lt", "r_b2_mod")
 # file stem: note -- the shapes the compiler cannot get through at all

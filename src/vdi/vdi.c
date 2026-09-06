@@ -13,6 +13,7 @@
 #include "../vbxe/vbxe.h"
 #include "../sys/irq.h"
 #include "../sys/zwin.h"
+#include "../sys/farmem.h"
 
 WORD contrl[CONTRL_SIZE];
 WORD intin[INTIN_SIZE];
@@ -76,6 +77,19 @@ static WORD rev_col(WORD hw)
 /* ---------------------------------------------------------------------- */
 /* helpers                                                                */
 /* ---------------------------------------------------------------------- */
+
+/* An arithmetic right shift, by hand.  cc65816 5.18 compiles a signed
+ * 16-bit >> to a LOGICAL shift and, by more than one bit, to a logical
+ * shift plus a sign extension from the wrong bit -- (900 >> 3) is 0 and
+ * (900 >> 4) is -8 (tools/ccbug B12, proved in the simulator).  Shifting
+ * an unsigned copy is right, so the sign is handled here: floor division
+ * by a power of two, which is what a shift is supposed to be. */
+static WORD asr(WORD v, WORD n)
+{
+    if (v >= 0)
+        return (WORD)((UWORD)v >> n);
+    return (WORD)(-(WORD)(((UWORD)(-v) + (UWORD)((1u << n) - 1u)) >> n));
+}
 
 static void order(WORD *a, WORD *b)
 {
@@ -1061,7 +1075,7 @@ static void raster_1bpp(const uint8_t *bits, uint16_t stride,
     last_part  = (WORD)(!(cx1 & 1));
     {
         WORD nf = (WORD)(nb - first_part - last_part);
-        n8  = (WORD)(nf >> 2);
+        n8  = (WORD)((UWORD)nf >> 2);   /* nf >= 0; and see asr() */
         rem = (WORD)(nf & 3);
         /* source x under the first whole byte's even pixel, and under the
          * even pixel of each byte built on its own */
@@ -1180,11 +1194,11 @@ static void draw_glyph_cpu(WORD ch, WORD cx, WORD cy)
  * the alignment vst_alignment set.  The horizontal is the string's width,
  * the vertical the font's own metrics: the ST's numbering, and EmuTOS's
  * gsx_tblt does the same arithmetic. */
-static WORD align_x(WORD x, WORD n)
+static WORD align_x(WORD x, WORD w)
 {
     switch (vwk.h_align) {
-    case TA_CENTRE: return (WORD)(x - n * FONT_W / 2);
-    case TA_RIGHT:  return (WORD)(x - n * FONT_W);
+    case TA_CENTRE: return (WORD)(x - w / 2);
+    case TA_RIGHT:  return (WORD)(x - w);
     default:        return x;
     }
 }
@@ -1201,60 +1215,72 @@ static WORD align_y(WORD y)
     }
 }
 
+/* One glyph at a cell's top-left corner, in the current writing mode,
+ * thickened if vst_effects asked for it.  The whole cell has to be
+ * inside the screen AND the clip for the blitter to serve it; anything
+ * else goes pixel by pixel through the window.  Shared by v_gtext and by
+ * v_justified, which places its cells one at a time. */
+static void draw_char(WORD ch, WORD cx, WORD cy)
+{
+    WORD mode = (WORD)(vwk.wrt_mode + 1);
+    WORD blittable = (mode == MD_REPLACE || mode == MD_TRANS);
+    WORD fits = (cx >= 0 && cy >= 0 &&
+                 cx + FONT_W <= SCR_W && cy + FONT_H <= SCR_H);
+
+    if (fits && vwk.clip)
+        fits = (cx >= vwk.xmn_clip && cy >= vwk.ymn_clip &&
+                cx + FONT_W - 1 <= vwk.xmx_clip &&
+                cy + FONT_H - 1 <= vwk.ymx_clip);
+    if (fits && blittable) {
+        if (mode == MD_REPLACE)
+            fill_rect_dev(cx, cy, (WORD)(cx + FONT_W - 1),
+                          (WORD)(cy + FONT_H - 1), HW(0));
+        draw_glyph(ch, cx, cy, HW(vwk.text_color),
+                   (WORD)(mode == MD_REPLACE));
+        blit_run();
+    } else {
+        draw_glyph_cpu(ch, cx, cy);
+    }
+    /* Thickened: the same glyph again, one pixel right, drawn
+     * transparently so the two overlap into a heavier letter.  It costs a
+     * second blit a glyph and nothing else. */
+    if ((vwk.text_effects & TXT_THICKEN) && cx + 1 + FONT_W <= SCR_W) {
+        WORD bx = (WORD)(cx + 1);
+        fits = (cy >= 0 && cy + FONT_H <= SCR_H);
+        if (fits && vwk.clip)
+            fits = (bx >= vwk.xmn_clip && cy >= vwk.ymn_clip &&
+                    bx + FONT_W - 1 <= vwk.xmx_clip &&
+                    cy + FONT_H - 1 <= vwk.ymx_clip);
+        if (fits && blittable) {
+            draw_glyph(ch, bx, cy, HW(vwk.text_color), 0);
+            blit_run();
+        } else {
+            draw_glyph_cpu(ch, bx, cy);
+        }
+    }
+}
+
+/* The row under a string, in the text colour: solid and clipped, because
+ * an underline is text and does not take the fill pattern. */
+static void underline(WORD x1, WORD x2, WORD cy)
+{
+    WORD a = x1, b = (WORD)(cy + FONT_H - 1), c = x2, d = b;
+
+    if (clip_rect(&a, &b, &c, &d))
+        paint_rect(a, b, c, d, vwk.text_color);
+}
+
 static void vdi_v_gtext(void)
 {
     WORD n = contrl[3], i;
-    WORD x = align_x(ptsin[0], n), y = ptsin[1];
-    WORD cy = align_y(y);
-    WORD mode = (WORD)(vwk.wrt_mode + 1);
-    WORD blittable = (mode == MD_REPLACE || mode == MD_TRANS);
+    WORD x = align_x(ptsin[0], (WORD)(n * FONT_W));
+    WORD cy = align_y(ptsin[1]);
 
-    for (i = 0; i < n && i < INTIN_SIZE; i++) {
-        WORD cx = (WORD)(x + i * FONT_W);
-        WORD fits = (cx >= 0 && cy >= 0 &&
-                     cx + FONT_W <= SCR_W && cy + FONT_H <= SCR_H);
-        if (fits && vwk.clip)
-            fits = (cx >= vwk.xmn_clip && cy >= vwk.ymn_clip &&
-                    cx + FONT_W - 1 <= vwk.xmx_clip &&
-                    cy + FONT_H - 1 <= vwk.ymx_clip);
-        if (fits && blittable) {
-            if (mode == MD_REPLACE)
-                fill_rect_dev(cx, cy, (WORD)(cx + FONT_W - 1),
-                              (WORD)(cy + FONT_H - 1), HW(0));
-            draw_glyph(intin[i], cx, cy, HW(vwk.text_color),
-                       (WORD)(mode == MD_REPLACE));
-            blit_run();
-        } else {
-            draw_glyph_cpu(intin[i], cx, cy);
-        }
-        /* Thickened: the same glyph again, one pixel right, drawn
-         * transparently so the two overlap into a heavier letter.  It
-         * costs a second blit a glyph and nothing else. */
-        if ((vwk.text_effects & TXT_THICKEN) && cx + 1 + FONT_W <= SCR_W) {
-            WORD bx = (WORD)(cx + 1);
-            WORD fits = (cy >= 0 && cy + FONT_H <= SCR_H);
-            if (fits && vwk.clip)
-                fits = (bx >= vwk.xmn_clip && cy >= vwk.ymn_clip &&
-                        bx + FONT_W - 1 <= vwk.xmx_clip &&
-                        cy + FONT_H - 1 <= vwk.ymx_clip);
-            if (fits && blittable) {
-                draw_glyph(intin[i], bx, cy, HW(vwk.text_color), 0);
-                blit_run();
-            } else {
-                draw_glyph_cpu(intin[i], bx, cy);
-            }
-        }
-    }
-    /* Underlined: the bottom row of the cells the string covers, in the
-     * text colour, drawn as a rectangle one pixel high. */
+    for (i = 0; i < n && i < INTIN_SIZE; i++)
+        draw_char(intin[i], (WORD)(x + i * FONT_W), cy);
     if ((vwk.text_effects & TXT_UNDERLINE) && n > 0) {
-        /* SOLID, in the text colour: an underline is text, not a filled
-         * area, so it does not take the fill pattern. */
         WORD w = (WORD)(n * FONT_W + ((vwk.text_effects & TXT_THICKEN) ? 1 : 0));
-        WORD x2 = (WORD)(x + w - 1), yy = (WORD)(cy + FONT_H - 1);
-        WORD a = x, b = yy, c = x2, d = yy;
-        if (clip_rect(&a, &b, &c, &d))
-            paint_rect(a, b, c, d, vwk.text_color);
+        underline(x, (WORD)(x + w - 1), cy);
     }
 }
 
@@ -1266,6 +1292,11 @@ static void v_nop(void) { }
 
 /* work_out: intout[0..44] then ptsout[0..11].  Values describe this device --
  * a 640x240, 16-colour, non-scalable raster screen with no GDPs yet. */
+/* What each GDP draws with: bar, pie, circle, ellipse and elliptical pie
+ * are fill areas (3), justified text is text (2), the arcs and the
+ * rounded outline are polylines (0). */
+static const WORD gdp_attr[10] = { 3, 0, 3, 3, 3, 0, 3, 0, 3, 2 };
+
 static void fill_workout(void)
 {
     WORD i;
@@ -1287,7 +1318,14 @@ static void fill_workout(void)
     intout[11] = 24;                /* patterns */
     intout[12] = 12;                /* hatches */
     intout[13] = 16;                /* colours available at once */
-    intout[14] = 0;                 /* GDPs supported -- none yet */
+    /* The ten GDPs, and for each of them the attribute it draws with:
+     * 3 = fill area, 2 = text, 0 = polyline.  A program reads these
+     * rather than assuming, which is the whole point of the table. */
+    intout[14] = 10;
+    for (i = 0; i < 10; i++) {
+        intout[15 + i] = (WORD)(i + 1);
+        intout[25 + i] = gdp_attr[i];
+    }
     intout[35] = 1;                 /* can do colour */
     intout[36] = 0;                 /* no text rotation */
     intout[37] = 1;                 /* can do fill area */
@@ -1302,6 +1340,8 @@ static void fill_workout(void)
     ptsout[2] = 8;  ptsout[3] = 8;  /* max char width / height */
     ptsout[4] = 1;  ptsout[5] = 0;  /* min line width */
     ptsout[6] = 1;  ptsout[7] = 0;  /* max line width */
+    ptsout[8]  = DEF_MKWD;  ptsout[9]  = DEF_MKHT;   /* min marker */
+    ptsout[10] = MAX_MKWD;  ptsout[11] = MAX_MKHT;   /* max marker */
     contrl[2] = 6;
     contrl[4] = 45;
 }
@@ -1548,11 +1588,18 @@ static void vdi_vq_extnd(void)
         ptsout[i] = 0;
     intout[0] = 0;                  /* screen type: not a separate buffer */
     intout[1] = 16;                 /* background colours */
-    intout[2] = 0;                  /* text effects */
+    intout[2] = TXT_DONE;           /* the text effects really applied */
     intout[3] = 0;                  /* scaling: raster, not scalable */
     intout[4] = 4;                  /* PLANES -- the AES reads this one */
     intout[5] = 1;                  /* lookup table present */
     intout[6] = 1;                  /* performance: rough */
+    intout[9]  = 4;                 /* writing modes */
+    intout[10] = 2;                 /* highest input mode: request */
+    intout[11] = 1;                 /* text alignment: yes */
+    intout[14] = PTSIN_SIZE / 2 - 1;/* vertices a fill area may have */
+    intout[15] = INTIN_SIZE;        /* words of intin */
+    intout[16] = 2;                 /* buttons on the pointing device */
+    intout[19] = vwk.clip;          /* clipping, right now */
     contrl[2] = 6;
     contrl[4] = 45;
 }
@@ -1775,12 +1822,16 @@ static void draw_line(WORD x1, WORD y1, WORD x2, WORD y2)
     line_diag(x1, y1, x2, y2, mask);
 }
 
+static void line_ends(WORD *pt, WORD n);    /* the arrowheads, below */
+
 static void vdi_v_pline(void)
 {
     WORD n = contrl[1], i;
     for (i = 0; i + 1 < n; i++)
         draw_line(ptsin[i * 2], ptsin[i * 2 + 1],
                   ptsin[i * 2 + 2], ptsin[i * 2 + 3]);
+    if (vwk.line_beg == LE_ARROWED || vwk.line_end == LE_ARROWED)
+        line_ends(ptsin, n);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1893,10 +1944,10 @@ static void clc_flit(const WORD *pt, WORD vectors, WORD start, WORD end)
 
                 if (dx < 0) {
                     m = (WORD)((int32_t)dy2 * dx / dy);
-                    fill_buf[n++] = (WORD)(((m + 1) >> 1) + x2);
+                    fill_buf[n++] = (WORD)(asr((WORD)(m + 1), 1) + x2);
                 } else {
                     m = (WORD)((int32_t)dy1 * dx / dy);
-                    fill_buf[n++] = (WORD)(((m + 1) >> 1) + x1);
+                    fill_buf[n++] = (WORD)(asr((WORD)(m + 1), 1) + x1);
                 }
             }
         }
@@ -2008,6 +2059,701 @@ static void vdi_v_pmarker(void)
     vwk.line_color = sv_color;
 }
 
+/* ---------------------------------------------------------------------- */
+/* v_contourfill -- the paint bucket                                      */
+/* ---------------------------------------------------------------------- */
+/* The donor keeps a queue of segments and lets the pixels it has already
+ * painted stop the search, which only works for a SOLID fill: a patterned
+ * one leaves interior-coloured pixels behind and the search walks back
+ * into them.  Here the region is discovered first, into a bitmap in far
+ * memory, and painted afterwards -- one bit a pixel, 19,200 bytes of a
+ * fourteen-megabyte heap, which is the kind of thing this machine's
+ * memory makes free.  It also makes the answer independent of the order
+ * the search takes, so the model and the driver need only agree about the
+ * REGION and not about the walk.
+ *
+ * Everything happens a ROW at a time.  The first version asked the
+ * hardware for one pixel and the bitmap for one bit at a time, and a
+ * screen-sized bucket took 44 seconds: a page mapped and a call made per
+ * pixel.  A row of the screen read through one mapping, and a row of the
+ * bitmap fetched and put back in one go, is the same algorithm without
+ * any of that. */
+#define CF_STRIDE (SCR_W / 8)           /* bytes a row of the bitmap */
+#define CF_BYTES  (CF_STRIDE * SCR_H)
+/* Seeds waiting to be examined, one per RUN rather than one per pixel.
+ * 8192 of them is 32 KB of far memory and more than a 640 x 240 region
+ * can need in any shape that has been drawn on this screen; a fill that
+ * did overflow it would come out incomplete, which is the one way the
+ * driver and the model could disagree. */
+#define CF_STACK  8192
+
+ZWIN static uint32_t cf_map;            /* the bitmap, far */
+ZWIN static uint32_t cf_stack;          /* CF_STACK seeds of two WORDs */
+ZWIN static WORD     cf_sp;
+ZWIN static WORD     cf_search;         /* the hardware pen the search knows */
+ZWIN static WORD     cf_type;           /* 1 = fill while it IS that pen */
+ZWIN static WORD     cf_x0, cf_y0, cf_x1, cf_y1;    /* where it may go */
+ZWIN static WORD     cf_py, cf_sy;      /* the rows the two buffers hold */
+ZWIN static WORD     cf_dirty;          /* the bitmap row has been marked */
+
+/* One row of the screen, through a single mapping of each 4K page it
+ * crosses -- the whole point of doing this a row at a time. */
+static void cf_read_px(WORD y, uint8_t *px)
+{
+    uint32_t base = VR_SCREEN0 + (uint32_t)y * SCR_STRIDE;
+    WORD i = 0;
+
+    while (i < SCR_STRIDE) {
+        volatile uint8_t *w = vram_win(base + (uint32_t)i);
+        WORD room = (WORD)(0x1000 - (WORD)((base + (uint32_t)i) & 0x0FFF));
+        WORD k = (WORD)(SCR_STRIDE - i), j;
+
+        if (k > room)
+            k = room;
+        for (j = 0; j < k; j++)
+            px[i + j] = w[j];
+        i = (WORD)(i + k);
+    }
+}
+
+static void cf_load_px(WORD y, uint8_t *px)
+{
+    if (cf_py == y)
+        return;
+    cf_read_px(y, px);
+    cf_py = y;
+}
+
+/* And one row of the bitmap, written back when the search moves on. */
+static void cf_flush_sn(uint8_t *sn)
+{
+    if (cf_dirty && cf_sy >= 0)
+        far_put(cf_map + (uint32_t)cf_sy * CF_STRIDE, sn, CF_STRIDE);
+    cf_dirty = 0;
+}
+
+static void cf_load_sn(WORD y, uint8_t *sn)
+{
+    if (cf_sy == y)
+        return;
+    cf_flush_sn(sn);
+    far_get(sn, cf_map + (uint32_t)y * CF_STRIDE, CF_STRIDE);
+    cf_sy = y;
+}
+
+/* A pixel is interior if it is inside the area the fill may reach and its
+ * colour answers the search the way v_contourfill was asked to.  px holds
+ * the row already. */
+static WORD cf_inside(WORD x, const uint8_t *px)
+{
+    uint8_t b;
+    WORD hw;
+
+    if (x < cf_x0 || x > cf_x1)
+        return 0;
+    b = px[(UWORD)x >> 1];              /* unsigned: see asr() */
+    hw = (WORD)((x & 1) ? (b & 0x0F) : (b >> 4));
+    return (WORD)(cf_type ? (hw == cf_search) : (hw != cf_search));
+}
+
+static WORD cf_seen(WORD x, const uint8_t *sn)
+{
+    uint8_t b = sn[(UWORD)x >> 3];      /* unsigned: see asr() */
+    return (WORD)((b >> (7 - (x & 7))) & 1);
+}
+
+static void cf_push(WORD x, WORD y)
+{
+    WORD e[2];
+
+    if (cf_sp >= CF_STACK)
+        return;
+    e[0] = x;  e[1] = y;
+    far_put(cf_stack + (uint32_t)cf_sp * 4, (const uint8_t *)e, 4);
+    cf_sp++;
+}
+
+/* The rows of one neighbour: every run of it that is interior and not yet
+ * taken gets ONE seed, which is what the stack is sized for. */
+static void cf_seed_row(WORD y, WORD run0, WORD run1, uint8_t *px, uint8_t *sn)
+{
+    WORD i;
+
+    if (y < cf_y0 || y > cf_y1)
+        return;
+    cf_load_px(y, px);
+    cf_load_sn(y, sn);
+    for (i = run0; i <= run1; i++) {
+        if (!cf_inside(i, px) || cf_seen(i, sn))
+            continue;
+        cf_push(i, y);
+        while (i <= run1 && cf_inside(i, px))
+            i++;
+    }
+}
+
+static void vdi_v_contourfill(void)
+{
+    uint8_t px[SCR_STRIDE];             /* one row of the screen */
+    uint8_t sn[CF_STRIDE];              /* one row of the bitmap */
+    WORD x = ptsin[0], y = ptsin[1], index = intin[0];
+    WORD i, run0, run1;
+
+    cf_x0 = 0;  cf_y0 = 0;  cf_x1 = SCR_W - 1;  cf_y1 = SCR_H - 1;
+    if (vwk.clip) {
+        if (vwk.xmn_clip > cf_x0) cf_x0 = vwk.xmn_clip;
+        if (vwk.ymn_clip > cf_y0) cf_y0 = vwk.ymn_clip;
+        if (vwk.xmx_clip < cf_x1) cf_x1 = vwk.xmx_clip;
+        if (vwk.ymx_clip < cf_y1) cf_y1 = vwk.ymx_clip;
+    }
+    if (x < cf_x0 || x > cf_x1 || y < cf_y0 || y > cf_y1)
+        return;
+    if (!cf_map) {
+        cf_map = far_alloc(CF_BYTES);
+        cf_stack = far_alloc((uint32_t)CF_STACK * 4);
+    }
+    if (!cf_map || !cf_stack)
+        return;
+
+    cf_py = cf_sy = -1;
+    cf_dirty = 0;
+    cf_load_px(y, px);
+    /* A colour index says "stop where that colour starts"; no index says
+     * "spread over the colour the seed is on". */
+    if (index >= 0) {
+        cf_search = HW(index);
+        cf_type = 0;
+    } else {
+        uint8_t b = px[(UWORD)x >> 1];
+        cf_search = (WORD)((x & 1) ? (b & 0x0F) : (b >> 4));
+        cf_type = 1;
+    }
+    {   /* the bitmap starts empty */
+        uint32_t a;
+        for (i = 0; i < CF_STRIDE; i++)
+            sn[i] = 0;
+        for (a = 0; a < CF_BYTES; a += CF_STRIDE)
+            far_put(cf_map + a, sn, CF_STRIDE);
+    }
+
+    cf_sp = 0;
+    cf_push(x, y);
+    while (cf_sp > 0) {
+        WORD e[2], sx, sy;
+
+        cf_sp--;
+        far_get((uint8_t *)e, cf_stack + (uint32_t)cf_sp * 4, 4);
+        sx = e[0];  sy = e[1];
+        cf_load_px(sy, px);
+        cf_load_sn(sy, sn);
+        if (!cf_inside(sx, px) || cf_seen(sx, sn))
+            continue;
+        for (run0 = sx; run0 > cf_x0 && cf_inside((WORD)(run0 - 1), px); run0--)
+            ;
+        for (run1 = sx; run1 < cf_x1 && cf_inside((WORD)(run1 + 1), px); run1++)
+            ;
+        for (i = run0; i <= run1; i++) {
+            UWORD k = (UWORD)i >> 3;    /* unsigned: see asr() */
+            uint8_t b = sn[k];
+            sn[k] = (uint8_t)(b | (1u << (7 - (i & 7))));
+        }
+        cf_dirty = 1;
+        cf_seed_row((WORD)(sy - 1), run0, run1, px, sn);
+        cf_seed_row((WORD)(sy + 1), run0, run1, px, sn);
+    }
+    cf_flush_sn(sn);
+
+    /* and now the paint: every run of the region, row by row, through the
+     * fill pattern and the writing mode like any other filled area */
+    cf_sy = -1;
+    for (y = cf_y0; y <= cf_y1; y++) {
+        cf_load_sn(y, sn);
+        x = cf_x0;
+        while (x <= cf_x1) {
+            if (!cf_seen(x, sn)) {
+                x++;
+                continue;
+            }
+            run0 = x;
+            while (x <= cf_x1 && cf_seen(x, sn))
+                x++;
+            fill_rect(run0, y, (WORD)(x - 1), y, vwk.fill_color);
+        }
+    }
+}
+
+/* ---------------------------------------------------------------------- */
+/* vsl_ends, and the arrowheads it asks for                               */
+/* ---------------------------------------------------------------------- */
+
+/* An integer square root, bit by bit: the arrowhead needs the length of
+ * the vector it points along and nothing else in the driver does. */
+static UWORD isqrt32(uint32_t v)
+{
+    uint32_t rem = 0, root = 0;
+    WORD i;
+
+    for (i = 0; i < 16; i++) {
+        root <<= 1;
+        rem = (rem << 2) | (v >> 30);
+        v <<= 2;
+        if (rem > root) {
+            rem -= root + 1;
+            root += 2;
+        }
+    }
+    return (UWORD)(root >> 1);
+}
+
+/* (m1 * m2 + d/2) / d -- the donor's mul_div_round, which the arrowhead
+ * geometry works in thousandths with. */
+static WORD mul_div_round(WORD m1, WORD m2, WORD d)
+{
+    int32_t v = (int32_t)m1 * m2;
+
+    v = (v < 0) ? (v - d / 2) : (v + d / 2);
+    return (WORD)(v / d);
+}
+
+/* One arrowhead, at the point pt[tip] of a polyline walked in steps of
+ * `inc` points.  The head is a filled triangle in the LINE colour, and
+ * the line's end point is pulled back to its base so the shaft does not
+ * stick through the tip -- which is why this takes the caller's array and
+ * edits it, exactly as the donor's draw_arrow does.
+ *
+ * The tip is an INDEX rather than a pointer into the middle of the array,
+ * so that every index here is non-negative.  The donor walks backwards
+ * from the last point with a pointer; compiled here, pt[-2] came back as
+ * neither point and the arrow at that end pointed off into the distance. */
+static void draw_arrow(WORD *pt, WORD count, WORD tip, WORD inc)
+{
+    WORD len = 8, wid = 4;              /* line_width is 1 on this device */
+    WORD dx = 0, dy = 0, i, k, nskip = 0;
+    WORD line_len, dxf, dyf, htx, hty, bx, by;
+    WORD tx = pt[tip], ty = pt[tip + 1];
+    WORD tri[8];
+    uint32_t len2 = 0;
+    WORD sv_style, sv_color, sv_index, sv_per;
+
+    for (i = 1; i < count; i++) {       /* the first point far enough away */
+        /* Through scalars: `pt[tip] - pt[j]` in one expression reads the
+         * second element as ZERO (tools/ccbug B13, B1's family), and the
+         * arrowhead then points at the origin. */
+        WORD j = (WORD)(tip + i * inc * 2), qx = pt[j], qy = pt[j + 1];
+
+        nskip = i;
+        dx = (WORD)(tx - qx);
+        dy = (WORD)(ty - qy);
+        len2 = (uint32_t)((int32_t)dx * dx + (int32_t)dy * dy);
+        if (len2 >= (uint32_t)(len * len))
+            break;
+    }
+    line_len = (WORD)isqrt32(len2);
+    if (line_len < len)                 /* too short to carry a head */
+        return;
+
+    dxf = mul_div_round(dx, 1000, line_len);
+    dyf = mul_div_round(dy, 1000, line_len);
+    htx = mul_div_round(len, dxf, 1000);
+    hty = mul_div_round(len, dyf, 1000);
+    bx  = mul_div_round(wid, (WORD)-dyf, 1000);
+    by  = mul_div_round(wid, dxf, 1000);
+
+    tri[0] = (WORD)(tx + bx - htx);  tri[1] = (WORD)(ty + by - hty);
+    tri[2] = (WORD)(tx - bx - htx);  tri[3] = (WORD)(ty - by - hty);
+    tri[4] = tx;                     tri[5] = ty;
+
+    sv_style = vwk.fill_style;  sv_index = vwk.fill_index;
+    sv_color = vwk.fill_color;  sv_per   = vwk.fill_per;
+    vwk.fill_style = FIS_SOLID;         /* a head is solid, in the line's
+                                         * colour: the donor's s_fa_attr */
+    vwk.fill_color = vwk.line_color;
+    vwk.fill_per = 0;
+    st_fl_ptr();
+    polygon(tri, 3);
+    vwk.fill_style = sv_style;  vwk.fill_index = sv_index;
+    vwk.fill_color = sv_color;  vwk.fill_per = sv_per;
+    st_fl_ptr();
+
+    /* Pull the tip back to the head's base, and drag the points the head
+     * swallowed along with it -- the ones BETWEEN the tip and the point
+     * the direction was taken from, which for a two-point line is none of
+     * them.  (The donor walks a pointer from that point towards the tip
+     * and stops when it arrives, which is the same thing said in
+     * pointers; taking its far point with it would leave the line with
+     * nowhere to go.) */
+    tx = (WORD)(tx - htx);
+    ty = (WORD)(ty - hty);
+    pt[tip]     = tx;
+    pt[tip + 1] = ty;
+    for (k = (WORD)(nskip - 1); k >= 1; k--) {
+        WORD j = (WORD)(tip + k * inc * 2);
+
+        pt[j]     = tx;
+        pt[j + 1] = ty;
+    }
+}
+
+/* The ends of a polyline: an arrowed end gets a head, and the head is
+ * drawn OVER the line the way the donor draws it -- the shaft is already
+ * there, and pulling the end point back only matters to what the caller
+ * does with its own array afterwards. */
+static void line_ends(WORD *pt, WORD n)
+{
+    if (n < 2)
+        return;
+    if (vwk.line_beg == LE_ARROWED)
+        draw_arrow(pt, n, 0, 1);
+    if (vwk.line_end == LE_ARROWED)
+        draw_arrow(pt, n, (WORD)((n - 1) * 2), -1);
+}
+
+static void vdi_vsl_ends(void)
+{
+    WORD b = intin[0], e = intin[1];
+
+    vwk.line_beg = (b < 0 || b > 2) ? 0 : b;
+    vwk.line_end = (e < 0 || e > 2) ? 0 : e;
+    intout[0] = vwk.line_beg;
+    intout[1] = vwk.line_end;
+    contrl[4] = 2;
+}
+
+/* ---------------------------------------------------------------------- */
+/* the graphics device primitives (v_gdp)                                 */
+/* ---------------------------------------------------------------------- */
+/* Angles are in TENTHS of a degree throughout, anticlockwise from east,
+ * which is how the VDI takes them. */
+#define HALFPI  900
+#define GDP_PI 1800
+#define TWOPI  3600
+
+/* Isin/Icos: 0..32767 for an angle 0..900, interpolated between the
+ * table's 0.8 degree steps. */
+static UWORD Isin(WORD angle)
+{
+    UWORD i = (UWORD)angle >> 3, rem = (UWORD)(angle & 7);
+    UWORD s = vdi_sin_tbl[i];
+
+    if (rem)
+        s = (UWORD)(s + (UWORD)(((uint32_t)(UWORD)(vdi_sin_tbl[i + 1] - s)
+                                 * rem) >> 3));
+    return s;
+}
+
+static UWORD Icos(WORD angle)
+{
+    return Isin((WORD)(HALFPI - angle));
+}
+
+/* (a * b + 32768) / 65536, the donor's umul_shift */
+static UWORD umul_shift(UWORD a, UWORD b)
+{
+    return (UWORD)((((uint32_t)a * b) + 32768UL) >> 16);
+}
+
+/* Precalculated for the rounded box's five points a corner, scaled to
+ * 32767 rather than 65536. */
+#define Isin225 12539
+#define Isin450 23170
+#define Isin675 30273
+#define Icos225 Isin675
+#define Icos450 Isin450
+#define Icos675 Isin225
+
+/* (m1 * m2) / d, truncated toward zero -- the donor's mul_div, which is
+ * a 68000 muls/divs pair. */
+static WORD mul_div(WORD m1, WORD m2, WORD d)
+{
+    return (WORD)((int32_t)m1 * m2 / d);
+}
+
+/* clc_pts: where an angle lands on the ellipse, in raster coordinates.
+ * y grows downward, so the first quadrant's y offset is negative -- which
+ * is what the Y_NEGATIVE default says. */
+#define X_NEGATIVE 0x02
+#define Y_NEGATIVE 0x01
+static void clc_pts(WORD *pt, WORD angle, WORD xc, WORD yc,
+                    WORD xrad, WORD yrad)
+{
+    WORD xdiff, ydiff, negative = Y_NEGATIVE;
+
+    while (angle >= TWOPI)
+        angle = (WORD)(angle - TWOPI);
+    if (angle > 3 * HALFPI) {               /* fourth quadrant */
+        angle = (WORD)(TWOPI - angle);
+        negative = 0;
+    } else if (angle > GDP_PI) {            /* third */
+        angle = (WORD)(angle - GDP_PI);
+        negative = X_NEGATIVE;
+    } else if (angle > HALFPI) {            /* second */
+        angle = (WORD)(GDP_PI - angle);
+        negative = X_NEGATIVE | Y_NEGATIVE;
+    }
+    /* the two the table cannot answer: it stops at 89.6 degrees */
+    if (angle > VDI_SIN_ANGLE_MAX) {
+        xdiff = 0;
+        ydiff = yrad;
+    } else if (angle < HALFPI - VDI_SIN_ANGLE_MAX) {
+        xdiff = xrad;
+        ydiff = 0;
+    } else {
+        xdiff = (WORD)umul_shift(Icos(angle), (UWORD)xrad);
+        ydiff = (WORD)umul_shift(Isin(angle), (UWORD)yrad);
+    }
+    if (negative & X_NEGATIVE) xdiff = (WORD)-xdiff;
+    if (negative & Y_NEGATIVE) ydiff = (WORD)-ydiff;
+    pt[0] = (WORD)(xc + xdiff);
+    pt[1] = (WORD)(yc + ydiff);
+}
+
+/* How many segments a curve is drawn in: the larger radius over four,
+ * clamped.  ptsin is where the points go, so the ceiling is ours. */
+static WORD clc_nsteps(WORD xrad, WORD yrad)
+{
+    WORD steps = (WORD)((UWORD)(xrad > yrad ? xrad : yrad) >> 2);
+
+    if (steps < MIN_ARC_CT) steps = MIN_ARC_CT;
+    else if (steps > MAX_ARC_CT) steps = MAX_ARC_CT;
+    return steps;
+}
+
+/* clc_arc: the points of a circular or elliptical arc, into ptsin, then
+ * drawn -- an open arc as a polyline, everything else as a polygon
+ * (which closes itself, so a circle needs no repeated first point).  A
+ * pie slice gets the centre as its last point. */
+static void clc_arc(WORD sub, WORD steps, WORD xc, WORD yc,
+                    WORD xrad, WORD yrad, WORD beg_ang, WORD del_ang,
+                    WORD end_ang)
+{
+    WORD *pt = ptsin, n = 1, i;
+
+    clc_pts(pt, beg_ang, xc, yc, xrad, yrad);
+    for (i = 1; i < steps; i++) {
+        WORD angle = (WORD)(mul_div(del_ang, i, steps) + beg_ang);
+        clc_pts(&pt[n * 2], angle, xc, yc, xrad, yrad);
+        if (pt[n * 2] != pt[(n - 1) * 2] ||     /* duplicates ignored */
+            pt[n * 2 + 1] != pt[(n - 1) * 2 + 1])
+            n++;
+    }
+    clc_pts(&pt[n * 2], end_ang, xc, yc, xrad, yrad);
+    n++;
+    if (sub == GDP_PIE || sub == GDP_ELLPIE) {
+        pt[n * 2]     = xc;
+        pt[n * 2 + 1] = yc;
+        n++;
+    }
+    if (sub == GDP_ARC || sub == GDP_ELLARC)
+        polyline_pts(pt, n);
+    else
+        polygon(pt, n);
+}
+
+/* The six curve GDPs.  A circle's y radius is its x radius: this device
+ * says its pixels are square (work_out's 372 x 372 microns), and the
+ * donor scales by exactly that ratio. */
+static void gdp_curve(WORD sub)
+{
+    WORD xc = ptsin[0], yc = ptsin[1], xrad, yrad, beg, end, del;
+
+    if (sub <= GDP_CIRCLE)
+        xrad = yrad = (sub == GDP_CIRCLE) ? ptsin[4] : ptsin[6];
+    else {
+        xrad = ptsin[2];
+        yrad = ptsin[3];
+    }
+    if (xrad < 0) xrad = (WORD)-xrad;       /* TOS takes either sign */
+    if (yrad < 0) yrad = (WORD)-yrad;
+
+    if (vwk.clip &&
+        (xc + xrad < vwk.xmn_clip || xc - xrad > vwk.xmx_clip ||
+         yc + yrad < vwk.ymn_clip || yc - yrad > vwk.ymx_clip))
+        return;
+
+    if (sub == GDP_CIRCLE || sub == GDP_ELLIPSE) {
+        beg = 0;
+        end = TWOPI;
+    } else {
+        beg = intin[0];
+        end = intin[1];
+    }
+    del = (WORD)(end - beg);
+    if (del < 0)
+        del = (WORD)(del + TWOPI);
+    clc_arc(sub, clc_nsteps(xrad, yrad), xc, yc, xrad, yrad, beg, del, end);
+}
+
+/* v_rbox / v_rfbox: four quadrants of five points each, from the corner
+ * radius -- a sixty-fourth of the screen width, clamped to half the
+ * shorter side. */
+#define CORNER_POINTS 5
+static void gdp_rbox(WORD sub)
+{
+    WORD xoff[CORNER_POINTS], yoff[CORNER_POINTS];
+    WORD x1 = ptsin[0], y1 = ptsin[1], x2 = ptsin[2], y2 = ptsin[3];
+    WORD xr, yr, xcentre, ycentre, i, *p = ptsin;
+
+    if (x1 > x2) { WORD t = x1; x1 = x2; x2 = t; }
+    if (y1 < y2) { WORD t = y1; y1 = y2; y2 = t; }   /* (x1,y1) lower left */
+
+    xr = (WORD)(SCR_W >> 6);
+    if (xr > (x2 - x1) / 2) xr = (WORD)((x2 - x1) / 2);
+    yr = xr;                                /* square pixels */
+    if (yr > (y1 - y2) / 2) yr = (WORD)((y1 - y2) / 2);
+
+    xoff[0] = 0;
+    xoff[1] = mul_div(Icos675, xr, 32767);
+    xoff[2] = mul_div(Icos450, xr, 32767);
+    xoff[3] = mul_div(Icos225, xr, 32767);
+    xoff[4] = xr;
+    yoff[0] = yr;
+    yoff[1] = mul_div(Isin675, yr, 32767);
+    yoff[2] = mul_div(Isin450, yr, 32767);
+    yoff[3] = mul_div(Isin225, yr, 32767);
+    yoff[4] = 0;
+
+    xcentre = (WORD)(x2 - xr);              /* upper right */
+    ycentre = (WORD)(y2 + yr);
+    for (i = 0; i < CORNER_POINTS; i++) {
+        *p++ = (WORD)(xcentre + xoff[i]);
+        *p++ = (WORD)(ycentre - yoff[i]);
+    }
+    ycentre = (WORD)(y1 - yr);              /* lower right, reversed */
+    for (i = CORNER_POINTS - 1; i >= 0; i--) {
+        *p++ = (WORD)(xcentre + xoff[i]);
+        *p++ = (WORD)(ycentre + yoff[i]);
+    }
+    xcentre = (WORD)(x1 + xr);              /* lower left */
+    for (i = 0; i < CORNER_POINTS; i++) {
+        *p++ = (WORD)(xcentre - xoff[i]);
+        *p++ = (WORD)(ycentre + yoff[i]);
+    }
+    ycentre = (WORD)(y2 + yr);              /* upper left, reversed */
+    for (i = CORNER_POINTS - 1; i >= 0; i--) {
+        *p++ = (WORD)(xcentre - xoff[i]);
+        *p++ = (WORD)(ycentre - yoff[i]);
+    }
+
+    if (sub == GDP_RBOX) {                  /* an outline: close it */
+        *p++ = ptsin[0];
+        *p   = ptsin[1];
+        polyline_pts(ptsin, 4 * CORNER_POINTS + 1);
+    } else {
+        polygon(ptsin, 4 * CORNER_POINTS);
+    }
+}
+
+/* v_justified: the string spread to a given width.  intin[0] asks for
+ * the spaces between words to carry it, intin[1] for the gaps between
+ * every character; the remainder after the division is spread one pixel
+ * at a time over the first few of them, which is what stops a justified
+ * line from ending a pixel short.  The font is monospaced, so the width
+ * of the string is simply its length in cells. */
+static void gdp_justified(void)
+{
+    WORD cnt = (WORD)(contrl[3] - 2);
+    WORD interword = intin[0], interchar = intin[1];
+    WORD *str = &intin[2];
+    WORD max_x = ptsin[2];
+    WORD spaces = 0, width, i;
+    WORD wordx = 0, rmword = 0, rmwordx = 0;
+    WORD charx = 0, rmchar = 0, rmcharx = 0;
+    WORD x, cy, x0, last = 0;
+
+    if (cnt < 0)
+        return;
+    if (interword)
+        for (i = 0; i < cnt; i++)
+            if (str[i] == ' ')
+                spaces++;
+
+    width = (WORD)(cnt * FONT_W);
+
+    if (interword && spaces) {
+        WORD delword = (WORD)((max_x - width) / spaces);
+        rmword = (WORD)((max_x - width) % spaces);
+        if (rmword < 0) {
+            rmwordx = -1;
+            rmword = (WORD)-rmword;
+        } else
+            rmwordx = 1;
+        if (interchar) {                    /* both: a word may only give
+                                             * half a cell to the gaps */
+            WORD expand = FONT_W / 2;
+            if (delword > expand) { delword = expand; rmword = 0; }
+            if (delword < -expand) { delword = (WORD)-expand; rmword = 0; }
+            width = (WORD)(width + delword * spaces + rmword * rmwordx);
+        }
+        wordx = delword;
+    }
+    if (interchar && cnt > 1) {
+        charx = (WORD)((max_x - width) / (cnt - 1));
+        rmchar = (WORD)((max_x - width) % (cnt - 1));
+        if (rmchar < 0) {
+            rmcharx = -1;
+            rmchar = (WORD)-rmchar;
+        } else
+            rmcharx = 1;
+    }
+
+    /* The point is placed by the JUSTIFIED width, not the string's own:
+     * a centred justified line is centred on where it will end up. */
+    x = align_x(ptsin[0], max_x);
+    cy = align_y(ptsin[1]);
+    x0 = x;
+    for (i = 0; i < cnt; i++) {
+        draw_char(str[i], x, cy);
+        last = x;
+        x = (WORD)(x + FONT_W + charx);
+        if (rmchar) {
+            x = (WORD)(x + rmcharx);
+            rmchar--;
+        }
+        if (str[i] == ' ') {
+            x = (WORD)(x + wordx);
+            if (rmword) {
+                x = (WORD)(x + rmwordx);
+                rmword--;
+            }
+        }
+    }
+    if ((vwk.text_effects & TXT_UNDERLINE) && cnt > 0)
+        underline(x0, (WORD)(last + FONT_W - 1
+                             + ((vwk.text_effects & TXT_THICKEN) ? 1 : 0)), cy);
+}
+
+static void vdi_v_gdp(void)
+{
+    switch (contrl[5]) {
+    case GDP_BAR:
+        vdi_vr_recfl();
+        if (vwk.fill_per) {
+            WORD *xy = ptsin;
+            xy[5] = xy[7] = xy[3];
+            xy[3] = xy[9] = xy[1];
+            xy[4] = xy[2];
+            xy[6] = xy[8] = xy[0];
+            fill_perimeter(xy, 5);
+        }
+        break;
+    case GDP_ARC:
+    case GDP_PIE:
+    case GDP_CIRCLE:
+    case GDP_ELLIPSE:
+    case GDP_ELLARC:
+    case GDP_ELLPIE:
+        gdp_curve(contrl[5]);
+        break;
+    case GDP_RBOX:
+    case GDP_RFBOX:
+        gdp_rbox(contrl[5]);
+        break;
+    case GDP_JUSTIFIED:
+        gdp_justified();
+        break;
+    }
+}
+
 static void vdi_vsm_type(void)
 {
     WORD v = intin[0];
@@ -2116,7 +2862,7 @@ static void vdi_v_get_pixel(void)
 
     if (x >= 0 && y >= 0 && x < SCR_W && y < SCR_H) {
         uint8_t b = vram_read8(VR_SCREEN0 + (uint32_t)y * SCR_STRIDE
-                               + (uint32_t)(x >> 1));
+                               + (uint32_t)((UWORD)x >> 1));
         hw = (WORD)((x & 1) ? (b & 0x0F) : (b >> 4));
     }
     intout[0] = hw;
@@ -2807,7 +3553,7 @@ static const VDI_OP jmptb1[] = {
     vdi_v_escape,    /*  5 */                   vdi_v_pline,     /*  6 */
     vdi_v_pmarker,   /*  7 */                   vdi_v_gtext,     /*  8 */
     vdi_v_fillarea,  /*  9 */                   v_nop,           /* 10 cellarray (nop) */
-    v_nop,           /* 11 v_gdp */             vdi_vst_height,  /* 12 */
+    vdi_v_gdp,       /* 11 */                   vdi_vst_height,  /* 12 */
     vdi_vst_rotation,/* 13 */                   vdi_vs_color,    /* 14 */
     vdi_vsl_type,    /* 15 */                   vdi_vsl_width,   /* 16 */
     vdi_vsl_color,   /* 17 */                   vdi_vsm_type,    /* 18 */
@@ -2828,12 +3574,12 @@ static const VDI_OP jmptb2[] = {
     vdi_v_opnvwk,    /* 100 */
     vdi_v_clsvwk,    /* 101 */
     vdi_vq_extnd,    /* 102 */
-    v_nop,           /* 103 v_contourfill (nop) */
+    vdi_v_contourfill, /* 103 */
     vdi_vsf_perimeter, /* 104 */
     vdi_v_get_pixel, /* 105 */
     vdi_vst_effects, /* 106 */
     vdi_vst_point,   /* 107 */
-    v_nop,           /* 108 vsl_ends */
+    vdi_vsl_ends,    /* 108 */
     vdi_vro_cpyfm,   /* 109 */
     vdi_vr_trnfm,    /* 110 */
     vdi_vsc_form,    /* 111 */
@@ -2881,6 +3627,9 @@ void vdi_init(void)
 {
     WORD i;
     kb_init();
+    /* The contour fill's far buffers are taken the first time one is
+     * asked for; nothing here clears bss, so say so out loud. */
+    cf_map = cf_stack = 0;
     /* The work_in the AES opens with: everything 1 -- style 1, colour 1
      * (black), solid fill -- and raster coordinates. */
     for (i = 0; i < 10; i++)

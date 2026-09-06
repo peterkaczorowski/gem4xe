@@ -413,6 +413,137 @@ volatile WORD r_b7_bug, r_b7_fix;                       /* want 801 */
 volatile WORD r_b8_bug, r_b8_fix;                       /* want 'T' = 84 */
 volatile WORD r_b9_bug, r_b9_fix;                       /* want 20 */
 volatile WORD r_b10_bug, r_b10_fix;                     /* want 207 */
+volatile WORD r_b12_bug, r_b12_fix;                     /* want 112 */
+volatile WORD r_b12_neg;                                /* want -113 */
+volatile WORD r_b13_bug, r_b13_fix;                     /* want 48 */
+volatile WORD r_b14_bug, r_b14_fix;                     /* want 192 */
+
+/* ---- B12: a signed 16-bit >> is not an arithmetic shift --------------- */
+
+/* Isin (src/vdi/vdi.c): the VDI's sine table is indexed by the angle over
+ * eight.  `angle >> 3` compiles to three logical shifts and then a sign
+ * extension from the WRONG bit -- `eor ##4 / and ##7 / sec / sbc ##4`,
+ * which keeps three bits and throws the rest away.  900 >> 3 is 0, not
+ * 112; 900 >> 4 is -8, not 56; -900 >> 3 is -1, not -113.  A shift by ONE
+ * emits a plain `lsr` and so is right only for a non-negative value, and
+ * 32-bit shifts are right.  The compiler does emit the correct `cmp
+ * ##-32768 / ror a` in some contexts, so this cannot be tested by reading
+ * one listing -- which is why it is here.
+ *
+ * Every curve gem4xe drew came out as a point at the centre of itself.
+ * The sources shift an UNSIGNED copy and do the sign by hand (asr()). */
+volatile WORD b12_in = 900;
+
+static WORD b12_bug(WORD a) { return (WORD)(a >> 3); }
+static WORD b12_fix(WORD a) { return (WORD)((uint16_t)a >> 3); }
+
+static WORD b12_asr(WORD v, WORD n)     /* what src/vdi/vdi.c uses */
+{
+    if (v >= 0)
+        return (WORD)((uint16_t)v >> n);
+    return (WORD)(-(WORD)(((uint16_t)(-v) + (uint16_t)((1u << n) - 1u)) >> n));
+}
+
+/* ---- B13/B14: an arrowhead's two ends -------------------------------- */
+
+/* draw_arrow (src/vdi/vdi.c) computes the vector from an arrowhead's tip
+ * to the first point far enough back to carry it.  Two things go wrong,
+ * and neither reproduces in a small function -- lifted out on their own
+ * both shapes compile correctly, which is why the whole calculation is
+ * here.  Every arrowhead the VDI drew was wrong.
+ *
+ *   B13   dx = pt[0] - pt[i * inc * 2];       the SECOND element reads as
+ *                                             zero (B1's shape, through a
+ *                                             pointer parameter)
+ *   B14   draw_arrow(&pt[(n-1)*2], n, -1)     the negative index inside --
+ *                                             pt[-2] -- reads neither
+ *                                             point
+ *
+ * The sources take the far element into a scalar and address every point
+ * as a non-negative index from the array's base. */
+WORD b13_pts[6] = { 40, 90, 200, 90, 0, 0 };
+WORD b14_pts[6] = { 40, 90, 200, 90, 0, 0 };
+volatile WORD b13_count = 2;
+
+static uint16_t b13_isqrt(uint32_t v)
+{
+    uint32_t rem = 0, root = 0;
+    WORD i;
+
+    for (i = 0; i < 16; i++) {
+        root <<= 1;
+        rem = (rem << 2) | (v >> 30);
+        v <<= 2;
+        if (rem > root) { rem -= root + 1; root += 2; }
+    }
+    return (uint16_t)(root >> 1);
+}
+
+static WORD b13_mdr(WORD m1, WORD m2, WORD d)
+{
+    int32_t v = (int32_t)m1 * m2;
+
+    v = (v < 0) ? (v - d / 2) : (v + d / 2);
+    return (WORD)(v / d);
+}
+
+/* returns the x of the head's first corner: 48 for this line */
+static WORD b13_arrow_bug(WORD *pt, WORD count, WORD inc)
+{
+    WORD len = 8, wid = 4, dx = 0, dy = 0, i, nskip = 0;
+    WORD line_len, dxf, dyf, htx, hty, bx;
+    uint32_t len2 = 0;
+
+    for (i = 1; i < count; i++) {
+        nskip = i;
+        dx = (WORD)(pt[0] - pt[i * inc * 2]);
+        dy = (WORD)(pt[1] - pt[i * inc * 2 + 1]);
+        len2 = (uint32_t)((int32_t)dx * dx + (int32_t)dy * dy);
+        if (len2 >= (uint32_t)(len * len))
+            break;
+    }
+    (void)nskip;
+    line_len = (WORD)b13_isqrt(len2);
+    if (line_len < len)
+        return -1;
+    dxf = b13_mdr(dx, 1000, line_len);
+    dyf = b13_mdr(dy, 1000, line_len);
+    htx = b13_mdr(len, dxf, 1000);
+    hty = b13_mdr(len, dyf, 1000);
+    bx  = b13_mdr(wid, (WORD)-dyf, 1000);
+    (void)hty;
+    return (WORD)(pt[0] + bx - htx);
+}
+
+static WORD b13_arrow_fix(WORD *pt, WORD count, WORD tip, WORD inc)
+{
+    WORD len = 8, wid = 4, dx = 0, dy = 0, i, nskip = 0;
+    WORD line_len, dxf, dyf, htx, hty, bx;
+    WORD tx = pt[tip], ty = pt[tip + 1];
+    uint32_t len2 = 0;
+
+    for (i = 1; i < count; i++) {
+        WORD j = (WORD)(tip + i * inc * 2), qx = pt[j], qy = pt[j + 1];
+
+        nskip = i;
+        dx = (WORD)(tx - qx);
+        dy = (WORD)(ty - qy);
+        len2 = (uint32_t)((int32_t)dx * dx + (int32_t)dy * dy);
+        if (len2 >= (uint32_t)(len * len))
+            break;
+    }
+    (void)nskip;
+    line_len = (WORD)b13_isqrt(len2);
+    if (line_len < len)
+        return -1;
+    dxf = b13_mdr(dx, 1000, line_len);
+    dyf = b13_mdr(dy, 1000, line_len);
+    htx = b13_mdr(len, dxf, 1000);
+    hty = b13_mdr(len, dyf, 1000);
+    bx  = b13_mdr(wid, (WORD)-dyf, 1000);
+    (void)hty;
+    return (WORD)(tx + bx - htx);
+}
 
 __task int main(void)
 {
@@ -464,5 +595,16 @@ __task int main(void)
     r_b10_bug = b10_bug(1, 2);                  /* (106, 101): 207 */
     b10_dirty();
     r_b10_fix = b10_fix(1, 2);
+
+    r_b12_bug = b12_bug(b12_in);                /* 900 >> 3 = 112 */
+    r_b12_fix = b12_fix(b12_in);
+    r_b12_neg = b12_asr((WORD)-(b12_in), 3);    /* -900 >> 3 = -113 */
+
+    /* the head at the START of the line: its first corner is x = 48 */
+    r_b13_bug = b13_arrow_bug(b13_pts, b13_count, 1);
+    r_b13_fix = b13_arrow_fix(b13_pts, b13_count, 0, 1);
+    /* and the head at its END, reached by a negative index: x = 192 */
+    r_b14_bug = b13_arrow_bug(&b14_pts[2], b13_count, -1);
+    r_b14_fix = b13_arrow_fix(b14_pts, b13_count, 2, -1);
     return 0;
 }

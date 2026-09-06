@@ -94,9 +94,9 @@ def check_refuses_6502(disk, far):
     try:
         b.frames(300)                       # no CPU switch: still a 6502
         before = [b.cmd(f"EVAL db(${a:06x})").get("value") for a in firsts]
-        for k in ("M", "3", "RETURN"):
+        for k in ("L", "M", "3", "RETURN"):
             b.key(k)
-            b.frames(6)
+            b.frames(10)
         b.frames(250)
         for _ in range(200):            # ready, not merely alive
             if bytes(b.memdump(STATUS, 3)) == b"VD\x01":
@@ -162,9 +162,9 @@ def check_image(name, why):
         b.poke(0xD1FF, 0x01)
         b.poke(0xD191, 0x00)
         b.frames(500)
-        for k in ("M", "3", "RETURN"):
+        for k in ("L", "M", "3", "RETURN"):
             b.key(k)
-            b.frames(6)
+            b.frames(10)
         b.frames(250)
         for _ in range(200):            # ready, not merely alive
             if bytes(b.memdump(STATUS, 3)) == b"VD\x01":

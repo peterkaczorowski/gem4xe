@@ -46,9 +46,9 @@ def main():
         b.poke(0xD1FF, 0x01)
         b.poke(0xD191, 0x00)
         b.frames(500)
-        for k in ("M", "3", "RETURN"):
+        for k in ("L", "M", "3", "RETURN"):
             b.key(k)
-            b.frames(6)
+            b.frames(10)
         b.frames(250)
         for _ in range(200):            # ready, not merely alive
             st = bytes(b.memdump(STATUS, 3))

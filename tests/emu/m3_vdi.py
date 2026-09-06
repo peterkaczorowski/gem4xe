@@ -27,7 +27,10 @@ from vdiref import (V_CLRWK, V_PLINE, VSL_TYPE, VSL_COLOR, VSF_INTERIOR,      # 
                     VST_POINT, VQT_EXTENT, VQT_WIDTH,
                     V_FILLAREA, V_PMARKER, VSM_TYPE, VSM_HEIGHT, VSM_COLOR,
                     VQL_ATTRIBUTES, VQM_ATTRIBUTES, VQF_ATTRIBUTES,
-                    VSF_PERIMETER, VST_ROTATION, V_GET_PIXEL)
+                    VSF_PERIMETER, VST_ROTATION, V_GET_PIXEL, V_GDP,
+                    GDP_BAR, GDP_ARC, GDP_PIE, GDP_CIRCLE, GDP_ELLIPSE,
+                    GDP_ELLARC, GDP_ELLPIE, GDP_RBOX, GDP_RFBOX,
+                    GDP_JUSTIFIED, V_CONTOURFILL, VSL_ENDS)
 from vdiref import (VST_COLOR, VSWR_MODE, VRT_CPYFM, pack_mfdb,           # noqa: E402
                      VSC_FORM, V_SHOW_C, V_HIDE_C, V_LOCATOR,
                      VSIN_MODE, VQIN_MODE, VEX_TIMV, VSL_UDSTY, VQ_MOUSE,
@@ -350,6 +353,144 @@ CASES = [
         (VSF_PERIMETER, (), (1,)), (VQF_ATTRIBUTES,),
         (VST_ROTATION, (), (900,)),
         (VSWR_MODE, (), (1,))]),
+
+    ("gdp: bar, with and without its perimeter", [
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (2,)),
+        (VSF_PERIMETER, (), (0,)),
+        (V_GDP, (20, 20, 140, 80), (), None, GDP_BAR),
+        # patterned, with the perimeter: the outline is solid, the fill is not
+        (VSF_INTERIOR, (), (2,)), (VSF_STYLE, (), (6,)), (VSF_COLOR, (), (1,)),
+        (VSF_PERIMETER, (), (1,)),
+        (V_GDP, (180, 20, 300, 80), (), None, GDP_BAR),
+        # given backwards, and clipped
+        (VS_CLIP, (340, 40, 500, 100), (1,)),
+        (V_GDP, (560, 120, 360, 20), (), None, GDP_BAR),
+        (VS_CLIP, (0, 0, 0, 0), (0,))]),
+
+    ("gdp: circles and ellipses, filled and hollow", [
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (2,)),
+        (VSF_PERIMETER, (), (0,)),
+        (V_GDP, (80, 60, 0, 0, 40, 0), (), None, GDP_CIRCLE),
+        (VSF_INTERIOR, (), (0,)), (VSF_COLOR, (), (1,)),
+        (VSF_PERIMETER, (), (1,)),
+        (V_GDP, (200, 60, 0, 0, 50, 0), (), None, GDP_CIRCLE),
+        (VSF_INTERIOR, (), (2,)), (VSF_STYLE, (), (3,)), (VSF_COLOR, (), (4,)),
+        (VSF_PERIMETER, (), (0,)),
+        (V_GDP, (360, 70, 90, 40), (), None, GDP_ELLIPSE),
+        # a tiny one, and one bigger than the screen
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (3,)),
+        (V_GDP, (500, 30, 0, 0, 3, 0), (), None, GDP_CIRCLE),
+        (VSF_COLOR, (), (9,)),
+        (V_GDP, (560, 120, 0, 0, 200, 0), (), None, GDP_CIRCLE)]),
+
+    ("gdp: arcs and pie slices, every quadrant", [
+        (VSL_COLOR, (), (1,)), (VSF_COLOR, (), (2,)),
+        (VSF_INTERIOR, (), (1,)), (VSF_PERIMETER, (), (0,)),
+        # an open arc is a polyline in the LINE colour and style
+        (V_GDP, (100, 60, 0, 0, 0, 0, 50, 0), (0, 900), None, GDP_ARC),
+        (VSL_COLOR, (), (4,)), (VSL_TYPE, (), (3,)),
+        (V_GDP, (100, 60, 0, 0, 0, 0, 50, 0), (1800, 2700), None, GDP_ARC),
+        (VSL_TYPE, (), (1,)),
+        # a wedge is a polygon in the FILL colour
+        (V_GDP, (280, 70, 0, 0, 0, 0, 60, 0), (300, 1500), None, GDP_PIE),
+        (VSF_COLOR, (), (4,)),
+        (V_GDP, (280, 70, 0, 0, 0, 0, 60, 0), (2100, 3300), None, GDP_PIE),
+        # elliptical, and one whose angles wrap past 360
+        (VSF_COLOR, (), (3,)),
+        (V_GDP, (480, 70, 90, 45), (3300, 600), None, GDP_ELLPIE),
+        (VSL_COLOR, (), (1,)),
+        (V_GDP, (480, 180, 100, 40), (450, 1350), None, GDP_ELLARC)]),
+
+    ("gdp: rounded boxes, outlined and filled, and degenerate ones", [
+        (VSL_COLOR, (), (1,)), (VSF_COLOR, (), (2,)),
+        (VSF_INTERIOR, (), (1,)), (VSF_PERIMETER, (), (0,)),
+        (V_GDP, (20, 20, 200, 90), (), None, GDP_RBOX),
+        (V_GDP, (220, 20, 400, 90), (), None, GDP_RFBOX),
+        # given backwards, patterned, and with a perimeter
+        (VSF_INTERIOR, (), (3,)), (VSF_STYLE, (), (5,)), (VSF_COLOR, (), (1,)),
+        (VSF_PERIMETER, (), (1,)),
+        (V_GDP, (600, 100, 430, 20), (), None, GDP_RFBOX),
+        # one narrower than two corner radii, and one clipped
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (4,)),
+        (VSF_PERIMETER, (), (0,)),
+        (V_GDP, (40, 140, 55, 190), (), None, GDP_RFBOX),
+        (VS_CLIP, (100, 150, 300, 200), (1,)),
+        (V_GDP, (80, 130, 340, 220), (), None, GDP_RFBOX),
+        (VS_CLIP, (0, 0, 0, 0), (0,))]),
+
+    ("gdp: justified text, by word, by character, and by both", [
+        (VSWR_MODE, (), (2,)), (VST_COLOR, (), (1,)),
+        (VSL_COLOR, (), (2,)),
+        (V_PLINE, (20, 10, 20, 230), ()), (V_PLINE, (500, 10, 500, 230), ()),
+        # neither: the string is drawn as it comes
+        (V_GDP, (20, 30, 480, 0), (0, 0) + tuple(b"neither of the two"),
+         None, GDP_JUSTIFIED),
+        # between words only
+        (V_GDP, (20, 50, 480, 0), (1, 0) + tuple(b"between the words only"),
+         None, GDP_JUSTIFIED),
+        # between characters only
+        (V_GDP, (20, 70, 480, 0), (0, 1) + tuple(b"between characters"),
+         None, GDP_JUSTIFIED),
+        # both, which caps what a word gap may take
+        (V_GDP, (20, 90, 480, 0), (1, 1) + tuple(b"both of them at once"),
+         None, GDP_JUSTIFIED),
+        # narrower than the string: the gaps go negative
+        (V_GDP, (20, 110, 100, 0), (1, 1) + tuple(b"squeezed up tight"),
+         None, GDP_JUSTIFIED),
+        # centred and right-aligned on the JUSTIFIED width, underlined
+        (VST_ALIGNMENT, (), (1, 5)),
+        (V_GDP, (260, 130, 300, 0), (1, 0) + tuple(b"centred on it"),
+         None, GDP_JUSTIFIED),
+        (VST_ALIGNMENT, (), (2, 5)), (VST_EFFECTS, (), (9,)),
+        (V_GDP, (500, 160, 300, 0), (0, 1) + tuple(b"right, and thick"),
+         None, GDP_JUSTIFIED),
+        (VST_ALIGNMENT, (), (0, 0)), (VST_EFFECTS, (), (0,)),
+        # one character, and none at all
+        (V_GDP, (20, 200, 200, 0), (1, 1, ord("x")), None, GDP_JUSTIFIED),
+        (V_GDP, (20, 220, 200, 0), (1, 1), None, GDP_JUSTIFIED)]),
+
+    ("contour fill: bounded by a colour, and by the seed's own", [
+        # a box outline in black, filled from inside up to it
+        (VSL_COLOR, (), (1,)),
+        (V_PLINE, (20, 20, 200, 20, 200, 120, 20, 120, 20, 20), ()),
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (2,)),
+        (V_CONTOURFILL, (100, 70), (1,)),
+        # the same box drawn again further right, filled by the seed's own
+        # colour instead -- white, up to anything that is not white
+        (V_PLINE, (240, 20, 420, 20, 420, 120, 240, 120, 240, 20), ()),
+        (V_PLINE, (300, 20, 300, 120), ()),      # a wall down the middle
+        (VSF_COLOR, (), (4,)),
+        (V_CONTOURFILL, (350, 70), (-1,)),       # only the right half fills
+        # a patterned bucket, and one whose seed is already the boundary
+        (V_PLINE, (460, 20, 620, 20, 620, 120, 460, 120, 460, 20), ()),
+        (VSF_INTERIOR, (), (2,)), (VSF_STYLE, (), (8,)), (VSF_COLOR, (), (1,)),
+        (V_CONTOURFILL, (540, 70), (1,)),
+        (V_CONTOURFILL, (460, 20), (1,)),        # on the wall: nothing
+        # clipped: the bucket may not leave the clip rectangle
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (3,)),
+        (VS_CLIP, (40, 150, 300, 220), (1,)),
+        (V_CONTOURFILL, (100, 180), (-1,)),
+        (VS_CLIP, (0, 0, 0, 0), (0,)),
+        (V_CONTOURFILL, (500, 200), (99,))]),    # no such pen: fills to nothing
+
+    ("line ends: arrowheads at either end, and lines too short for one", [
+        (VSL_COLOR, (), (1,)),
+        (VSL_ENDS, (), (1, 0)), (V_PLINE, (40, 30, 200, 30), ()),
+        (VSL_ENDS, (), (0, 1)), (V_PLINE, (40, 60, 200, 60), ()),
+        (VSL_ENDS, (), (1, 1)), (V_PLINE, (40, 90, 200, 90), ()),
+        # every direction, from one centre
+        (V_PLINE, (320, 120, 420, 120), ()),
+        (V_PLINE, (320, 120, 320, 220), ()),
+        (V_PLINE, (320, 120, 240, 60), ()),
+        (V_PLINE, (320, 120, 400, 200), ()),
+        # a polyline of several segments: the head follows the last one
+        (V_PLINE, (460, 30, 520, 90, 600, 40), ()),
+        # too short to carry a head, and a single point
+        (V_PLINE, (40, 200, 45, 200), ()),
+        (V_PLINE, (100, 200), ()),
+        # rounded and out of range, which the driver answers with what it did
+        (VSL_ENDS, (), (2, 9)), (V_PLINE, (140, 200, 240, 200), ()),
+        (VSL_ENDS, (), (0, 0))]),
 
     ("v_get_pixel reads back the pen that was drawn", [
         (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (2,)),
@@ -806,7 +947,7 @@ def poke_script(b, addr, script, mfdb_addr=0, room=None, screen_mfdb=0):
     b.memload(addr, data)
 
 
-def wait_done(b, timeout_frames=600):
+def wait_done(b, timeout_frames=4000):
     n = 0
     while n < timeout_frames:
         if b.peek(STATUS + ST_DONE) == 0xA5:
@@ -843,9 +984,9 @@ def main(argv):
         b.poke(0xD1FF, 0x01)
         b.poke(0xD191, 0x00)
         b.frames(500)
-        for k in ("M", "3", "RETURN"):
+        for k in ("L", "M", "3", "RETURN"):
             b.key(k)
-            b.frames(6)
+            b.frames(10)
         b.frames(200)
         # Ready is STATUS[2] == 1, not the signature: the runner raises
         # 'VD' early and finishes starting up (farmem_probe among it) some
@@ -873,7 +1014,8 @@ def main(argv):
 
             resolved = [
                 (r[0], r[1] if len(r) > 1 else (), r[2] if len(r) > 2 else (),
-                 FORMS[r[3]] if len(r) > 3 else None)
+                 FORMS[r[3]] if len(r) > 3 and r[3] is not None else None,
+                 r[4] if len(r) > 4 else 0)
                 for r in full]
             ref = vdiref.VDI()
             ref.run(resolved)
