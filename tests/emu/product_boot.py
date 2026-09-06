@@ -78,7 +78,7 @@ BOOT_LINE = b"GEM\x9b"
 COLDST = 0x0244                 # the OS: non-zero at RESET means come up cold
 DRVBYT = 0x070A                 # DOS 2's drive map (src/sys/gemdos.c)
 DOS_2 = 0                       # src/sys/dos.h
-REFUSAL = "gem4xe:"             # src/farload.s msg_no816
+REFUSAL = "gem4xe needs"        # src/farload.s msg_no816
 FARMEM_BRK = 8                  # the cursor's offset in FARMEM (src/sys/farmem.h)
 SEAM = 8                        # bytes checked either side of a chunk seam
 STEP = 20                       # frames between screen reads while waiting for
@@ -193,13 +193,11 @@ def one(name, progname, how, echo, keep, check):
     shot = os.path.join(SHOTDIR, f"product-{name.split('.')[0]}.png")
     try:
         # -- 1. the 6502 pass, hands off ------------------------------------
-        # A FINE poll, because the refusal is not on the screen for long:
-        # GEM prints it, returns to the DOS, and a DOS 2 clears the screen
-        # for its menu a moment later.  At a hundred frames a poll this
-        # gate missed the window about one run in ten and reported that
-        # the DOS never started GEM, with the menu on the screen as its
-        # evidence -- which was true and not the point.  Twenty frames is
-        # a third of a second and costs a screen read, not a frame.
+        # The refusal now STAYS on the screen: the loader abandons the
+        # load and waits for a key before it lets the DOS have the machine
+        # back, because coming back is what wipes the message (a DOS 2
+        # redraws its menu over it).  So this poll can no longer miss it,
+        # and the key below is what a person at the machine would press.
         seen = None
         for t in range(0, 12000, STEP):
             b.frames(STEP)
@@ -215,6 +213,14 @@ def one(name, progname, how, echo, keep, check):
             return
         lines = seen
         print(f"  the DOS started GEM and GEM refused, {t + STEP} frames in")
+        # The second line comes a moment after the first, and it is the one
+        # that matters: the machine was not damaged by being asked.
+        b.frames(20)
+        lines = [ln for ln in screen(b) if ln.strip()]
+        check(any("Nothing was changed" in ln for ln in lines),
+              f"{name}: the refusal does not say the machine was left alone")
+        b.key("A")                       # the loader is waiting to be read
+        b.frames(20)
         if echo:
             check(any(ln.rstrip().endswith(echo) for ln in lines),
                   f"{name}: no {echo!r} on the screen: the DOS did not run the batch")

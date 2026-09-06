@@ -204,6 +204,8 @@ def main(argv):
               "no PBI BIOS banner: the card was not mounted by it")
         print(f"  the PBI BIOS mounted the card and SpartaDOS X ran "
               f"AUTOEXEC.BAT; GEM refused the 6502, {t + 100} frames in")
+        b.key("A")                       # the loader waits to be read
+        keep_switch(b, 20)
 
         refused, last, same = lines, None, 0
         for t in range(0, 20000, 100):

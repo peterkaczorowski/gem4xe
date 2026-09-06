@@ -57,12 +57,17 @@ FL_CHUNK:     .equ    0x1b00          ; staging payload: 27 whole pages -- with
 ;;; CIO, for the two failure messages.  DOS is still resident and IOCB #0 is
 ;;; open on E: at this point, which is the whole reason the diagnostics can be
 ;;; a printed line rather than a wedged machine.
+CH:           .equ    0x02fc          ; the OS's last key, $FF when none
+ICHID:        .equ    0x0340          ; IOCB #1: the DOS's own load channel
 ICCOM:        .equ    0x0342
 ICBAL:        .equ    0x0344
 ICBLL:        .equ    0x0348
+IOCB1:        .equ    0x0010          ; the offset of IOCB #1 from IOCB #0
 CIOV:         .equ    0xe456
 PUTREC:       .equ    0x09
+CLOSE:        .equ    0x0c
 EOL:          .equ    0x9b
+DOSVEC:       .equ    0x000a          ; the DOS's own re-entry
 
 NMIEN:        .equ    0xd40e
 
@@ -276,7 +281,22 @@ fl_hex_d:     adc     #'0'
 fl_no816:     ldx     #.byte0 msg_no816
               ldy     #.byte1 msg_no816
               lda     #msg_no816_end-msg_no816
-;;; fl_fail -- print (X,Y) for A bytes on IOCB #0 and mark the machine unusable.
+;;; fl_fail -- say why on IOCB #0, wait to be read, and give the machine
+;;; back.
+;;;
+;;; Printing is not enough on its own.  This runs from INITAD, inside the
+;;; DOS's own read loop, and the DOS goes on to read the other hundred
+;;; kilobytes whatever we do -- a minute of a floppy grinding after a
+;;; message nobody is still reading.  So the load is ABANDONED: the DOS's
+;;; file is closed (IOCB #1, the channel every DOS 2 and SpartaDOS loads
+;;; a binary on) and DOSVEC takes the machine back to its prompt.
+;;;
+;;; And the message is WAITED ON, because coming back is what wipes it: a
+;;; DOS 2 redraws its menu over the top and a SpartaDOS prints its banner.
+;;; A key -- read from the OS's own CH, so no IOCB has to be opened at a
+;;; moment when the DOS owns them -- is what says it has been read.
+;;; _fl_ok stays clear as well, so a DOS that somehow returns here finds
+;;; the entry point refusing too.
 fl_fail:      stx     ICBAL
               sty     ICBAL+1
               sta     ICBLL
@@ -287,7 +307,35 @@ fl_fail:      stx     ICBAL
               sta     ICCOM
               ldx     #0
               jsr     CIOV
-              rts
+              ldx     #.byte0 msg_key
+              ldy     #.byte1 msg_key
+              stx     ICBAL
+              sty     ICBAL+1
+              lda     #msg_key_end-msg_key
+              sta     ICBLL
+              lda     #0
+              sta     ICBLL+1
+              lda     #PUTREC
+              sta     ICCOM
+              ldx     #0
+              jsr     CIOV
+              lda     #0xff
+              sta     CH              ; drop whatever was already typed
+fl_anykey:    lda     CH
+              cmp     #0xff
+              beq     fl_anykey
+              lda     #0xff
+              sta     CH
+              lda     ICHID+IOCB1     ; $FF when the channel is not open
+              cmp     #0xff
+              beq     fl_gone
+              lda     #CLOSE
+              sta     ICCOM+IOCB1
+              ldx     #IOCB1
+              jsr     CIOV
+fl_gone:      ldx     #0xff
+              txs                     ; the DOS's own re-entry wants its stack
+              jmp     (DOSVEC)
 
 ;;; _fl_running_bank -- which bank is the far code EXECUTING in?
 ;;;
@@ -308,9 +356,16 @@ _fl_running_bank:
 ;;; The messages are `cdata`, which is bank $00 RAM: the bank number in the
 ;;; second one is filled in by fl_noram before it is printed.
               .section cdata, rodata
-msg_no816:    .byte   "gem4xe: this needs a 65C816 (Rapidus/Antonia)", EOL
+;;; Two lines, and the second one is the important one: a machine that
+;;; cannot run gem4xe has not been damaged by finding out.  Forty columns.
+msg_no816:    .byte   "gem4xe needs a 65C816: this is a 6502.", EOL
 msg_no816_end:
 msg_noram:    .byte   "gem4xe: no linear RAM in bank $"
 msg_noram_bank:
               .byte   "xx", EOL
 msg_noram_end:
+;;; The second line, and the one that matters: the machine was not
+;;; damaged by being asked.  One record a line -- CIO's PUT RECORD stops
+;;; at the first EOL, whatever length it was given.
+msg_key:      .byte   "Nothing was changed.  Press a key.", EOL
+msg_key_end:
