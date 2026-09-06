@@ -51,6 +51,19 @@
 #define LEN_ZFNAME  14                  /* "FILENAME.EXT" and its NUL */
 #define LEN_ZINFO   36                  /* " 1234567 bytes used in 12 items." */
 #define NUM_FNODES  64                  /* a window lists this many at most */
+/* What an operation is doing, in the walk and in the dialog's title.
+ * OP_COUNT is the pass that says what the others will do. */
+#define OP_COUNT   0
+#define OP_DELETE  1
+#define OP_COPY    2
+#define OP_MOVE    3
+
+/* A file is copied through this much far memory at a time (the arena).
+ * GEMDOS takes a far buffer and shuttles it through a pool slice
+ * (src/sys/gemdos.c, gd_xfer), so the desktop's near memory pays
+ * nothing for it. */
+#define COPY_BUF   1024
+
 #define MAX_DELLEVEL 4                  /* folders inside folders a delete
                                          * walks: a DTA (and a search slot,
                                          * src/sys/gemdos.c) per level */
@@ -135,6 +148,7 @@ typedef struct {
                                          * it, as the ST does */
     CSAVE __far *g_cnxsave;             /* the windows' places between programs */
     char __far *g_shelbuf;              /* the desktop's copy of the shell buffer */
+    char __far *g_copybuf;              /* COPY_BUF of it, for file copies */
     WNODE    g_wlist[NUM_WNODES];       /* by w_root - (DROOT + 1) */
     OBJECT     g_screen[NUM_SOBS];
     SCREENINFO g_screeninfo[NUM_ITEMS]; /* by obid - WOBS_START */
@@ -166,6 +180,8 @@ void act_select(WORD wh, WORD root, WORD obj);
 WORD do_open(WORD wh, WORD obj);
 WORD do_aopen(WNODE *pw, WORD curr, const char __far *name);
 void win_rebld(WNODE *pw);
+/* The listing entry an item object shows, or 0. */
+FNODE __far *win_fnode(WNODE *pw, WORD obj);
 void hndl_wmsg(const WORD *msg);
 void app_start(void);
 void app_save(void);
@@ -175,6 +191,9 @@ void cnx_put(void);
 /* deskfun.c: what the desktop says, and what the File menu does to files */
 WORD fun_alert(WORD defbut, WORD stnum);
 void fun_mkdir(WNODE *pw);
+/* An item dragged out of pw and let go over (dst_wh, dst_obj): a copy,
+ * a move when SHIFT is held, a delete over the trash. */
+void fun_file2any(WNODE *pw, WORD dst_wh, WORD dst_obj, WORD kstate);
 void fun_del(WNODE *pw);
 
 #endif /* GEM4XE_DESK_H */

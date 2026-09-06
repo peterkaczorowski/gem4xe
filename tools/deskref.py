@@ -63,15 +63,19 @@ from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
                     RSRC_LOAD, RSRC_FREE, RSRC_GADDR, SHEL_WRITE,
                     SHEL_GET, SHEL_PUT, SIZE_SHELBUF,
                     DSETDRV, DGETDRV, DSETPATH, FSETDTA, MALLOC, FSFIRST,
-                    FSNEXT, DCREATE, DDELETE, FDELETE, FA_SUBDIR)
+                    FSNEXT, DCREATE, DDELETE, FDELETE, FA_SUBDIR,
+                    GRAF_MKSTATE, GRAF_DRAGBOX,
+                    FOPEN, FCREATE, FCLOSE, FREAD, FWRITE, GD_EACCDN)
 from rsc import R_TREE, R_ICONBLK, R_STRING, ICONBLK_SIZE  # noqa: E402
 from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA,  # noqa: E402
                      DESKMENU, FILEMENU, ABOUITEM,
                      OPENITEM, NFOLITEM, DELTITEM, CLOSITEM, CLSWITEM,
                      QUITITEM, DEVERSN, DEOK,
-                     MKNAME, MKOK, CDFILES, CDFOLDS, CDOK,
+                     MKNAME, MKOK, CDTITLE, CDFILES, CDFOLDS, CDOK,
                      STDISK, STTRASH, STNOMEM, STNOWIND, STDEFDIR,
                      STDELFIL, STDELDIR, STFOFAIL, STFO8DEE, STDEEPPA,
+                     STCPYFIL, STDISKFU, STNOTHIN, STSAMEPL,
+                     STDELTTL, STCPYTTL, STMOVTTL,
                      IB_HARD, IB_FLOPPY, IB_TRASH,
                      IB_FOLDER, IB_APPL, IB_DOCU, NOT_YET)
 
@@ -115,12 +119,20 @@ WSAVE_SIZE = 6 * 2 + LEN_ZPATH
 CSAVE_SIZE = NUM_WNODES * WSAVE_SIZE
 
 # -- deskwin.c -------------------------------------------------------------
+# desk.h: what an operation is doing, and the buffer a copy goes through
+OP_COUNT, OP_DELETE, OP_COPY, OP_MOVE = 0, 1, 2, 3
+COPY_BUF = 1024
+# graf_mkstate's key state: SHIFT is the modifier this machine can be
+# asked about while the button is down (src/app/gem.h)
+MODE_RSHIFT, MODE_LSHIFT = 0x01, 0x02
+
 ARENA_SIZE = (DTA_SIZE + NUM_WNODES * NUM_FNODES * FNODE_SIZE + CSAVE_SIZE
-              + SIZE_SHELBUF + MAX_DELLEVEL * DTA_SIZE)
+              + SIZE_SHELBUF + MAX_DELLEVEL * DTA_SIZE + COPY_BUF)
 WIN_XCELL, WIN_WCELL, WIN_HCELL = 2, 38, 12
 # where the model keeps a string the desktop passes from its stack (the
 # target's address is the compiler's; the gate compares G, not records)
 STACK_STRING = 0x00FFFE00
+STACK_STRING2 = 0x00FFFE80              # ...and the destination's
 WIN_YCELL = (6, 8, 10, 13)
 
 # GLOBES, field by field in the order desk.h declares them; sizes as
@@ -133,6 +145,7 @@ GLOBES = [("a_menu", 2), ("a_info", 2), ("a_mkdir", 2), ("a_delete", 2),
           ("g_ich", 2), ("g_screenfree", 2), ("g_rmsg", 16),
           ("g_wcnt", 2), ("g_nfiles", 4), ("g_ndirs", 4),
           ("g_dta", 4), ("g_opdta", 4), ("g_cnxsave", 4), ("g_shelbuf", 4),
+          ("g_copybuf", 4),
           ("g_wlist", NUM_WNODES * WNODE_SIZE),
           ("g_screen", NUM_SOBS * OBJ_SIZE),
           ("g_screeninfo", NUM_ITEMS * SCREENINFO_SIZE)]
@@ -296,7 +309,7 @@ class Desktop:
         self.wcnt, self.dta, self.opdta = 0, 0, 0
         self.nfiles = self.ndirs = 0
         self.a_mkdir = self.a_delete = 0
-        self.cnxsave = self.shelbuf = 0
+        self.cnxsave = self.shelbuf = self.copybuf = 0
         self.wsave = [Wsave() for _ in range(NUM_WNODES)]
         # the desktop's copy of the shell buffer, a far CharArray the
         # model's shel_get/shel_put copy into and out of
@@ -598,6 +611,7 @@ class Desktop:
         self.cnxsave = arena + DTA_SIZE + NUM_WNODES * NUM_FNODES * FNODE_SIZE
         self.shelbuf = self.cnxsave + CSAVE_SIZE
         self.opdta = self.shelbuf + SIZE_SHELBUF
+        self.copybuf = self.opdta + MAX_DELLEVEL * DTA_SIZE
         self.a.mem[self.shelbuf] = self.shelbuf_data
         for ws in self.wsave:
             ws.x = ws.y = ws.w = ws.h = ws.hsl = ws.vsl = 0
@@ -1243,16 +1257,101 @@ class Desktop:
         if k > 3:
             self.op_path = p[:p.rfind("\\", 0, k - 1) + 1] + "*.*"
 
+    # the same four, as functions of a path: a copy has two of them and
+    # they go down and back up together (deskfun.c, dst_path)
+    @classmethod
+    def p_add_fname(cls, p, name):
+        return p[:cls.path_tail(p)] + name
+
+    @classmethod
+    def p_set_all(cls, p):
+        return p[:cls.path_tail(p)] + "*.*"
+
+    @classmethod
+    def p_add_path(cls, p, name):
+        k = cls.path_tail(p)
+        q = p[:k] + name
+        if len(q) + 5 > LEN_ZPATH:
+            return False, p[:k] + "*.*"
+        return True, q + "\\*.*"
+
+    @classmethod
+    def p_sub_path(cls, p):
+        k = cls.path_tail(p)
+        if k > 3:
+            return p[:p.rfind("\\", 0, k - 1) + 1] + "*.*"
+        return p
+
     def op_gemdos(self, fn, *rest):
         """A GEMDOS call on op_path (the target passes its own buffer;
         the model keeps one string at STACK_STRING)."""
         self.a.mem[STACK_STRING] = Text(self.op_path)
         return self.gemdos_long(fn, STACK_STRING, *rest)
 
-    def walk(self, level, counting):
-        """deskfun.c walk: one directory, op_path ending in "*.*", with
-        a DTA of its own -- our GEMDOS keeps a search by the DTA that
-        owns it, so the nested walk does not disturb this one."""
+    def dst_gemdos(self, fn, *rest):
+        """...and one on dst_path."""
+        self.a.mem[STACK_STRING2] = Text(self.dst_path)
+        return self.gemdos_long(fn, STACK_STRING2, *rest)
+
+    # -- copying and moving (deskfun.c) ------------------------------------
+    def make_dir(self):
+        """The destination directory, without the "*.*"; one that is
+        already there is not an error."""
+        k = self.path_tail(self.dst_path)
+        self.a.mem[STACK_STRING2] = Text(self.dst_path[:k - 1])
+        ret = self.gemdos_long(DCREATE, STACK_STRING2)
+        if ret in (E_OK, GD_EACCDN):
+            return True
+        self.fun_alert(1, STFOFAIL)
+        return False
+
+    def copy_file(self):
+        """op_path to dst_path, COPY_BUF at a time, through the arena."""
+        h_in = self.op_gemdos(FOPEN, 0)
+        if h_in < 0:
+            self.fun_alert(1, STCPYFIL)
+            return False
+        h_out = self.dst_gemdos(FCREATE, 0)
+        if h_out < 0:
+            self.gemdos(FCLOSE, (h_in,))
+            self.fun_alert(1, STCPYFIL)
+            return False
+        ok = True
+        while True:
+            got = self.gemdos(FREAD, (h_in, COPY_BUF & 0xFFFF, COPY_BUF >> 16,
+                                      self.copybuf & 0xFFFF, self.copybuf >> 16))
+            if got <= 0:
+                if got < 0:
+                    ok = False
+                break
+            put = self.gemdos(FWRITE, (h_out, got & 0xFFFF, got >> 16,
+                                       self.copybuf & 0xFFFF, self.copybuf >> 16))
+            if put != got:
+                self.fun_alert(1, STDISKFU)
+                ok = False
+                break
+            if got < COPY_BUF:
+                break
+        self.gemdos(FCLOSE, (h_in,))
+        self.gemdos(FCLOSE, (h_out,))
+        if not ok:
+            self.dst_gemdos(FDELETE)
+            return False
+        return True
+
+    def copy_one(self, op):
+        if not self.copy_file():
+            return False
+        if op == OP_MOVE and self.op_gemdos(FDELETE) != E_OK:
+            self.fun_alert(1, STDELFIL)
+            return False
+        return True
+
+    def walk(self, level, op):
+        """deskfun.c walk: one directory, op_path ending in "*.*" (and
+        dst_path with it for a copy), with a DTA of its own -- our
+        GEMDOS keeps a search by the DTA that owns it, so the nested
+        walk does not disturb this one."""
         if level >= MAX_DELLEVEL:
             self.fun_alert(1, STFO8DEE)
             return False
@@ -1266,35 +1365,56 @@ class Desktop:
                     if not self.add_path(name):
                         self.fun_alert(1, STDEEPPA)
                         return False
-                    if not self.walk(level + 1, counting):
+                    if op in (OP_COPY, OP_MOVE):
+                        ok, self.dst_path = self.p_add_path(self.dst_path, name)
+                        if not ok:
+                            self.fun_alert(1, STDEEPPA)
+                            return False
+                        if not self.make_dir():
+                            return False
+                    if not self.walk(level + 1, op):
                         return False
                     self.sub_path()
+                    if op in (OP_COPY, OP_MOVE):
+                        self.dst_path = self.p_sub_path(self.dst_path)
                     self.call(FSETDTA, (dta & 0xFFFF, dta >> 16))
                     self.add_fname(name)
-                    if counting:
+                    if op == OP_COUNT:
                         self.ndirs += 1
-                    elif self.op_gemdos(DDELETE) != E_OK:
-                        self.fun_alert(1, STDELDIR)
-                        return False
-                    else:
+                    elif op == OP_COPY:
                         self.ndirs -= 1
-                        self.inf_numset(self.a_delete, CDFOLDS, self.ndirs)
-                        self.fun_fld(self.a_delete, CDFOLDS)
+                        self.op_count(CDFOLDS, self.ndirs)
+                    else:
+                        if self.op_gemdos(DDELETE) != E_OK:
+                            self.fun_alert(1, STDELDIR)
+                            return False
+                        self.ndirs -= 1
+                        self.op_count(CDFOLDS, self.ndirs)
                     self.set_all_files()
                 else:
                     self.add_fname(name)
-                    if counting:
+                    if op == OP_COUNT:
                         self.nfiles += 1
-                    elif self.op_gemdos(FDELETE) != E_OK:
-                        self.fun_alert(1, STDELFIL)
-                        return False
-                    else:
+                    elif op == OP_DELETE:
+                        if self.op_gemdos(FDELETE) != E_OK:
+                            self.fun_alert(1, STDELFIL)
+                            return False
                         self.nfiles -= 1
-                        self.inf_numset(self.a_delete, CDFILES, self.nfiles)
-                        self.fun_fld(self.a_delete, CDFILES)
+                        self.op_count(CDFILES, self.nfiles)
+                    else:
+                        self.dst_path = self.p_add_fname(self.dst_path, name)
+                        if not self.copy_one(op):
+                            return False
+                        self.dst_path = self.p_set_all(self.dst_path)
+                        self.nfiles -= 1
+                        self.op_count(CDFILES, self.nfiles)
                     self.set_all_files()
             ret = self.gemdos(FSNEXT)
         return True
+
+    def op_count(self, field, left):
+        self.inf_numset(self.a_delete, field, left)
+        self.fun_fld(self.a_delete, field)
 
     def fun_del(self, pw):
         """deskfun.c fun_del: what is selected, counted (the donor's
@@ -1319,7 +1439,7 @@ class Desktop:
                     self.fun_alert(1, STDEEPPA)
                     ok = False
                     break
-                ok = self.walk(0, True)
+                ok = self.walk(0, OP_COUNT)
                 self.ndirs += 1
             else:
                 self.nfiles += 1
@@ -1344,7 +1464,7 @@ class Desktop:
             self.op_path = pn.spec.s
             if pf.attr & FA_SUBDIR:
                 self.add_path(pf.name)          # it fitted at the count
-                ok = self.walk(0, False)
+                ok = self.walk(0, OP_DELETE)
                 if not ok:
                     break
                 self.sub_path()
@@ -1368,6 +1488,127 @@ class Desktop:
         self.end_dialog()
         self.win_rebld(pw)
         return
+
+    def op_title(self, op):
+        """The dialog says which of the three it is, from a free string
+        of the resource (deskfun.c op_title)."""
+        stnum = (STCPYTTL if op == OP_COPY else
+                 STMOVTTL if op == OP_MOVE else STDELTTL)
+        addr = self.rsrc_gaddr(R_STRING, stnum)
+        self.a.trees[self.a_delete][CDTITLE].ob_spec = addr
+
+    def drop_path(self, dst_wh, dst_obj):
+        """Where a drop landed, as a path ending in "*.*", or None."""
+        if dst_wh == DESKWH:
+            drive = self.obj_info(dst_obj).icon.char & 0xFF
+            if not drive:
+                return None                     # the trash: not a place
+            return chr(drive) + ":\\*.*"
+        pd = self.win_find(dst_wh)
+        if pd is None:
+            return None
+        path = pd.path.spec.s
+        if not dst_obj:
+            return path
+        pf = self.win_fnode(pd, dst_obj)
+        if pf is None or not pf.attr & FA_SUBDIR:
+            return None
+        ok, path = self.p_add_path(path, pf.name)
+        return path if ok else None
+
+    def fun_file2any(self, pw, dst_wh, dst_obj, kstate):
+        """deskfun.c fun_file2any: what is selected, dragged somewhere.
+        The same three passes as a delete -- count, ask, do -- with a
+        destination path kept in step with the source."""
+        tree = self.a_delete
+        pn = pw.path
+        op = OP_MOVE if kstate & (MODE_LSHIFT | MODE_RSHIFT) else OP_COPY
+        if dst_wh == DESKWH and not (self.obj_info(dst_obj).icon.char & 0xFF):
+            self.fun_del(pw)                    # the trash
+            return
+        dest = self.drop_path(dst_wh, dst_obj)
+        if dest is None:
+            return
+        if not any(pf.flags & F_SELECTED for pf in pn.fnodes[:pn.count]):
+            self.fun_alert(1, STNOTHIN)
+            return
+        if dest == pn.spec.s:
+            self.fun_alert(1, STSAMEPL)
+            return
+
+        self.busy(True)                         # what it will do
+        self.nfiles = self.ndirs = 0
+        ok = True
+        for pf in pn.fnodes[:pn.count]:
+            if not ok:
+                break
+            if not pf.flags & F_SELECTED:
+                continue
+            self.op_path = pn.spec.s
+            if pf.attr & FA_SUBDIR:
+                if not self.add_path(pf.name):
+                    self.fun_alert(1, STDEEPPA)
+                    ok = False
+                    break
+                ok = self.walk(0, OP_COUNT)
+                self.ndirs += 1
+            else:
+                self.nfiles += 1
+        self.busy(False)
+        if not ok:
+            return
+
+        self.op_title(op)                       # ...and ask
+        self.inf_numset(tree, CDFILES, self.nfiles)
+        self.inf_numset(tree, CDFOLDS, self.ndirs)
+        self.start_dialog(tree)
+        self.call(FORM_DO, (ROOT,), tree=tree, steps=self.take_input("form_do"))
+        if not self.inf_what(tree, CDOK):
+            self.end_dialog()
+            self.op_title(OP_DELETE)
+            return
+
+        self.busy(True)                         # ...and do it
+        for pf in pn.fnodes[:pn.count]:
+            if not ok:
+                break
+            if not pf.flags & F_SELECTED:
+                continue
+            self.op_path = pn.spec.s
+            self.dst_path = dest
+            if pf.attr & FA_SUBDIR:
+                self.add_path(pf.name)          # both fitted at the count
+                good, self.dst_path = self.p_add_path(self.dst_path, pf.name)
+                if not good or not self.make_dir():
+                    break
+                ok = self.walk(0, op)
+                if not ok:
+                    break
+                self.sub_path()
+                self.dst_path = self.p_sub_path(self.dst_path)
+                self.add_fname(pf.name)
+                if op == OP_MOVE and self.op_gemdos(DDELETE) != E_OK:
+                    self.fun_alert(1, STDELDIR)
+                    break
+                self.ndirs -= 1
+                self.op_count(CDFOLDS, self.ndirs)
+                self.set_all_files()
+            else:
+                self.add_fname(pf.name)
+                self.dst_path = self.p_add_fname(self.dst_path, pf.name)
+                if not self.copy_one(op):
+                    break
+                self.dst_path = self.p_set_all(self.dst_path)
+                self.set_all_files()
+                self.nfiles -= 1
+                self.op_count(CDFILES, self.nfiles)
+        self.busy(False)
+        self.end_dialog()
+        self.op_title(OP_DELETE)                # as the resource has it
+        self.win_rebld(pw)
+        pd = None if dst_wh == DESKWH else self.win_find(dst_wh)
+        if pd is not None and pd is not pw:
+            self.win_rebld(pd)
 
     def do_deskmenu(self, item):
         if item == ABOUITEM:
@@ -1414,9 +1655,49 @@ class Desktop:
         return done
 
     # -- events --------------------------------------------------------------
+    def hndl_drag(self, pw, obj, wh):
+        """desktop.c hndl_drag: the AES drags the outline, and where the
+        POINTER came up says where it went.  A drop in its own window on
+        nothing, or on itself, is the click it started as."""
+        io, _ = self.call(GRAF_MKSTATE)         # a sample, not a wait
+        mstate, kstate = signed(io[3]), signed(io[4])
+        if not (mstate & 1):                    # already let go: a click
+            return
+        io, _ = self.call(OBJC_OFFSET, (obj,), tree=self.g_screen_addr)
+        bx, by = signed(io[0]), signed(io[1])
+        d = self.wind_get_rect(0, WF_WXYWH)     # WF_WORKXYWH: the desk
+        pob = self.screen[obj]
+        self.call(GRAF_DRAGBOX,
+                  (pob.ob_width, pob.ob_height, bx, by, d.x, d.y, d.w, d.h),
+                  steps=self.take_input("dragbox"))
+        io, _ = self.call(GRAF_MKSTATE)
+        x, y, mstate, kstate = (signed(io[1]), signed(io[2]),
+                                signed(io[3]), signed(io[4]))
+        io, _ = self.call(WIND_FIND, (x, y))
+        dwh = signed(io[0])
+        if dwh == DESKWH:
+            io, _ = self.call(OBJC_FIND, (DROOT, MAX_DEPTH), (x, y),
+                              tree=self.g_screen_addr)
+            dobj = signed(io[0])
+            if dobj < WOBS_START:
+                return
+        else:
+            pd = self.win_find(dwh)
+            if pd is None:
+                return
+            io, _ = self.call(OBJC_FIND, (pd.root, MAX_DEPTH), (x, y),
+                              tree=self.g_screen_addr)
+            dobj = signed(io[0])
+            if dobj < WOBS_START:
+                dobj = 0
+            if dwh == wh and (dobj == 0 or dobj == obj):
+                return
+        self.fun_file2any(pw, dwh, dobj, kstate)
+
     def hndl_button(self, clicks, mx, my):
         io, _ = self.call(WIND_FIND, (mx, my))
         wh = signed(io[0])
+        pw = None
         if wh == DESKWH:
             root = DROOT
         else:
@@ -1432,6 +1713,8 @@ class Desktop:
         self.act_select(wh, root, obj)
         if obj and clicks == 2:
             return self.do_open(wh, obj)
+        if obj and pw is not None:
+            self.hndl_drag(pw, obj, wh)
         return False
 
     def hndl_msg(self):
@@ -1514,7 +1797,7 @@ class Desktop:
             self.screenfree)) + b"".join(w(x) for x in self.rmsg)
         out += (w(self.wcnt) + dw(self.nfiles) + dw(self.ndirs)
                 + dw(self.dta) + dw(self.opdta) + dw(self.cnxsave)
-                + dw(self.shelbuf))
+                + dw(self.shelbuf) + dw(self.copybuf))
         out += b"".join(pw.pack() for pw in self.wlist)
         assert len(out) == g_offset("g_screen"), len(out)
         out += b"".join(o.pack() for o in self.screen)

@@ -212,19 +212,64 @@ static WORD hndl_menu(WORD title, WORD item)
 
 /* -- events ------------------------------------------------------------ */
 
+/* An item taken out of a window and let go somewhere.  The AES drags
+ * the outline and answers where the button came up; where the POINTER
+ * came up is what says which window and which icon, so the state is
+ * asked for again afterwards -- the box is snapped to the grid the item
+ * came from and is not where the hand is.
+ *
+ * Dropped in its own window on nothing, or on itself, it is the click
+ * it started as.  Anywhere else the file layer takes over: another
+ * window or a folder in one is a copy, a copy with SHIFT held is a
+ * move, and the trash is a delete. */
+static void hndl_drag(WNODE *pw, WORD obj, WORD wh)
+{
+    OBJECT *pob = &G.g_screen[obj];
+    WORD x, y, mstate, kstate, dwh, dobj, bx, by;
+    GRECT d;
+
+    graf_mkstate(&x, &y, &mstate, &kstate);
+    if (!(mstate & 1))                          /* already let go: a click */
+        return;
+    objc_offset(G.g_screen, obj, &bx, &by);
+    wind_get(0, WF_WORKXYWH, &d.g_x, &d.g_y, &d.g_w, &d.g_h);
+    graf_dragbox(pob->ob_width, pob->ob_height, bx, by,
+                 d.g_x, d.g_y, d.g_w, d.g_h, &x, &y);
+    graf_mkstate(&x, &y, &mstate, &kstate);
+
+    dwh = wind_find(x, y);
+    if (dwh == DESKWH) {
+        dobj = objc_find(G.g_screen, DROOT, MAX_DEPTH, x, y);
+        if (dobj < WOBS_START)
+            return;                             /* the bare desk */
+    } else {
+        WNODE *pd = win_find(dwh);
+        if (!pd)
+            return;
+        dobj = objc_find(G.g_screen, pd->w_root, MAX_DEPTH, x, y);
+        if (dobj < WOBS_START)
+            dobj = 0;                           /* the window itself */
+        if (dwh == wh && (dobj == 0 || dobj == obj))
+            return;                             /* where it already is */
+    }
+    fun_file2any(pw, dwh, dobj, kstate);
+}
+
 /* A press on the desk or in a window's work area (the control manager
  * keeps the gadgets and the windows under the top one): select the
  * item under it and no other there; two clicks open it, and opening
- * a program is what ends the desktop's loop. */
+ * a program is what ends the desktop's loop.  One click on an item in
+ * a window, with the button still down, is a drag. */
 static WORD hndl_button(WORD clicks, WORD mx, WORD my)
 {
     WORD wh, root, obj;
+    WNODE *pw = 0;
 
     wh = wind_find(mx, my);
     if (wh == DESKWH) {
         root = DROOT;
     } else {
-        WNODE *pw = win_find(wh);
+        pw = win_find(wh);
         if (!pw)
             return FALSE;
         root = pw->w_root;
@@ -235,6 +280,8 @@ static WORD hndl_button(WORD clicks, WORD mx, WORD my)
     act_select(wh, root, obj);
     if (obj && clicks == 2)
         return do_open(wh, obj);
+    if (obj && pw)
+        hndl_drag(pw, obj, wh);
     return FALSE;
 }
 

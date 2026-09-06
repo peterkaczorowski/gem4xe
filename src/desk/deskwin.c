@@ -23,7 +23,7 @@
  * walk (deskfun.c). */
 #define ARENA_SIZE  (sizeof(DTA) + (LONG)NUM_WNODES * NUM_FNODES * sizeof(FNODE) \
                      + sizeof(CSAVE) + SIZE_SHELBUF \
-                     + (LONG)MAX_DELLEVEL * sizeof(DTA))
+                     + (LONG)MAX_DELLEVEL * sizeof(DTA) + COPY_BUF)
 
 /* The INF file's default windows (the donor's desk_inf_data1, "#W"):
  * in character cells, x 2 wide 38 high 12, each one lower. */
@@ -123,6 +123,7 @@ WORD win_start(void)
                                   + (LONG)NUM_WNODES * (NUM_FNODES * sizeof(FNODE)));
     G.g_shelbuf = (char __far *)G.g_cnxsave + sizeof(CSAVE);
     G.g_opdta = (DTA __far *)(G.g_shelbuf + SIZE_SHELBUF);
+    G.g_copybuf = (char __far *)(G.g_opdta + MAX_DELLEVEL);
     {                                           /* the donor's is zeroed */
         char __far *p = (char __far *)G.g_cnxsave;
         WORD n;
@@ -208,7 +209,7 @@ static WNODE *win_alloc(void)
 /* -- the listing ------------------------------------------------------- */
 
 /* The window's FNODE behind item obj, or NULL. */
-static FNODE __far *win_fnode(WNODE *pw, WORD obj)
+FNODE __far *win_fnode(WNODE *pw, WORD obj)
 {
     FNODE __far *pf = pw->w_path.p_flist;
     WORD i;

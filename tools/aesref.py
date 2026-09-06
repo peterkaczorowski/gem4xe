@@ -605,6 +605,7 @@ class AES:
         self.dos_dta_data = None
         self.dos_dirs = {}
         self.dos_searches = {}
+        self.dos_files = {}             # by handle, while they are open
         # what a fresh directory's own entry says its length is: the gate
         # sets it from the filesystem it built the disk with (SDFS writes
         # the header entry, so 23), because a folder's size counts in the
@@ -4151,6 +4152,38 @@ class AES:
             raise ValueError(f"unknown AES op {op}")
         return vdiref.record(c2, c4, io, po)
 
+    # -- open files -------------------------------------------------------
+    # A handle is its IOCB plus GD_HANDLE_BASE (src/sys/gemdos.c), and an
+    # IOCB is the lowest free one from 1 (src/sys/cio.c, free_iocb).  A
+    # search holds one only while it is still reading the directory --
+    # every listing the gates use fits one read, so none is held here.
+    GD_HANDLE_BASE = 6
+    CIO_IOCBS = 8
+
+    def dos_open(self, parent, name, size, writing):
+        for iocb in range(1, self.CIO_IOCBS):
+            h = iocb + self.GD_HANDLE_BASE
+            if h not in self.dos_files:
+                self.dos_files[h] = {"parent": parent, "name": name,
+                                     "size": size, "at": 0, "w": writing}
+                return h
+        return GD_ENHNDL & 0xFFFFFFFF
+
+    def dos_close(self, h):
+        if h not in self.dos_files:
+            return GD_EIHNDL & 0xFFFFFFFF
+        del self.dos_files[h]
+        return 0
+
+    def dos_setsize(self, f):
+        """A write grows the directory entry, which is what the gate
+        reads back off the image afterwards."""
+        entries = self.dos_dirs.get(f["parent"], [])
+        for i, e in enumerate(entries):
+            if e[0] == f["name"]:
+                entries[i] = (e[0], e[1], e[2], e[3], f["size"])
+                return
+
     def gemdos(self, fn, ints):
         """The file calls of src/sys/gemdos.c the desktop makes, on the
         listing the harness read off the disk (dos_dirs) and the far heap
@@ -4221,6 +4254,42 @@ class AES:
                 return GD_EFILNF & 0xFFFFFFFF
             self.dos_dirs[parent] = [e for e in entries if e[0] != name]
             return 0
+        if fn == 0x3D or fn == 0x3C:    # Fopen / Fcreate
+            path = self.mem[long_(0)].s
+            k = path.rfind("\\") + 1
+            parent, name = path[:k], path[k:]
+            entries = self.dos_dirs.get(parent)
+            if entries is None:
+                return GD_EPTHNF & 0xFFFFFFFF
+            hit = [e for e in entries if e[0] == name and not e[1] & FA_SUBDIR]
+            if fn == 0x3D:                      # open what is there
+                if not hit:
+                    return GD_EFILNF & 0xFFFFFFFF
+                size = hit[0][4]
+            else:                               # create, or empty what is
+                self.dos_dirs[parent] = [e for e in entries if e[0] != name]
+                self.dos_dirs[parent].append((name, 0, 0, self.dos_newdir, 0))
+                size = 0
+            h = self.dos_open(parent, name, size, fn == 0x3C)
+            return h
+        if fn == 0x3E:                  # Fclose
+            return self.dos_close(ints[0])
+        if fn == 0x3F or fn == 0x40:    # Fread / Fwrite
+            h, count = ints[0], ints[1] | (ints[2] << 16)
+            f = self.dos_files.get(h)
+            if f is None:
+                return GD_EIHNDL & 0xFFFFFFFF
+            if fn == 0x3F:
+                n = min(count, f["size"] - f["at"])
+                if n < 0:
+                    n = 0
+                f["at"] += n
+                return n
+            f["at"] += count
+            if f["at"] > f["size"]:
+                f["size"] = f["at"]
+            self.dos_setsize(f)
+            return count
         if fn == 0x4E:                  # Fsfirst
             spec = self.mem[long_(0)].s
             k = spec.rfind("\\") + 1
@@ -4281,10 +4350,13 @@ DSETDRV, DGETDRV, DSETPATH = GEMDOS_OP + 0x0E, GEMDOS_OP + 0x19, GEMDOS_OP + 0x3
 FSETDTA, FGETDTA, MALLOC = GEMDOS_OP + 0x1A, GEMDOS_OP + 0x2F, GEMDOS_OP + 0x48
 FSFIRST, FSNEXT = GEMDOS_OP + 0x4E, GEMDOS_OP + 0x4F
 DCREATE, DDELETE, FDELETE = GEMDOS_OP + 0x39, GEMDOS_OP + 0x3A, GEMDOS_OP + 0x41
+FCREATE, FOPEN, FCLOSE = GEMDOS_OP + 0x3C, GEMDOS_OP + 0x3D, GEMDOS_OP + 0x3E
+FREAD, FWRITE = GEMDOS_OP + 0x3F, GEMDOS_OP + 0x40
 # src/sys/gemdos.h: the attributes and the error the searches answer
 FA_RDONLY, FA_HIDDEN, FA_SYSTEM, FA_VOLUME, FA_SUBDIR, FA_ARCHIVE = (
     0x01, 0x02, 0x04, 0x08, 0x10, 0x20)
 GD_EPTHNF, GD_EACCDN, GD_EFILNF, GD_ENMFIL = -34, -36, -33, -49
+GD_ENHNDL, GD_EIHNDL = -35, -37
 
 
 def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None,

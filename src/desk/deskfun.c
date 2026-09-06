@@ -49,6 +49,17 @@ static char *put_str(char *d, const char *s)
     return d;
 }
 
+/* Two paths, the same or not.  The listings and the specs are the
+ * DOS's own upper case, so a plain comparison is the right one. */
+static WORD same_path(const char *a, const char *b)
+{
+    while (*a && *a == *b) {
+        a++;
+        b++;
+    }
+    return (WORD)(*a == *b);
+}
+
 static char *put_far(char *d, const char __far *s)
 {
     while ((*d = *s++) != 0)
@@ -200,6 +211,13 @@ static void sub_path(char *path)
 
 /* -- the walk ----------------------------------------------------------- */
 
+/* One of the dialog's two counters, ticked down as the walk goes. */
+static void op_count(WORD field, LONG left)
+{
+    inf_numset(G.a_delete, field, left);
+    fun_fld(G.a_delete, field);
+}
+
 /* Delete one file, alerting when the DOS refuses. */
 static WORD del_file(void)
 {
@@ -209,16 +227,108 @@ static WORD del_file(void)
     return FALSE;
 }
 
-/* One level of the walk: op_path ends in "*.*".  counting: add the
- * entries up; otherwise delete them, a folder after its contents, and
- * count them off the dialog as they go.  FALSE when something stopped
- * it, and then the path is left where it stopped -- the caller is
- * stopping too. */
-static WORD walk(WORD level, WORD counting)
+/* -- copying and moving (the donor's deskfun.c and deskdir.c) ---------- */
+
+/* Where the operation is going: the same shape as op_path, kept in step
+ * with it as the walk goes down and back up.  A copy is two paths, and
+ * that is the only difference between it and the delete above. */
+static char dst_path[LEN_ZPATH];
+
+/* The directory dst_path names, without the "*.*" on the end.  Made
+ * when a copy walks into a folder that is not there yet; a folder that
+ * IS there is not an error -- copying over an existing tree is what a
+ * second copy of the same thing means. */
+static WORD make_dir(void)
+{
+    char *tail = path_tail(dst_path);
+    LONG ret;
+
+    /* "A:\\DIR\\*.*" -> "A:\\DIR": the separator goes as well, since a
+     * DOS takes a directory by its name and not as a path to nothing. */
+    tail[-1] = 0;
+    ret = Dcreate(dst_path);
+    tail[-1] = '\\';
+    set_all_files(tail);
+    if (ret == E_OK || ret == EACCDN)        /* it was already there */
+        return TRUE;
+    fun_alert(1, STFOFAIL);
+    return FALSE;
+}
+
+/* One file, op_path to dst_path, through the arena's buffer.  A copy
+ * that stops half way leaves nothing behind: a truncated file looks
+ * like a whole one to everything that reads it afterwards. */
+static WORD copy_file(void)
+{
+    LONG in, out, got, put;
+    char __far *buf = G.g_copybuf;
+    WORD ok = TRUE;
+
+    in = Fopen(op_path, 0)      /* read */;
+    if (in < 0) {
+        fun_alert(1, STCPYFIL);
+        return FALSE;
+    }
+    out = Fcreate(dst_path, 0);
+    if (out < 0) {
+        Fclose((WORD)in);
+        fun_alert(1, STCPYFIL);
+        return FALSE;
+    }
+    for (;;) {
+        got = Fread((WORD)in, (LONG)COPY_BUF, buf);
+        if (got <= 0) {
+            if (got < 0)
+                ok = FALSE;
+            break;
+        }
+        put = Fwrite((WORD)out, got, buf);
+        if (put != got) {
+            fun_alert(1, STDISKFU);
+            ok = FALSE;
+            break;
+        }
+        if (got < (LONG)COPY_BUF)               /* that was the end of it */
+            break;
+    }
+    Fclose((WORD)in);
+    Fclose((WORD)out);
+    if (!ok) {
+        Fdelete(dst_path);          /* half a file is worse than none */
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/* The file at op_path, copied to dst_path and -- for a move -- taken
+ * away afterwards.  A move is a copy and a delete on this machine:
+ * neither DOS renames a file into another directory, and the two
+ * drives of a floppy machine are not the same drive anyway. */
+static WORD copy_one(WORD op)
+{
+    if (!copy_file())
+        return FALSE;
+    if (op == OP_MOVE && !del_file())
+        return FALSE;
+    return TRUE;
+}
+
+/* One level of the walk.  op_path ends in "*.*", and for a copy or a
+ * move dst_path does too, kept in step with it step for step.
+ *
+ *   OP_COUNT    add the entries up, so the dialog can say what it will do
+ *   OP_DELETE   delete them, a folder after its contents
+ *   OP_COPY     copy them, a folder BEFORE its contents (it has to be
+ *               there to copy into)
+ *   OP_MOVE     the same, and take the original away behind it
+ *
+ * FALSE when something stopped it, and then the paths are left where
+ * they stopped -- the caller is stopping too. */
+static WORD walk(WORD level, WORD op)
 {
     DTA __far *dta;
     LONG ret;
-    char *tail;
+    char *tail, *dtail;
 
     if (level >= MAX_DELLEVEL) {
         fun_alert(1, STFO8DEE);
@@ -234,32 +344,51 @@ static WORD walk(WORD level, WORD counting)
                     fun_alert(1, STDEEPPA);
                     return FALSE;
                 }
-                if (!walk((WORD)(level + 1), counting))
+                if (op == OP_COPY || op == OP_MOVE) {
+                    if (!add_path(dst_path, dta->d_fname)) {
+                        fun_alert(1, STDEEPPA);
+                        return FALSE;
+                    }
+                    if (!make_dir())
+                        return FALSE;
+                }
+                if (!walk((WORD)(level + 1), op))
                     return FALSE;
                 sub_path(op_path);
+                if (op == OP_COPY || op == OP_MOVE)
+                    sub_path(dst_path);
                 Fsetdta(dta);                   /* this level's own again */
                 tail = add_fname(op_path, dta->d_fname);
-                if (counting) {
+                if (op == OP_COUNT) {
                     G.g_ndirs++;
-                } else if (Ddelete(op_path) != E_OK) {
-                    fun_alert(1, STDELDIR);
-                    return FALSE;
-                } else {
+                } else if (op == OP_COPY) {
                     G.g_ndirs--;
-                    inf_numset(G.a_delete, CDFOLDS, G.g_ndirs);
-                    fun_fld(G.a_delete, CDFOLDS);
+                    op_count(CDFOLDS, G.g_ndirs);
+                } else {                        /* delete, and move's tail */
+                    if (Ddelete(op_path) != E_OK) {
+                        fun_alert(1, STDELDIR);
+                        return FALSE;
+                    }
+                    G.g_ndirs--;
+                    op_count(CDFOLDS, G.g_ndirs);
                 }
                 set_all_files(tail);
             } else {
                 tail = add_fname(op_path, dta->d_fname);
-                if (counting) {
+                if (op == OP_COUNT) {
                     G.g_nfiles++;
-                } else if (!del_file()) {
-                    return FALSE;
-                } else {
+                } else if (op == OP_DELETE) {
+                    if (!del_file())
+                        return FALSE;
                     G.g_nfiles--;
-                    inf_numset(G.a_delete, CDFILES, G.g_nfiles);
-                    fun_fld(G.a_delete, CDFILES);
+                    op_count(CDFILES, G.g_nfiles);
+                } else {
+                    dtail = add_fname(dst_path, dta->d_fname);
+                    if (!copy_one(op))
+                        return FALSE;
+                    set_all_files(dtail);
+                    G.g_nfiles--;
+                    op_count(CDFILES, G.g_nfiles);
                 }
                 set_all_files(tail);
             }
@@ -270,6 +399,173 @@ static WORD walk(WORD level, WORD counting)
 }
 
 /* -- the two operations ------------------------------------------------- */
+
+/* The dialog serves all three operations and says which one it is from
+ * a string of the resource -- a title in the C could not be translated
+ * (docs/shipping.md).  The donor has a dialog each; one and a title is
+ * the same dialog with less of DESKTOP.RSC spent on it. */
+static void op_title(WORD op)
+{
+    char *str;
+    WORD stnum = (op == OP_COPY) ? STCPYTTL
+               : (op == OP_MOVE) ? STMOVTTL : STDELTTL;
+
+    rsrc_gaddr(R_STRING, stnum, (void **)&str);
+    G.a_delete[CDTITLE].ob_spec = (LONG)(uint32_t)(char __far *)str;
+}
+
+/* Where a drop landed, as a path ending in "*.*": a window's own
+ * directory, a folder in one, or a drive's root on the desk.  FALSE if
+ * it landed on nothing that can hold a file. */
+static WORD drop_path(WORD dst_wh, WORD dst_obj, char *path)
+{
+    WNODE *pd;
+    FNODE __far *pf;
+
+    if (dst_wh == DESKWH) {
+        WORD drive = (WORD)(obj_info(dst_obj)->icon.ib_char & 0xFF);
+
+        if (!drive)
+            return FALSE;                       /* the trash: not a place */
+        path[0] = (char)drive;
+        path[1] = ':';
+        path[2] = '\\';
+        path[3] = 0;
+        set_all_files(path + 3);
+        return TRUE;
+    }
+    pd = win_find(dst_wh);
+    if (!pd)
+        return FALSE;
+    put_str(path, pd->w_path.p_spec);
+    if (!dst_obj)                               /* the window's own directory */
+        return TRUE;
+    pf = win_fnode(pd, dst_obj);
+    if (!pf || !(pf->f_attr & FA_SUBDIR))       /* onto a file: no */
+        return FALSE;
+    return add_path(path, pf->f_name);
+}
+
+/* An item dragged out of pw and let go somewhere.  SHIFT makes it a
+ * move: the ST does that with CONTROL, which POKEY cannot see unless a
+ * key is down with it (SKSTAT reports the shift key alone and nothing
+ * else), so the one modifier this machine can be asked about while the
+ * button is held is the one it uses.
+ *
+ * The shape is fun_del's, because it is the same three passes: count
+ * what is selected, ask, then do it with the counters ticking down. */
+void fun_file2any(WNODE *pw, WORD dst_wh, WORD dst_obj, WORD kstate)
+{
+    OBJECT *tree = G.a_delete;
+    FNODE __far *pf;
+    char dest[LEN_ZPATH];
+    WORD i, ok, op, chose = FALSE;
+
+    op = (kstate & (MODE_LSHIFT | MODE_RSHIFT)) ? OP_MOVE : OP_COPY;
+    if (dst_wh == DESKWH && !(obj_info(dst_obj)->icon.ib_char & 0xFF)) {
+        fun_del(pw);                            /* the trash */
+        return;
+    }
+    if (!drop_path(dst_wh, dst_obj, dest))
+        return;
+
+    pf = pw->w_path.p_flist;
+    for (i = 0; i < pw->w_path.p_count; i++, pf++)
+        if (pf->f_flags & F_SELECTED)
+            chose = TRUE;
+    if (!chose) {
+        fun_alert(1, STNOTHIN);
+        return;
+    }
+    if (same_path(dest, pw->w_path.p_spec)) {   /* where it already is */
+        fun_alert(1, STSAMEPL);
+        return;
+    }
+
+    desk_busy(TRUE);                            /* what it will do */
+    G.g_nfiles = 0;
+    G.g_ndirs = 0;
+    ok = TRUE;
+    pf = pw->w_path.p_flist;
+    for (i = 0; i < pw->w_path.p_count && ok; i++, pf++) {
+        if (!(pf->f_flags & F_SELECTED))
+            continue;
+        put_str(op_path, pw->w_path.p_spec);
+        if (pf->f_attr & FA_SUBDIR) {
+            if (!add_path(op_path, pf->f_name)) {
+                fun_alert(1, STDEEPPA);
+                ok = FALSE;
+                break;
+            }
+            ok = walk(0, OP_COUNT);
+            G.g_ndirs++;
+        } else {
+            G.g_nfiles++;
+        }
+    }
+    desk_busy(FALSE);
+    if (!ok)
+        return;
+
+    op_title(op);                               /* ...and ask */
+    inf_numset(tree, CDFILES, G.g_nfiles);
+    inf_numset(tree, CDFOLDS, G.g_ndirs);
+    fun_start(tree);
+    form_do(tree, 0);
+    ok = inf_what(tree, CDOK);
+    if (!ok) {
+        fun_end();
+        op_title(OP_DELETE);
+        return;
+    }
+
+    desk_busy(TRUE);                            /* ...and do it */
+    pf = pw->w_path.p_flist;
+    for (i = 0; i < pw->w_path.p_count && ok; i++, pf++) {
+        char *tail, *dtail;
+
+        if (!(pf->f_flags & F_SELECTED))
+            continue;
+        put_str(op_path, pw->w_path.p_spec);
+        put_str(dst_path, dest);
+        if (pf->f_attr & FA_SUBDIR) {
+            add_path(op_path, pf->f_name);      /* both fitted at the count */
+            if (!add_path(dst_path, pf->f_name) || !make_dir())
+                break;
+            ok = walk(0, op);
+            if (!ok)
+                break;
+            sub_path(op_path);
+            sub_path(dst_path);
+            tail = add_fname(op_path, pf->f_name);
+            if (op == OP_MOVE && Ddelete(op_path) != E_OK) {
+                fun_alert(1, STDELDIR);
+                break;
+            }
+            G.g_ndirs--;
+            op_count(CDFOLDS, G.g_ndirs);
+            set_all_files(tail);
+        } else {
+            tail = add_fname(op_path, pf->f_name);
+            dtail = add_fname(dst_path, pf->f_name);
+            if (!copy_one(op))
+                break;
+            set_all_files(dtail);
+            set_all_files(tail);
+            G.g_nfiles--;
+            op_count(CDFILES, G.g_nfiles);
+        }
+    }
+    desk_busy(FALSE);
+    fun_end();
+    op_title(OP_DELETE);                        /* as the resource has it */
+    win_rebld(pw);
+    {                                           /* and the other end of it */
+        WNODE *pd = (dst_wh == DESKWH) ? 0 : win_find(dst_wh);
+        if (pd && pd != pw)
+            win_rebld(pd);
+    }
+}
 
 /* File -> New folder: the name in a dialog, Dcreate, the window read
  * again.  Nothing is returned: an operation on files never ends the
@@ -344,7 +640,7 @@ void fun_del(WNODE *pw)
                 ok = FALSE;
                 break;
             }
-            ok = walk(0, TRUE);
+            ok = walk(0, OP_COUNT);
             G.g_ndirs++;
         } else {
             G.g_nfiles++;
@@ -374,7 +670,7 @@ void fun_del(WNODE *pw)
         put_str(op_path, pw->w_path.p_spec);
         if (pf->f_attr & FA_SUBDIR) {
             add_path(op_path, pf->f_name);      /* it fitted at the count */
-            ok = walk(0, FALSE);
+            ok = walk(0, OP_DELETE);
             if (!ok)
                 break;
             sub_path(op_path);

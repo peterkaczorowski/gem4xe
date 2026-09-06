@@ -186,7 +186,11 @@ def one(name, progname, how, echo, keep, check):
         check("DUP.SYS" in listed, f"{name}: no DUP.SYS -- nowhere to return to")
         free = fs.free_count() * fs.data_bytes
         print(f"  {fs.free_count()} sectors free, {free // 1024} KB for applications")
-        check(fs.free_count() > 100, f"{name}: only {fs.free_count()} sectors free")
+        # Room for a program beside the system, on the disk that has the
+        # least of it.  Eighty sectors is 20 KB: M11.G4A is 6 KB and
+        # GACS's engine wants 24 of code, so this is the floor at which
+        # the floppy stops being a place to put an application at all.
+        check(fs.free_count() > 80, f"{name}: only {fs.free_count()} sectors free")
 
     emu = launch(tag="product", memsize="1088K", extra_args=["--disk", disk])
     b = emu.bridge

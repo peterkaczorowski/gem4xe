@@ -303,7 +303,18 @@ WORD graf_handle(WORD *wchar, WORD *hchar, WORD *wbox, WORD *hbox);
 WORD graf_mouse(WORD mode, const WORD *form);  /* form only for USER_DEF */
 WORD graf_growbox(WORD x1, WORD y1, WORD w1, WORD h1, WORD x2, WORD y2, WORD w2, WORD h2);
 WORD graf_shrinkbox(WORD x1, WORD y1, WORD w1, WORD h1, WORD x2, WORD y2, WORD w2, WORD h2);
+/* graf_mkstate's key state, the ST's bits (biosdefs.h).  This machine
+ * can only be asked about SHIFT while no key is down: POKEY reports the
+ * shift key on a line of its own and control only in the code of a key
+ * that is being held (src/vdi/vdi.c, vq_key_s). */
+#define MODE_RSHIFT 0x01
+#define MODE_LSHIFT 0x02
+#define MODE_CTRL   0x04
+#define MODE_ALT    0x08
+
 WORD graf_mkstate(WORD *mx, WORD *my, WORD *mb, WORD *ks);
+WORD graf_dragbox(WORD w, WORD h, WORD sx, WORD sy,
+                  WORD bx, WORD by, WORD bw, WORD bh, WORD *px, WORD *py);
 
 WORD wind_create(WORD kind, WORD x, WORD y, WORD w, WORD h);
 WORD wind_open(WORD handle, WORD x, WORD y, WORD w, WORD h);

@@ -444,6 +444,28 @@ WORD graf_shrinkbox(WORD x1, WORD y1, WORD w1, WORD h1, WORD x2, WORD y2, WORD w
     return graf_box(74, x1, y1, w1, h1, x2, y2, w2, h2);
 }
 
+/* The AES drags the outline for us and answers where it was let go:
+ * the desktop's drag-and-drop, and the same call the control manager
+ * moves a window with. */
+WORD graf_dragbox(WORD w, WORD h, WORD sx, WORD sy,
+                  WORD bx, WORD by, WORD bw, WORD bh, WORD *px, WORD *py)
+{
+    WORD r;
+
+    int_in[0] = w;
+    int_in[1] = h;
+    int_in[2] = sx;
+    int_in[3] = sy;
+    int_in[4] = bx;
+    int_in[5] = by;
+    int_in[6] = bw;
+    int_in[7] = bh;
+    r = aes(71, 8, 3, 0, 0);
+    *px = int_out[1];
+    *py = int_out[2];
+    return r;
+}
+
 WORD graf_mouse(WORD mode, const WORD *form)
 {
     int_in[0] = mode;

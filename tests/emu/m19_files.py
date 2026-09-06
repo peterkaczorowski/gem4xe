@@ -37,7 +37,7 @@ from deskref import Desktop, DROOT, GLOBES_SIZE, LEN_ZPATH  # noqa: E402
 from deskrsc import (FILEMENU, NFOLITEM, DELTITEM, QUITITEM,  # noqa: E402
                      MKOK, CDOK)
 from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE,  # noqa: E402
-                     F, B, K, RETURN, DCLICK, drive, compare)
+                     F, B, K, M, RETURN, DCLICK, drive, compare)
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
 from m12_file import Runner                 # noqa: E402
 from m13_alert import ALLOC                 # noqa: E402
@@ -62,8 +62,15 @@ CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME",
                           "altirra")
 NEWDIR = "NEWDIR"                           # the folder the gate makes
 KILLDIR = "SUB"                             # ...and the tree it deletes
+# What it drags into NEWDIR: the SUB tree, so the walk copies a folder,
+# the files in it and the folder inside that.  It has to be an item on
+# the window's FIRST row -- the second row's cells hang below the work
+# area, where a press belongs to the control manager and never reaches
+# the desktop at all.
 STOPS = ["desktop", "window-a", "new-folder", "made", "exists",
+         "picked", "copy-dialog", "copied",
          "selected", "delete", "deleted"]
+
 
 
 def inputs(memo):
@@ -108,11 +115,34 @@ def inputs(memo):
         # (STFOFAIL): RETURN takes its default button
         return [F(3), SHOT, K("RETURN", RETURN)]
 
+    def picked(d):
+        # SUB pressed and HELD: the AES waits out the double-click
+        # delay before it delivers the event, by which time a hand
+        # dragging is still on the button -- which is what makes it a
+        # drag rather than a click
+        pw = d.win_ontop()
+        src = d.item(pw, KILLDIR)
+        return [F(3), probe(d), SHOT, *path(d.pointer(), src), F(4),
+                B(1), F(2), M(src[0] + 8, src[1] + 4)]
+
+    def dragged(d):
+        # the outline dragged onto NEWDIR and let go there: a copy
+        pw = d.win_ontop()
+        dst = d.item(pw, NEWDIR)
+        return [F(2), *path(d.pointer(), dst), F(2), B(0)]
+
+    def copy_dialog(d):
+        # the same dialog a delete uses, wearing the copy's title
+        ok = d.centre(d.a_delete, CDOK)
+        return [F(3), B(0), F(2), SHOT, *path(d.pointer(), ok), F(4),
+                B(1), F(14), B(0)]
+
     def selected(d):
-        # one click selects SUB
+        # the window has been read again after the copy -- that is the
+        # shot -- and one click selects SUB
         pw = d.win_ontop()
         sub = d.item(pw, KILLDIR)
-        return [F(3), probe(d), *path(d.pointer(), sub), F(4), B(1),
+        return [F(3), probe(d), SHOT, *path(d.pointer(), sub), F(4), B(1),
                 F(2), B(0), F(14)]
 
     def chosen(d):
@@ -128,8 +158,9 @@ def inputs(memo):
     def deleted(d):
         return [F(3), probe(d), SHOT, *menu(d, FILEMENU, QUITITEM, False)[1:]]
 
-    return [desktop, window_a, new_folder, made, again, exists, selected,
-            chosen, delete, deleted]
+    return [desktop, window_a, new_folder, made, again, exists,
+            picked, dragged, copy_dialog,
+            selected, chosen, delete, deleted]
 
 
 def model(mark, brk, pointer, drvmap):
@@ -183,8 +214,24 @@ def check_disk(check, written):
         e = names[NEWDIR]
         check(e.is_dir, f"{NEWDIR} is on the disk but is not a folder")
         if e.is_dir:
-            left = [x.filename for x in fs.entries(NEWDIR)]
-            check(not left, f"the new folder is not empty: {left}")
+            # what the drag copied into it: the SUB tree, whole
+            got = {x.filename.upper(): x for x in fs.entries(NEWDIR)}
+            check(list(got) == [KILLDIR],
+                  f"{NEWDIR} holds {sorted(got)}, not just {KILLDIR}")
+            if KILLDIR in got:
+                inner = {x.filename.upper(): x
+                         for x in fs.entries(NEWDIR + ">" + KILLDIR)}
+                check(sorted(inner) == ["DEEP", "ONE.TXT", "TWO.DAT"],
+                      f"the copy of {KILLDIR} holds {sorted(inner)}")
+                for name, size in (("ONE.TXT", 4), ("TWO.DAT", 4)):
+                    if name in inner:
+                        check(inner[name].size == size,
+                              f"the copied {name} is {inner[name].size} "
+                              f"bytes, not {size}")
+                deep = [x.filename.upper() for x in
+                        fs.entries(NEWDIR + ">" + KILLDIR + ">DEEP")]
+                check(deep == ["THREE.TXT"],
+                      f"the copy of DEEP holds {deep}")
     check(KILLDIR not in names,
           f"{KILLDIR} is still in the image's root after the delete")
     print(f"  the image afterwards: {sorted(names)}")

@@ -89,7 +89,10 @@ NOBS_CDEL = 6
 # the one that says the resource is missing.
 STDISK, STTRASH = 0, 1
 (STNOMEM, STNOWIND, STDEFDIR, STDELFIL, STDELDIR, STFOFAIL, STFO8DEE,
- STDEEPPA) = range(2, 10)
+ STDEEPPA, STCPYFIL, STDISKFU, STNOTHIN, STSAMEPL) = range(2, 14)
+# The operation dialog's title, by operation: one dialog does the three,
+# and which one it is is a string of this file rather than a word of C.
+STDELTTL, STCPYTTL, STMOVTTL = 14, 15, 16
 
 # (index, name, text) in index order; the alerts as form_alert parses
 # them -- [icon][the lines, | between][the buttons]
@@ -104,6 +107,19 @@ ALERTS = [
     (STFO8DEE, "STFO8DEE", "[3][You cannot delete a folder|this far down "
                            "the|directory path.][ OK ]"),
     (STDEEPPA, "STDEEPPA", "[3][A folder in here has|too long a path.][ OK ]"),
+    (STCPYFIL, "STCPYFIL", "[1][That file cannot be copied.][ OK ]"),
+    (STDISKFU, "STDISKFU", "[1][There is no room on|the disk.][ OK ]"),
+    (STNOTHIN, "STNOTHIN", "[1][Nothing is selected|to copy or move.][ OK ]"),
+    (STSAMEPL, "STSAMEPL", "[1][That is where it|already is.][ OK ]"),
+]
+
+# The three titles the operation dialog wears, in index order after the
+# alerts.  Plain strings, not alerts: they go into the dialog's own
+# G_STRING, so a translation moves with the rest of the resource.
+TITLES = [
+    (STDELTTL, "STDELTTL", "DELETE FILE(S)"),
+    (STCPYTTL, "STCPYTTL", "COPY FILE(S)"),
+    (STMOVTTL, "STMOVTTL", "MOVE FILE(S)"),
 ]
 
 # ICONBLKs, in the order of the table; IG_* name them
@@ -126,10 +142,12 @@ INDICES = [
     ("DEVERSN", DEVERSN), ("DEOK", DEOK),
     ("ADMKDBOX", ADMKDBOX), ("MKNAME", MKNAME), ("MKOK", MKOK),
     ("MKCNCL", MKCNCL),
-    ("ADDELDIA", ADDELDIA), ("CDFILES", CDFILES), ("CDFOLDS", CDFOLDS),
+    ("ADDELDIA", ADDELDIA), ("CDTITLE", CDTITLE),
+    ("CDFILES", CDFILES), ("CDFOLDS", CDFOLDS),
     ("CDOK", CDOK), ("CDCNCL", CDCNCL),
     ("STDISK", STDISK), ("STTRASH", STTRASH),
     *[(name, i) for i, name, _ in ALERTS],
+    *[(name, i) for i, name, _ in TITLES],
     ("IB_HARD", IB_HARD), ("IB_FLOPPY", IB_FLOPPY), ("IB_TRASH", IB_TRASH),
     ("IB_FOLDER", IB_FOLDER), ("IB_APPL", IB_APPL), ("IB_DOCU", IB_DOCU),
 ]
@@ -279,7 +297,7 @@ def delete_tree(r):
         (NIL, CDTITLE, CDCNCL, G_BOX, NONE, OUTLINED, 0x00021100,
          ch(0), ch(0), ch(CDEL_W), ch(CDEL_H)),
         (CDFILES, NIL, NIL, G_STRING, NONE, NORMAL, r.string("DELETE FILE(S)"),
-         ch(10), ch(1), ch(14), ch(1)),
+         ch(10), ch(1), ch(14), ch(1)),        # replaced per operation
         (CDFOLDS, NIL, NIL, G_FTEXT, NONE, NORMAL,
          r.ted(" " * CDEL_FILES.count("_"), CDEL_FILES, "9"),
          ch(5), ch(3), ch(len(CDEL_FILES)), ch(1)),
@@ -304,6 +322,8 @@ def build():
     assert r.free_string("DISK") == STDISK
     assert r.free_string("TRASH") == STTRASH
     for i, name, text in ALERTS:
+        assert r.free_string(text) == i, (name, i)
+    for i, name, text in TITLES:
         assert r.free_string(text) == i, (name, i)
     for ib, ig in IB_TABLE:
         (mask, data, char, xchar, ychar, xicon, yicon, wicon, hicon,
