@@ -54,7 +54,7 @@ full-screen repaints.
 | `make bench` | — | GEMBench's tests on this machine, in milliseconds, not a gate (`docs/bench.md`) |
 
 `make test` runs them all. Per-phase notes, including the bugs and what caught
-them, are in `docs/`.
+them, are in [`docs/`](docs/README.md) — one document per phase, with an index.
 
 The 37 VDI opcodes the AES and the GEM Desktop actually use are complete. The
 AES object library draws, hit-tests and edits; `form_do` runs a dialog under

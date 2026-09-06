@@ -1,0 +1,29 @@
+# The host tests, on every push and pull request.
+#
+# Only these: they are the part of the suite that needs nothing but
+# Python 3 -- the reference models (tools/vdiref.py, tools/aesref.py,
+# tools/vbxeref.py), the .xex far-staging format, the disk file systems
+# and the APT partition table, all checked against their own rules.
+#
+# The emulated gates cannot run here and it is not worth pretending
+# otherwise: they need AltirraSDL (two of the patches in tools/altirra/
+# are still open pull requests upstream), the Calypsi 65816 tool chain,
+# which is a closed-source download, and Atari disk images that are
+# nobody's to distribute.  README.md, "Building", says how to run them
+# on a machine that has all three.
+name: host tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'    # 3.11+ for tomllib
+      - name: make test-host
+        run: make test-host
