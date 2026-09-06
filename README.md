@@ -311,7 +311,11 @@ stops.
 
 GPLv2 or later — see `COPYING`. The lineage is EmuTOS, which *is* the
 Caldera-GPL'd Digital Research GEM source carried forward in C, so the licence
-position is inherited rather than chosen.
+position is inherited rather than chosen. It is v2-or-later **throughout**,
+including the AES: EmuTOS's `vdi/*.c` say "version 2 or at your option any
+later version" and several of its `aes/*.c` name no version at all, and this
+tree resolves that silence the same way for every file rather than shipping
+under two licences.
 
 Where a file follows EmuTOS, its header names the donor file it follows, and
 the two trees are read side by side deliberately — this is a port, not a clean
