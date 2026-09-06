@@ -9,6 +9,7 @@
 #include "vdi.h"
 #include "pointer.h"
 #include "font.h"
+#include "sys/zwin.h"
 #include "../vbxe/vbxe.h"
 #include "../sys/irq.h"
 #include "../sys/zwin.h"
@@ -60,6 +61,17 @@ static const uint8_t gem_rgb[16 * 3] = {
 };
 
 #define HW(pen) ((WORD)map_col[(pen) & 0x0F])
+
+/* And back: the VDI pen that maps to a hardware index.  A search, not a
+ * second table -- it is wanted once per v_get_pixel and nowhere hot. */
+static WORD rev_col(WORD hw)
+{
+    WORD i;
+    for (i = 0; i < 16; i++)
+        if (map_col[i] == (uint8_t)hw)
+            return i;
+    return 0;
+}
 
 /* ---------------------------------------------------------------------- */
 /* helpers                                                                */
@@ -1164,11 +1176,36 @@ static void draw_glyph_cpu(WORD ch, WORD cx, WORD cy)
  * GEM has no separate text background colour -- replace mode uses pen 0.
  * XOR and erase modes go pixel by pixel; the AES draws text in replace and
  * transparent mode only, so those two are the ones the blitter serves. */
+/* Where the point v_gtext is given puts the cell's top-left corner, given
+ * the alignment vst_alignment set.  The horizontal is the string's width,
+ * the vertical the font's own metrics: the ST's numbering, and EmuTOS's
+ * gsx_tblt does the same arithmetic. */
+static WORD align_x(WORD x, WORD n)
+{
+    switch (vwk.h_align) {
+    case TA_CENTRE: return (WORD)(x - n * FONT_W / 2);
+    case TA_RIGHT:  return (WORD)(x - n * FONT_W);
+    default:        return x;
+    }
+}
+
+static WORD align_y(WORD y)
+{
+    switch (vwk.v_align) {
+    case TA_HALF:    return (WORD)(y - FONT_HALF);
+    case TA_ASCENT:  return (WORD)(y - FONT_ASCENT);
+    case TA_BOTTOM:  return (WORD)(y - FONT_H + 1);
+    case TA_DESCENT: return (WORD)(y - FONT_TOP - FONT_DESCENT);
+    case TA_TOP:     return y;
+    default:         return (WORD)(y - FONT_TOP);   /* the baseline */
+    }
+}
+
 static void vdi_v_gtext(void)
 {
-    WORD x = ptsin[0], y = ptsin[1];
     WORD n = contrl[3], i;
-    WORD cy = (WORD)(y - FONT_TOP);
+    WORD x = align_x(ptsin[0], n), y = ptsin[1];
+    WORD cy = align_y(y);
     WORD mode = (WORD)(vwk.wrt_mode + 1);
     WORD blittable = (mode == MD_REPLACE || mode == MD_TRANS);
 
@@ -1190,6 +1227,34 @@ static void vdi_v_gtext(void)
         } else {
             draw_glyph_cpu(intin[i], cx, cy);
         }
+        /* Thickened: the same glyph again, one pixel right, drawn
+         * transparently so the two overlap into a heavier letter.  It
+         * costs a second blit a glyph and nothing else. */
+        if ((vwk.text_effects & TXT_THICKEN) && cx + 1 + FONT_W <= SCR_W) {
+            WORD bx = (WORD)(cx + 1);
+            WORD fits = (cy >= 0 && cy + FONT_H <= SCR_H);
+            if (fits && vwk.clip)
+                fits = (bx >= vwk.xmn_clip && cy >= vwk.ymn_clip &&
+                        bx + FONT_W - 1 <= vwk.xmx_clip &&
+                        cy + FONT_H - 1 <= vwk.ymx_clip);
+            if (fits && blittable) {
+                draw_glyph(intin[i], bx, cy, HW(vwk.text_color), 0);
+                blit_run();
+            } else {
+                draw_glyph_cpu(intin[i], bx, cy);
+            }
+        }
+    }
+    /* Underlined: the bottom row of the cells the string covers, in the
+     * text colour, drawn as a rectangle one pixel high. */
+    if ((vwk.text_effects & TXT_UNDERLINE) && n > 0) {
+        /* SOLID, in the text colour: an underline is text, not a filled
+         * area, so it does not take the fill pattern. */
+        WORD w = (WORD)(n * FONT_W + ((vwk.text_effects & TXT_THICKEN) ? 1 : 0));
+        WORD x2 = (WORD)(x + w - 1), yy = (WORD)(cy + FONT_H - 1);
+        WORD a = x, b = yy, c = x2, d = yy;
+        if (clip_rect(&a, &b, &c, &d))
+            paint_rect(a, b, c, d, vwk.text_color);
     }
 }
 
@@ -1242,6 +1307,29 @@ static void fill_workout(void)
 }
 
 /* The palette in HARDWARE order: entry map_col[pen] gets pen's colour. */
+/* What vs_color was ASKED for, 0..1000 a channel, so vq_color can answer
+ * the request as well as what the hardware made of it.  In the banked
+ * window (src/sys/zwin.h) because bank $00's own data is spoken for, and
+ * read-mostly is exactly what it is for. */
+ZWIN static WORD pal_req[16][3];
+
+/* 0..1000 to the eight bits the palette takes, and back.  VBXE keeps
+ * seven significant bits and copies the top one down into the eighth, so
+ * what a caller reads back as the ACTUAL colour is not always what it
+ * asked for -- tools/vbxeref.py's dac() is the same arithmetic. */
+static uint8_t col_to_hw(WORD v)
+{
+    if (v < 0) v = 0;
+    if (v > 1000) v = 1000;
+    return (uint8_t)(((int32_t)v * 255 + 500) / 1000);
+}
+
+static WORD hw_to_col(uint8_t h)
+{
+    uint8_t dac = (uint8_t)((h & 0xFE) | ((h >> 7) & 1));
+    return (WORD)(((int32_t)dac * 1000 + 127) / 255);
+}
+
 static void load_palette(void)
 {
     uint8_t hw[16 * 3];
@@ -1253,6 +1341,48 @@ static void load_palette(void)
         hw[h * 3 + 2] = gem_rgb[pen * 3 + 2];
     }
     vbxe_palette(1, 0, hw, 16);
+    for (pen = 0; pen < 16; pen++) {
+        pal_req[pen][0] = hw_to_col(gem_rgb[pen * 3]);
+        pal_req[pen][1] = hw_to_col(gem_rgb[pen * 3 + 1]);
+        pal_req[pen][2] = hw_to_col(gem_rgb[pen * 3 + 2]);
+    }
+}
+
+/* vs_color: one entry of the palette, in the VDI's thousandths.  An index
+ * the device does not have is ignored, which is what the donor does. */
+static void vdi_vs_color(void)
+{
+    uint8_t rgb[3];
+    WORD i = intin[0], k;
+
+    if (i < 0 || i > 15)
+        return;
+    for (k = 0; k < 3; k++) {
+        WORD v = intin[k + 1];
+        pal_req[i][k] = (WORD)(v < 0 ? 0 : v > 1000 ? 1000 : v);
+        rgb[k] = col_to_hw(v);
+    }
+    vbxe_palette(1, (uint8_t)HW(i), rgb, 1);
+}
+
+/* vq_color: what was asked for (flag 0) or what the hardware made of it
+ * (flag 1).  They differ because the DAC keeps seven bits. */
+static void vdi_vq_color(void)
+{
+    WORD i = intin[0], k;
+
+    intout[0] = i;
+    if (i < 0 || i > 15) {
+        intout[0] = -1;
+        intout[1] = intout[2] = intout[3] = 0;
+    } else if (intin[1]) {
+        for (k = 0; k < 3; k++)
+            intout[k + 1] = hw_to_col(col_to_hw(pal_req[i][k]));
+    } else {
+        for (k = 0; k < 3; k++)
+            intout[k + 1] = pal_req[i][k];
+    }
+    contrl[4] = 4;
 }
 
 /* ---- workstations ----------------------------------------------------- */
@@ -1318,6 +1448,13 @@ static void init_wk(WORD handle)
     top = (vwk.fill_style == FIS_PATTERN) ? MAX_FILL_PATTERN : MAX_FILL_HATCH;
     l = intin[8];  vwk.fill_index = (WORD)(((l < 1 || l > top) ? 1 : l) - 1);
     l = intin[9];  vwk.fill_color = (l < 0 || l > 15) ? 1 : l;
+    /* work_in[3] and [4] are the marker: the type, and its colour. */
+    l = intin[3];
+    vwk.mark_index = (WORD)(((l < MIN_MARK_STYLE || l > MAX_MARK_STYLE)
+                             ? DEF_MARK_STYLE : l) - 1);
+    l = intin[4];  vwk.mark_color = (l < 0 || l > 15) ? 1 : l;
+    vwk.mark_height = DEF_MKHT;
+    vwk.mark_scale  = 1;
     st_fl_ptr();
 }
 
@@ -1644,6 +1781,347 @@ static void vdi_v_pline(void)
     for (i = 0; i + 1 < n; i++)
         draw_line(ptsin[i * 2], ptsin[i * 2 + 1],
                   ptsin[i * 2 + 2], ptsin[i * 2 + 3]);
+}
+
+/* ---------------------------------------------------------------------- */
+/* filled areas                                                           */
+/* ---------------------------------------------------------------------- */
+
+/* A polyline over n points held as x,y pairs -- v_pline's loop, but over an
+ * array the caller names rather than over ptsin. */
+static void polyline_pts(const WORD *pt, WORD n)
+{
+    WORD i;
+    for (i = 0; i + 1 < n; i++)
+        draw_line(pt[i * 2], pt[i * 2 + 1], pt[i * 2 + 2], pt[i * 2 + 3]);
+}
+
+/* The perimeter of a filled area is SOLID and in the FILL colour, whatever
+ * the line attributes say: the donor forces LN_MASK to $FFFF and passes
+ * fill_color, which here is a save and a restore. */
+static void fill_perimeter(const WORD *pt, WORD n)
+{
+    WORD sv_color = vwk.line_color, sv_index = vwk.line_index;
+    vwk.line_color = vwk.fill_color;
+    vwk.line_index = 1;                     /* solid */
+    polyline_pts(pt, n);
+    vwk.line_color = sv_color;
+    vwk.line_index = sv_index;
+}
+
+/* clc_flit's edge buffer: the x where each edge crosses one scan line.
+ * ZWIN because bank $00's data is spoken for and this is touched only from
+ * the driver's own calls. */
+#define MAX_INTERSECT 32
+ZWIN static WORD fill_buf[MAX_INTERSECT];
+
+/* The donor's bubble sort.  There are almost always exactly two
+ * intersections, which is why a bubble sort is the right one. */
+static void bub_sort(WORD *buf, WORD count)
+{
+    WORD i, j;
+
+    for (i = (WORD)(count - 1); i > 0; i--) {
+        WORD *p = buf;
+        for (j = 0; j < i; j++) {
+            WORD v = *p++;
+            if (v > *p) {
+                *(p - 1) = *p;
+                *p = v;
+            }
+        }
+    }
+}
+
+/* One scan line of a polygon's interior, clipped the way the donor clips
+ * it -- the clip rectangle first, then the screen, which on the donor its
+ * device layer applies for it. */
+static void fill_span(WORD x1, WORD x2, WORD y)
+{
+    if (vwk.clip) {
+        if (x1 < vwk.xmn_clip) {
+            if (x2 < vwk.xmn_clip)
+                return;                     /* entirely left of the clip */
+            x1 = vwk.xmn_clip;
+        }
+        if (x2 > vwk.xmx_clip) {
+            if (x1 > vwk.xmx_clip)
+                return;                     /* entirely right of it */
+            x2 = vwk.xmx_clip;
+        }
+    }
+    if (x2 < 0 || x1 > SCR_W - 1)
+        return;
+    if (x1 < 0) x1 = 0;
+    if (x2 > SCR_W - 1) x2 = SCR_W - 1;
+    fill_rect(x1, y, x2, y, vwk.fill_color);
+}
+
+/* clc_flit -- for each scan line, where every edge crosses it, sorted, and
+ * filled in pairs (Sutherland and Hodgman).  The arithmetic is the donor's
+ * down to the rounding: the +1 before the >>1 is what puts the boundary
+ * pixel INSIDE the fill, which is what TOS does and what a perimeter drawn
+ * afterwards then lands on top of.
+ *
+ * `start` is the bottom scan line and `end` is one ABOVE the top one: the
+ * loop stops before it, so a polygon does not paint its own topmost row.
+ * That is the donor's rule, not a rounding accident, and a caller that
+ * abuts two polygons depends on it. */
+static void clc_flit(const WORD *pt, WORD vectors, WORD start, WORD end)
+{
+    WORD y, i;
+
+    for (y = start; y > end; y--) {
+        WORD n = 0;
+
+        for (i = 0; i < vectors; i++) {
+            WORD y1 = pt[i * 2 + 1], y2 = pt[i * 2 + 3];
+            WORD dy = (WORD)(y2 - y1), dy1, dy2;
+
+            if (!dy)                        /* horizontal: ignored */
+                continue;
+            dy1 = (WORD)(y - y1);
+            dy2 = (WORD)(y - y2);
+            /* same sign at both ends means the scan line misses the edge */
+            if ((dy1 ^ dy2) >= 0)
+                continue;
+            if (n >= MAX_INTERSECT)
+                break;
+            {
+                WORD x1 = pt[i * 2], x2 = pt[i * 2 + 2], m;
+                int32_t dx = (int32_t)(x2 - x1) * 2;   /* doubled, to round */
+
+                if (dx < 0) {
+                    m = (WORD)((int32_t)dy2 * dx / dy);
+                    fill_buf[n++] = (WORD)(((m + 1) >> 1) + x2);
+                } else {
+                    m = (WORD)((int32_t)dy1 * dx / dy);
+                    fill_buf[n++] = (WORD)(((m + 1) >> 1) + x1);
+                }
+            }
+        }
+        if (n < 2)
+            continue;
+        bub_sort(fill_buf, n);
+        for (i = 0; i + 1 < n; i += 2)
+            fill_span(fill_buf[i], fill_buf[i + 1], y);
+    }
+}
+
+/* polygon -- the interior, then the perimeter if vsf_perimeter asked for
+ * one.  pt must have room for ONE MORE point: the polygon is closed in
+ * place, as the donor closes it. */
+static void polygon(WORD *pt, WORD n)
+{
+    WORD i, miny, maxy;
+
+    if (n < 2)
+        return;
+    miny = maxy = pt[1];
+    for (i = 1; i < n; i++) {
+        WORD k = pt[i * 2 + 1];
+        if (k < miny)
+            miny = k;
+        else if (k > maxy)
+            maxy = k;
+    }
+    if (vwk.clip) {
+        if (maxy < vwk.ymn_clip || miny > vwk.ymx_clip)
+            return;                         /* wholly outside the clip */
+        if (miny < vwk.ymn_clip)
+            miny = (WORD)(vwk.ymn_clip - 1);
+        if (maxy > vwk.ymx_clip)
+            maxy = vwk.ymx_clip;
+    }
+    /* and the screen, which the donor leaves to its device layer */
+    if (maxy < 0 || miny > SCR_H - 1)
+        return;
+    if (miny < -1) miny = -1;
+    if (maxy > SCR_H - 1) maxy = SCR_H - 1;
+
+    pt[n * 2]     = pt[0];                  /* close it */
+    pt[n * 2 + 1] = pt[1];
+    clc_flit(pt, n, maxy, miny);
+    if (vwk.fill_per)
+        fill_perimeter(pt, (WORD)(n + 1));
+}
+
+static void vdi_v_fillarea(void)
+{
+    WORD n = contrl[1];
+
+    if (n > PTSIN_SIZE / 2 - 1)
+        n = PTSIN_SIZE / 2 - 1;             /* room to close it in place */
+    polygon(ptsin, n);
+}
+
+/* ---------------------------------------------------------------------- */
+/* markers                                                                */
+/* ---------------------------------------------------------------------- */
+
+/* The six GEM markers, in the donor's own encoding: a count of polylines,
+ * then for each of them a count of points and that many x,y offsets from
+ * the marker's centre, in units the marker scale multiplies. */
+static const WORD m_dot[]    = { 1, 2, 0, 0, 0, 0 };
+static const WORD m_plus[]   = { 2, 2, 0, -3, 0, 3, 2, -4, 0, 4, 0 };
+static const WORD m_star[]   = { 3, 2, 0, -3, 0, 3, 2, 3, 2, -3, -2,
+                                 2, 3, -2, -3, 2 };
+static const WORD m_square[] = { 1, 5, -4, -3, 4, -3, 4, 3, -4, 3, -4, -3 };
+static const WORD m_cross[]  = { 2, 2, -4, -3, 4, 3, 2, -4, 3, 4, -3 };
+static const WORD m_dmnd[]   = { 1, 5, -4, 0, 0, -3, 4, 0, 0, 3, -4, 0 };
+
+static const WORD * const markers[6] = {
+    m_dot, m_plus, m_star, m_square, m_cross, m_dmnd
+};
+
+/* v_pmarker: each point gets the current marker, drawn as the polylines
+ * that define it -- solid, in the marker colour, at the marker scale.
+ *
+ * One departure from the donor: it also sets vwk->clip = 1 and never puts
+ * it back, so a program that draws one marker finds clipping switched on
+ * for good.  That is a bug in the ROM, not a contract, and gem4xe leaves
+ * the workstation's clip state alone. */
+static void vdi_v_pmarker(void)
+{
+    WORD sv_index = vwk.line_index, sv_color = vwk.line_color;
+    WORD npts = contrl[1], i, j, k;
+    WORD seg[10];
+
+    vwk.line_index = 1;                     /* solid */
+    vwk.line_color = vwk.mark_color;
+
+    for (i = 0; i < npts; i++) {
+        WORD cx = ptsin[i * 2], cy = ptsin[i * 2 + 1];
+        const WORD *m = markers[vwk.mark_index];
+        WORD lines = *m++;
+
+        for (j = 0; j < lines; j++) {
+            WORD n = *m++;
+            for (k = 0; k < n && k < 5; k++) {
+                seg[k * 2]     = (WORD)(cx + vwk.mark_scale * *m++);
+                seg[k * 2 + 1] = (WORD)(cy + vwk.mark_scale * *m++);
+            }
+            polyline_pts(seg, n);
+        }
+    }
+    vwk.line_index = sv_index;
+    vwk.line_color = sv_color;
+}
+
+static void vdi_vsm_type(void)
+{
+    WORD v = intin[0];
+
+    if (v < MIN_MARK_STYLE || v > MAX_MARK_STYLE)
+        v = DEF_MARK_STYLE;
+    vwk.mark_index = (WORD)(v - 1);
+    intout[0] = v;
+    contrl[4] = 1;
+}
+
+/* vsm_height takes a height in ptsin and answers with the cell the marker
+ * will really occupy: the scale is a whole multiple of the nominal height,
+ * so what comes back is rarely what was asked for. */
+static void vdi_vsm_height(void)
+{
+    WORD h = ptsin[1];
+
+    if (h < DEF_MKHT)
+        h = DEF_MKHT;
+    else if (h > MAX_MKHT)
+        h = MAX_MKHT;
+    vwk.mark_height = h;
+    vwk.mark_scale = (WORD)((h + DEF_MKHT / 2) / DEF_MKHT);
+    ptsout[0] = (WORD)(vwk.mark_scale * DEF_MKWD);
+    ptsout[1] = (WORD)(vwk.mark_scale * DEF_MKHT);
+    contrl[2] = 1;
+}
+
+static void vdi_vsm_color(void)
+{
+    WORD v = intin[0];
+
+    if (v < 0 || v > 15) v = 1;
+    vwk.mark_color = v;
+    intout[0] = v;
+    contrl[4] = 1;
+}
+
+/* ---------------------------------------------------------------------- */
+/* the inquiries an application makes about what it set                   */
+/* ---------------------------------------------------------------------- */
+
+static void vdi_vql_attributes(void)
+{
+    intout[0] = vwk.line_index;
+    intout[1] = vwk.line_color;
+    intout[2] = (WORD)(vwk.wrt_mode + 1);
+    ptsout[0] = vwk.line_width;
+    ptsout[1] = 0;
+    contrl[2] = 1;
+    contrl[4] = 3;
+}
+
+/* The donor answers this one with mark_index, which is the type MINUS ONE
+ * -- an off-by-one in the ROM.  The manual says the marker type, and a
+ * caller that feeds the answer back to vsm_type has to get the same marker
+ * back, so this reports the type. */
+static void vdi_vqm_attributes(void)
+{
+    intout[0] = (WORD)(vwk.mark_index + 1);
+    intout[1] = vwk.mark_color;
+    intout[2] = (WORD)(vwk.wrt_mode + 1);
+    ptsout[0] = 0;
+    ptsout[1] = vwk.mark_height;
+    contrl[2] = 1;
+    contrl[4] = 3;
+}
+
+static void vdi_vqf_attributes(void)
+{
+    intout[0] = vwk.fill_style;
+    intout[1] = vwk.fill_color;
+    intout[2] = (WORD)(vwk.fill_index + 1);
+    intout[3] = (WORD)(vwk.wrt_mode + 1);
+    intout[4] = vwk.fill_per;
+    contrl[4] = 5;
+}
+
+static void vdi_vsf_perimeter(void)
+{
+    vwk.fill_per = (WORD)(intin[0] != 0);
+    intout[0] = vwk.fill_per;
+    contrl[4] = 1;
+}
+
+/* vst_rotation: this driver has one direction.  Answering with what was
+ * applied -- zero -- is how a caller finds that out. */
+static void vdi_vst_rotation(void)
+{
+    intout[0] = 0;
+    contrl[4] = 1;
+}
+
+/* v_get_pixel: the one primitive that reads the screen back a pixel at a
+ * time.  intout[0] is the hardware index the plane holds, intout[1] the
+ * VDI pen that maps to it -- which is what a program comparing against
+ * vsf_color's answer wants.  A point off the screen reads as 0.
+ *
+ * The mouse cursor is drawn INTO the screen here (it is a blit, not a
+ * sprite), so a pixel under a visible cursor reads the cursor.  That is
+ * true of the donor on an ST as well. */
+static void vdi_v_get_pixel(void)
+{
+    WORD x = ptsin[0], y = ptsin[1], hw = 0;
+
+    if (x >= 0 && y >= 0 && x < SCR_W && y < SCR_H) {
+        uint8_t b = vram_read8(VR_SCREEN0 + (uint32_t)y * SCR_STRIDE
+                               + (uint32_t)(x >> 1));
+        hw = (WORD)((x & 1) ? (b & 0x0F) : (b >> 4));
+    }
+    intout[0] = hw;
+    intout[1] = rev_col(hw);
+    contrl[4] = 2;
 }
 
 /* attribute setters -- each returns the value actually selected */
@@ -2177,6 +2655,73 @@ static void vdi_vqt_name(void)
     contrl[4] = 33;
 }
 
+/* vst_alignment.  The pair chosen is what comes back, and an out-of-range
+ * request becomes the default -- the donor's rule, and the reason a caller
+ * must use the answer rather than the request. */
+static void vdi_vst_alignment(void)
+{
+    vwk.h_align = (WORD)(intin[0] >= TA_LEFT && intin[0] <= TA_RIGHT
+                         ? intin[0] : TA_LEFT);
+    vwk.v_align = (WORD)(intin[1] >= TA_BASE && intin[1] <= TA_TOP
+                         ? intin[1] : TA_BASE);
+    intout[0] = vwk.h_align;
+    intout[1] = vwk.v_align;
+    contrl[4] = 2;
+}
+
+/* vst_effects.  Two of the six are real here -- thickened and underlined,
+ * which cost a second blit and a rectangle -- and the answer is what was
+ * APPLIED, which is how a GEM application learns what a device can do. */
+static void vdi_vst_effects(void)
+{
+    vwk.text_effects = (WORD)(intin[0] & TXT_DONE);
+    intout[0] = vwk.text_effects;
+    contrl[4] = 1;
+}
+
+/* vst_point.  One face, so the point size is the one it has; as with
+ * vst_height, what comes back is what the caller must use. */
+static void vdi_vst_point(void)
+{
+    intout[0] = FONT_POINT;
+    ptsout[0] = FONT_W;
+    ptsout[1] = FONT_TOP;
+    ptsout[2] = FONT_W;
+    ptsout[3] = FONT_H;
+    contrl[2] = 2;
+    contrl[4] = 1;
+}
+
+/* vqt_extent: the box the string would cover, as four corners going
+ * anticlockwise from the origin -- which for unrotated text is the
+ * rectangle n cells wide and one cell high.  A word processor cannot
+ * break a line without this. */
+static void vdi_vqt_extent(void)
+{
+    WORD w = (WORD)(contrl[3] * FONT_W
+                    + ((vwk.text_effects & TXT_THICKEN) ? 1 : 0));
+
+    ptsout[0] = 0;      ptsout[1] = 0;
+    ptsout[2] = w;      ptsout[3] = 0;
+    ptsout[4] = w;      ptsout[5] = FONT_H;
+    ptsout[6] = 0;      ptsout[7] = FONT_H;
+    contrl[2] = 4;
+}
+
+/* vqt_width: one character's cell and the two deltas that would carry a
+ * proportional face's overhang.  This one is monospaced, so the cell is
+ * the width and both deltas are zero; a character the font does not have
+ * would answer -1, and this font has all 256. */
+static void vdi_vqt_width(void)
+{
+    intout[0] = intin[0];
+    ptsout[0] = FONT_W;
+    ptsout[1] = 0;
+    ptsout[2] = 0;
+    contrl[2] = 3;
+    contrl[4] = 1;
+}
+
 /* vqt_attributes -- the AES asks for the current text settings before drawing
  * a string, rather than tracking them itself. */
 static void vdi_vqt_attributes(void)
@@ -2184,8 +2729,8 @@ static void vdi_vqt_attributes(void)
     intout[0] = 1;                  /* font id: the system font */
     intout[1] = vwk.text_color;
     intout[2] = 0;                  /* rotation: none supported */
-    intout[3] = 0;                  /* horizontal alignment: left */
-    intout[4] = 0;                  /* vertical alignment: baseline */
+    intout[3] = vwk.h_align;        /* what vst_alignment set */
+    intout[4] = vwk.v_align;
     intout[5] = (WORD)(vwk.wrt_mode + 1);
     ptsout[0] = FONT_W;
     ptsout[1] = FONT_TOP;           /* as vst_height: the font's top */
@@ -2260,23 +2805,23 @@ static const VDI_OP jmptb1[] = {
     vdi_v_opnwk,     /*  1 */  v_nop,           /*  2 v_clswk        */
     vdi_v_clrwk,     /*  3 */  v_nop,           /*  4 v_updwk  (nop) */
     vdi_v_escape,    /*  5 */                   vdi_v_pline,     /*  6 */
-    v_nop,           /*  7 v_pmarker */         vdi_v_gtext,     /*  8 */
-    v_nop,           /*  9 v_fillarea */        v_nop,           /* 10 cellarray (nop) */
+    vdi_v_pmarker,   /*  7 */                   vdi_v_gtext,     /*  8 */
+    vdi_v_fillarea,  /*  9 */                   v_nop,           /* 10 cellarray (nop) */
     v_nop,           /* 11 v_gdp */             vdi_vst_height,  /* 12 */
-    v_nop,           /* 13 vst_rotation */      v_nop,           /* 14 vs_color */
+    vdi_vst_rotation,/* 13 */                   vdi_vs_color,    /* 14 */
     vdi_vsl_type,    /* 15 */                   vdi_vsl_width,   /* 16 */
-    vdi_vsl_color,   /* 17 */                   v_nop,           /* 18 vsm_type */
-    v_nop,           /* 19 vsm_height */        v_nop,           /* 20 vsm_color */
+    vdi_vsl_color,   /* 17 */                   vdi_vsm_type,    /* 18 */
+    vdi_vsm_height,  /* 19 */                   vdi_vsm_color,   /* 20 */
     vdi_vst_font,    /* 21 */                   vdi_vst_color,   /* 22 */
     vdi_vsf_interior,/* 23 */                   vdi_vsf_style,   /* 24 */
-    vdi_vsf_color,   /* 25 */                   v_nop,           /* 26 vq_color */
+    vdi_vsf_color,   /* 25 */                   vdi_vq_color,    /* 26 */
     v_nop,           /* 27 vq_cellarray (nop)*/ vdi_v_locator,   /* 28 */
     v_nop,           /* 29 valuator (nop) */    vdi_v_choice,    /* 30 */
     vdi_v_string,    /* 31 */                   vdi_vswr_mode,   /* 32 */
     vdi_vsin_mode,   /* 33 */                   v_nop,           /* 34 (does not exist) */
-    v_nop,           /* 35 vql_attributes */    v_nop,           /* 36 vqm_attributes */
-    v_nop,           /* 37 vqf_attributes */    vdi_vqt_attributes, /* 38 */
-    v_nop            /* 39 vst_alignment */
+    vdi_vql_attributes, /* 35 */                vdi_vqm_attributes, /* 36 */
+    vdi_vqf_attributes, /* 37 */                vdi_vqt_attributes, /* 38 */
+    vdi_vst_alignment /* 39 */
 };
 
 static const VDI_OP jmptb2[] = {
@@ -2284,10 +2829,10 @@ static const VDI_OP jmptb2[] = {
     vdi_v_clsvwk,    /* 101 */
     vdi_vq_extnd,    /* 102 */
     v_nop,           /* 103 v_contourfill (nop) */
-    v_nop,           /* 104 vsf_perimeter */
-    v_nop,           /* 105 v_get_pixel (nop) */
-    v_nop,           /* 106 vst_effects */
-    v_nop,           /* 107 vst_point */
+    vdi_vsf_perimeter, /* 104 */
+    vdi_v_get_pixel, /* 105 */
+    vdi_vst_effects, /* 106 */
+    vdi_vst_point,   /* 107 */
     v_nop,           /* 108 vsl_ends */
     vdi_vro_cpyfm,   /* 109 */
     vdi_vr_trnfm,    /* 110 */
@@ -2296,8 +2841,8 @@ static const VDI_OP jmptb2[] = {
     vdi_vsl_udsty,   /* 113 */
     vdi_vr_recfl,    /* 114 */
     vdi_vqin_mode,   /* 115 */
-    v_nop,           /* 116 vqt_extent */
-    v_nop,           /* 117 vqt_width */
+    vdi_vqt_extent,  /* 116 */
+    vdi_vqt_width,   /* 117 */
     vdi_vex_timv,    /* 118 */
     vdi_vst_load_fonts,  /* 119 */
     vdi_vst_unload_fonts,/* 120 */

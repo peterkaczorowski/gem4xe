@@ -22,7 +22,12 @@ import vbxeref                         # noqa: E402
 import vdiref                          # noqa: E402
 import symfile                         # noqa: E402
 from vdiref import (V_CLRWK, V_PLINE, VSL_TYPE, VSL_COLOR, VSF_INTERIOR,      # noqa: E402
-                    VSF_COLOR, VR_RECFL, VS_CLIP, VRO_CPYFM, V_GTEXT)
+                    VSF_COLOR, VR_RECFL, VS_CLIP, VRO_CPYFM, V_GTEXT,
+                    VS_COLOR, VQ_COLOR, VST_ALIGNMENT, VST_EFFECTS,
+                    VST_POINT, VQT_EXTENT, VQT_WIDTH,
+                    V_FILLAREA, V_PMARKER, VSM_TYPE, VSM_HEIGHT, VSM_COLOR,
+                    VQL_ATTRIBUTES, VQM_ATTRIBUTES, VQF_ATTRIBUTES,
+                    VSF_PERIMETER, VST_ROTATION, V_GET_PIXEL)
 from vdiref import (VST_COLOR, VSWR_MODE, VRT_CPYFM, pack_mfdb,           # noqa: E402
                      VSC_FORM, V_SHOW_C, V_HIDE_C, V_LOCATOR,
                      VSIN_MODE, VQIN_MODE, VEX_TIMV, VSL_UDSTY, VQ_MOUSE,
@@ -260,6 +265,154 @@ CASES = [
     ("text, transparent, black on white", [
         (VSWR_MODE, (), (2,)), (VST_COLOR, (), (1,)),
         (V_GTEXT, (16, 20), tuple(b"GEM for the Atari 8-bit"))]),
+
+    # -- what an application asks the VDI for, and the AES never does ----
+    ("fill: a triangle, a concave polygon, and one that crosses itself", [
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (1,)),
+        (VSF_PERIMETER, (), (0,)),
+        (V_FILLAREA, (60, 20, 20, 100, 100, 100), ()),
+        # a chevron: two spans on the scan lines through the notch
+        (VSF_COLOR, (), (2,)),
+        (V_FILLAREA, (140, 20, 180, 100, 220, 20, 220, 110, 140, 110), ()),
+        # a bow tie: the edges cross, so the middle is two spans
+        (VSF_COLOR, (), (4,)),
+        (V_FILLAREA, (260, 20, 380, 110, 380, 20, 260, 110), ()),
+        # and a degenerate one: every point on the same row
+        (VSF_COLOR, (), (3,)),
+        (V_FILLAREA, (420, 60, 500, 60, 460, 60), ())]),
+
+    ("fill: the perimeter is the FILL colour, over the edge pixels", [
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (8,)),
+        (VSL_COLOR, (), (2,)), (VSL_TYPE, (), (3,)),   # neither is used
+        (VSF_PERIMETER, (), (1,)),
+        (V_FILLAREA, (60, 20, 20, 100, 100, 100), ()),
+        # hollow with a perimeter: the outline alone, in the fill colour
+        (VSF_INTERIOR, (), (0,)), (VSF_COLOR, (), (1,)),
+        (V_FILLAREA, (180, 20, 140, 100, 220, 100), ()),
+        # and the line attributes must be back as they were
+        (VQL_ATTRIBUTES,), (VQF_ATTRIBUTES,)]),
+
+    ("fill: patterned and hatched interiors take the screen anchor", [
+        (VSF_INTERIOR, (), (2,)), (VSF_STYLE, (), (4,)), (VSF_COLOR, (), (1,)),
+        (VSF_PERIMETER, (), (0,)),
+        (V_FILLAREA, (100, 20, 20, 120, 180, 120), ()),
+        (VSF_INTERIOR, (), (3,)), (VSF_STYLE, (), (2,)), (VSF_COLOR, (), (2,)),
+        (V_FILLAREA, (300, 20, 220, 120, 380, 120), ()),
+        (VSF_INTERIOR, (), (4,)), (VSF_UDPAT, (), UD_DIAG),
+        (VSF_COLOR, (), (4,)),
+        (V_FILLAREA, (500, 20, 420, 120, 580, 120), ())]),
+
+    ("fill: clipped, off the top, and off both side edges", [
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (1,)),
+        (VSF_PERIMETER, (), (1,)),
+        (VS_CLIP, (100, 40, 300, 160), (1,)),
+        (V_FILLAREA, (200, 10, 60, 200, 340, 200), ()),
+        (VS_CLIP, (0, 0, 0, 0), (0,)),
+        # off the top edge and off the left edge, unclipped
+        (VSF_COLOR, (), (2,)),
+        (V_FILLAREA, (420, -40, 380, 60, 460, 60), ()),
+        (VSF_COLOR, (), (4,)),
+        (V_FILLAREA, (-30, 150, 60, 120, 60, 200), ()),
+        (VSF_COLOR, (), (3,)),
+        (V_FILLAREA, (620, 150, 700, 120, 700, 200), ())]),
+
+    ("markers: all six, at three scales, coloured and clipped", [
+        (VSM_COLOR, (), (1,)),
+        (VSM_TYPE, (), (1,)), (V_PMARKER, (40, 30), ()),
+        (VSM_TYPE, (), (2,)), (V_PMARKER, (80, 30), ()),
+        (VSM_TYPE, (), (3,)), (V_PMARKER, (120, 30), ()),
+        (VSM_TYPE, (), (4,)), (V_PMARKER, (160, 30), ()),
+        (VSM_TYPE, (), (5,)), (V_PMARKER, (200, 30), ()),
+        (VSM_TYPE, (), (6,)), (V_PMARKER, (240, 30), ()),
+        # several points in one call, at scale 2, in another colour
+        (VSM_HEIGHT, (0, 22), ()), (VSM_COLOR, (), (2,)), (VSM_TYPE, (), (3,)),
+        (V_PMARKER, (40, 90, 100, 90, 160, 90, 220, 90), ()),
+        # a height below the minimum and one above the maximum
+        (VSM_HEIGHT, (0, 1), ()), (V_PMARKER, (300, 90), ()),
+        (VSM_HEIGHT, (0, 999), ()), (VSM_COLOR, (), (4,)),
+        (V_PMARKER, (450, 120), ()),
+        # clipped, and off the screen edge
+        (VSM_HEIGHT, (0, 11), ()), (VS_CLIP, (0, 160, 200, 200), (1,)),
+        (VSM_TYPE, (), (4,)), (V_PMARKER, (100, 160, 100, 200, 100, 220), ()),
+        (VS_CLIP, (0, 0, 0, 0), (0,)),
+        (V_PMARKER, (2, 220, 637, 220), ()),
+        # out of range on both, which become the defaults
+        (VSM_TYPE, (), (9,)), (VSM_COLOR, (), (99,)),
+        (VQM_ATTRIBUTES,)]),
+
+    ("the inquiries answer with what was set, not what was asked", [
+        (VSL_TYPE, (), (4,)), (VSL_COLOR, (), (3,)), (VSWR_MODE, (), (3,)),
+        (VQL_ATTRIBUTES,),
+        (VSM_TYPE, (), (5,)), (VSM_COLOR, (), (6,)), (VSM_HEIGHT, (0, 30), ()),
+        (VQM_ATTRIBUTES,),
+        (VSF_INTERIOR, (), (3,)), (VSF_STYLE, (), (7,)), (VSF_COLOR, (), (9,)),
+        (VSF_PERIMETER, (), (0,)), (VQF_ATTRIBUTES,),
+        (VSF_PERIMETER, (), (1,)), (VQF_ATTRIBUTES,),
+        (VST_ROTATION, (), (900,)),
+        (VSWR_MODE, (), (1,))]),
+
+    ("v_get_pixel reads back the pen that was drawn", [
+        (VSF_INTERIOR, (), (1,)), (VSF_COLOR, (), (2,)),
+        (VR_RECFL, (10, 10, 100, 50), ()),
+        (VSF_COLOR, (), (9,)), (VR_RECFL, (101, 10, 200, 50), ()),
+        (V_GET_PIXEL, (50, 30), ()),      # the red field
+        (V_GET_PIXEL, (150, 30), ()),     # the grey one
+        (V_GET_PIXEL, (101, 10), ()),     # the first pixel of the second
+        (V_GET_PIXEL, (100, 10), ()),     # and the last of the first: odd x
+        (V_GET_PIXEL, (400, 200), ()),    # untouched: pen 0
+        (V_GET_PIXEL, (-1, 0), ()),       # off the screen: 0
+        (V_GET_PIXEL, (0, 999), ())]),
+
+    ("text: vst_alignment, every horizontal against every vertical", [
+        (VSWR_MODE, (), (2,)), (VST_COLOR, (), (1,)),
+        (VSL_COLOR, (), (1,)),
+        # a cross through the point each string is aligned to, so where the
+        # string lands is visible and not merely returned
+        (V_PLINE, (320, 0, 320, 239), ()), (V_PLINE, (0, 40, 639, 40), ()),
+        (VST_ALIGNMENT, (), (0, 0)), (V_GTEXT, (320, 40), tuple(b"left/base")),
+        (VST_ALIGNMENT, (), (1, 5)), (V_GTEXT, (320, 60), tuple(b"centre/top")),
+        (VST_ALIGNMENT, (), (2, 3)), (V_GTEXT, (320, 90), tuple(b"right/bottom")),
+        (VST_ALIGNMENT, (), (1, 2)), (V_GTEXT, (320, 120), tuple(b"centre/ascent")),
+        (VST_ALIGNMENT, (), (0, 1)), (V_GTEXT, (320, 150), tuple(b"left/half")),
+        (VST_ALIGNMENT, (), (2, 4)), (V_GTEXT, (320, 180), tuple(b"right/descent")),
+        # out of range on both, which the driver answers with the default
+        (VST_ALIGNMENT, (), (9, 9)), (V_GTEXT, (320, 210), tuple(b"refused"))]),
+
+    ("text: vst_effects -- thickened, underlined, both, and one it cannot do", [
+        (VSWR_MODE, (), (2,)), (VST_COLOR, (), (1,)),
+        (VST_EFFECTS, (), (0,)), (V_GTEXT, (16, 20), tuple(b"plain")),
+        (VST_EFFECTS, (), (1,)), (V_GTEXT, (16, 40), tuple(b"thickened")),
+        (VST_EFFECTS, (), (8,)), (V_GTEXT, (16, 60), tuple(b"underlined")),
+        (VST_EFFECTS, (), (9,)), (V_GTEXT, (16, 80), tuple(b"both of them")),
+        # skewed and outlined are asked for and not applied: the answer says so
+        (VST_EFFECTS, (), (0x3F,)), (V_GTEXT, (16, 100), tuple(b"all six asked")),
+        (VST_EFFECTS, (), (0,)),
+        (VST_ALIGNMENT, (), (1, 5)), (VST_EFFECTS, (), (1,)),
+        (V_GTEXT, (320, 140), tuple(b"thick and centred")),
+        (VST_ALIGNMENT, (), (0, 0)), (VST_EFFECTS, (), (0,))]),
+
+    ("text: the metrics an application measures with", [
+        (VQT_EXTENT, (), tuple(b"a string")),
+        (VQT_WIDTH, (), (ord("M"),)),
+        (VST_POINT, (), (10,)),
+        (VST_EFFECTS, (), (1,)), (VQT_EXTENT, (), tuple(b"a string")),
+        (VST_EFFECTS, (), (0,)),
+        (VQT_EXTENT, (), ()),                     # the empty string
+        (VQT_ATTRIBUTES,)]),
+
+    ("colour: vs_color and vq_color, asked for and actual", [
+        (VS_COLOR, (), (2, 1000, 0, 0)),          # pen 2 pure red
+        (VQ_COLOR, (), (2, 0)), (VQ_COLOR, (), (2, 1)),
+        (VS_COLOR, (), (3, 333, 666, 999)),       # a value the DAC rounds
+        (VQ_COLOR, (), (3, 0)), (VQ_COLOR, (), (3, 1)),
+        (VS_COLOR, (), (4, -50, 1500, 500)),      # out of range, clamped
+        (VQ_COLOR, (), (4, 0)),
+        (VQ_COLOR, (), (99, 0)),                  # no such pen
+        (VS_COLOR, (), (99, 0, 0, 0)),            # ignored
+        # and the screen, so the new colours are seen and not just reported
+        (VSF_COLOR, (), (2,)), (VR_RECFL, (10, 10, 200, 60), ()),
+        (VSF_COLOR, (), (3,)), (VR_RECFL, (210, 10, 400, 60), ()),
+        (VSF_COLOR, (), (4,)), (VR_RECFL, (410, 10, 600, 60), ())]),
 
     ("text, every printable ASCII row", [
         (VSWR_MODE, (), (2,)), (VST_COLOR, (), (1,)),

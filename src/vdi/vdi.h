@@ -80,6 +80,17 @@ typedef struct {
     WORD fill_index;        /* vsf_style's index MINUS ONE, as the donor keeps it */
     WORD fill_per;          /* outline fill area */
     WORD text_color;
+    /* markers (vsm_*): the shape 0..5, its colour, the height asked for and
+     * the whole-number scale that height rounds to. */
+    WORD mark_index, mark_color, mark_height, mark_scale;
+    /* vst_alignment: where the point v_gtext is given sits in the string.
+     * 0/1/2 horizontally (left, centre, right) and 0..5 vertically
+     * (baseline, half, ascent, bottom, descent, top) -- the donor's
+     * numbering, and the default is left/baseline. */
+    WORD h_align, v_align;
+    /* vst_effects: the effects actually APPLIED, which is what the call
+     * answers with and not necessarily what it was asked for. */
+    WORD text_effects;
     /* What the two above resolve to: the 16-bit rows of the current fill
      * pattern and the mask that turns a y coordinate into a row index
      * (3 for the 4-row dithers, 7 for the OEM and coarse hatches, 15 for
@@ -94,6 +105,16 @@ typedef struct {
 /* The physical workstation's handle, by specification; v_opnvwk hands
  * out the ones above it. */
 #define VDI_PHYS_HANDLE 1
+
+/* markers (vsm_type / vsm_height).  The nominal cell is the ST's, so that
+ * an application's idea of a "standard" marker is the familiar one. */
+#define MIN_MARK_STYLE 1
+#define MAX_MARK_STYLE 6
+#define DEF_MARK_STYLE 3
+#define DEF_MKWD  15
+#define DEF_MKHT  11
+#define MAX_MKWD 120
+#define MAX_MKHT  88
 
 /* fill interior styles (vsf_interior) */
 #define FIS_HOLLOW  0
@@ -164,6 +185,26 @@ extern Vwk vwk;
 #define V_HIDE_C     123
 #define VQ_MOUSE     124
 #define VS_CLIP      129
+#define VS_COLOR      14
+#define VQ_COLOR      26
+#define VST_POINT    107
+#define VST_EFFECTS  106
+#define VQT_EXTENT   116
+#define VQT_WIDTH    117
+#define V_PMARKER      7
+#define V_FILLAREA     9
+#define V_GDP         11
+#define VST_ROTATION  13
+#define VSM_TYPE      18
+#define VSM_HEIGHT    19
+#define VSM_COLOR     20
+#define VQL_ATTRIBUTES 35
+#define VQM_ATTRIBUTES 36
+#define VQF_ATTRIBUTES 37
+#define V_CONTOURFILL 103
+#define VSF_PERIMETER 104
+#define V_GET_PIXEL   105
+#define VSL_ENDS      108
 
 /* ---- entry point ------------------------------------------------------ */
 /* GEM 8x8 system font (from EmuTOS bios/fnt_st_8x8.c via tools/fontconv.py).
@@ -173,6 +214,33 @@ extern Vwk vwk;
 #define FONT_H        8
 #define FONT_STRIDE 256
 #define FONT_TOP      6     /* Fonthead.top: baseline to top of cell */
+#define FONT_ASCENT   6     /* and the rest of the head EmuTOS records for */
+#define FONT_HALF     4     /* this face, which vst_alignment needs */
+#define FONT_DESCENT  1
+#define FONT_BOTTOM   1
+#define FONT_POINT    9     /* Fonthead.point, as fnt_st_8x8.c gives it */
+
+/* vst_effects, and the two of them this driver can do: a second blit one
+ * pixel right thickens a glyph, and a line under the cell underlines it.
+ * The others are answered with what WAS applied, which is the contract. */
+#define TXT_THICKEN   0x01
+#define TXT_LIGHT     0x02
+#define TXT_SKEW      0x04
+#define TXT_UNDERLINE 0x08
+#define TXT_OUTLINE   0x10
+#define TXT_SHADOW    0x20
+#define TXT_DONE      (TXT_THICKEN | TXT_UNDERLINE)
+
+/* vst_alignment */
+#define TA_LEFT 0
+#define TA_CENTRE 1
+#define TA_RIGHT 2
+#define TA_BASE 0
+#define TA_HALF 1
+#define TA_ASCENT 2
+#define TA_BOTTOM 3
+#define TA_DESCENT 4
+#define TA_TOP 5
 extern const uint8_t __far font8x8[FONT_STRIDE * FONT_H];
 
 void vdi(void);             /* dispatch on contrl[0]; the GSX "SCREEN" entry */

@@ -459,13 +459,15 @@ build/m12-d2.atr: tools/mkfsdisk.py tools/atr.py
 	python3 tools/mkfsdisk.py "$(SRC_DOS)" $@
 
 # The runner's DOS 2 disk has no room for the shell's applications: DOS
-# II+/D's 1040 sectors hold M3.COM's 820 and the fixtures, and 35 more.
+# II+/D's 1040 sectors hold M3.COM's 900-odd and the fixtures, and little
+# more -- --sweep takes the fixture's own demonstration programs off it,
+# which is where the last of the room came from.
 # The shell gate (test-m16) runs on the SpartaDOS disk, whose size is
 # ours to choose (tools/mkspdisk.py --sectors).
 build/m3-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM $(DISK_DENSITY) $(DISK_FILES)
+	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M3.COM $(DISK_DENSITY) --sweep $(DISK_FILES)
 
 # The product disks: the system with the desktop beside it, one per DOS,
 # and both of them boot into it with nothing typed.

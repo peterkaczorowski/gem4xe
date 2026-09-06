@@ -31,8 +31,38 @@ VSIN_MODE, VQIN_MODE, VEX_TIMV, VSL_UDSTY = 33, 115, 118, 113
 VEX_BUTV, VEX_MOTV = 125, 126
 VST_HEIGHT, VQT_ATTRIBUTES, V_ESCAPE = 12, 38, 5
 VST_FONT, VST_LOAD_FONTS, VST_UNLOAD_FONTS, VQT_NAME = 21, 119, 120, 130
+VS_COLOR, VQ_COLOR, VST_ALIGNMENT = 14, 26, 39
+VST_EFFECTS, VST_POINT, VQT_EXTENT, VQT_WIDTH = 106, 107, 116, 117
+# src/vdi/vdi.h: the rest of the font head, and the two effects
+# this device really applies
+FONT_ASCENT, FONT_HALF, FONT_DESCENT, FONT_POINT = 6, 4, 1, 9
+TXT_THICKEN, TXT_UNDERLINE = 0x01, 0x08
+TXT_DONE = TXT_THICKEN | TXT_UNDERLINE
+TA_LEFT, TA_CENTRE, TA_RIGHT = 0, 1, 2
+TA_BASE, TA_HALF, TA_ASCENT, TA_BOTTOM, TA_DESCENT, TA_TOP = range(6)
 FONT_ID_SYS, FONT_SYSTEM, FONT_LOADED = 1, 1, 2
 FONT_SYSNAME = "gem4xe system 8x8"    # what vqt_name(1) answers
+V_PMARKER, V_FILLAREA, V_GDP, VST_ROTATION = 7, 9, 11, 13
+VSM_TYPE, VSM_HEIGHT, VSM_COLOR = 18, 19, 20
+VQL_ATTRIBUTES, VQM_ATTRIBUTES, VQF_ATTRIBUTES = 35, 36, 37
+V_CONTOURFILL, VSF_PERIMETER, V_GET_PIXEL, VSL_ENDS = 103, 104, 105, 108
+# markers (src/vdi/vdi.h): the nominal cell is the ST's
+MIN_MARK_STYLE, MAX_MARK_STYLE, DEF_MARK_STYLE = 1, 6, 3
+DEF_MKWD, DEF_MKHT, MAX_MKWD, MAX_MKHT = 15, 11, 120, 88
+# The six marker shapes, in the donor's encoding: a count of polylines, then
+# for each a count of points and that many x,y offsets from the centre.
+MARKERS = (
+    (1, 2, 0, 0, 0, 0),                                     # dot
+    (2, 2, 0, -3, 0, 3, 2, -4, 0, 4, 0),                    # plus
+    (3, 2, 0, -3, 0, 3, 2, 3, 2, -3, -2, 2, 3, -2, -3, 2),  # star
+    (1, 5, -4, -3, 4, -3, 4, 3, -4, 3, -4, -3),             # square
+    (2, 2, -4, -3, 4, 3, 2, -4, 3, 4, -3),                  # cross
+    (1, 5, -4, 0, 0, -3, 4, 0, 0, 3, -4, 0),                # diamond
+)
+# clc_flit's edge buffer, and the room ptsin leaves to close a polygon
+MAX_INTERSECT = 32
+MAX_POLY = 63
+
 V_LOCATOR = 28
 V_STRING, VQ_KEY_S = 31, 128
 VSF_UDPAT = 112
@@ -108,6 +138,20 @@ for _pen in range(16):
 HW_PAL = bytes(HW_PAL)
 
 
+def col_to_hw(v):
+    """The VDI's thousandths into the eight bits the palette takes
+    (src/vdi/vdi.c, col_to_hw)."""
+    v = 0 if v < 0 else 1000 if v > 1000 else v
+    return (v * 255 + 500) // 1000
+
+
+def hw_to_col(h):
+    """And back, through the DAC: VBXE keeps seven significant bits and
+    copies the top one into the eighth."""
+    dac = (h & 0xFE) | ((h >> 7) & 1)
+    return (dac * 1000 + 127) // 255
+
+
 
 # The target's result record (src/m3_vdi.c): contrl[2], contrl[4], then
 # RESULT_INTOUT words of intout and three of ptsout.  Fifteen intout words
@@ -153,7 +197,9 @@ class VDI:
     # and swaps by handle; so does this.
     WK_FIELDS = ("clip", "xmn", "ymn", "xmx", "ymx", "wrt_mode", "line_width",
                  "line_index", "line_color", "text_color",
-                 "fill_style", "fill_index", "fill_color", "ud_patrn", "ud_ls")
+                 "fill_style", "fill_index", "fill_color", "fill_per",
+                 "ud_patrn", "ud_ls", "h_align", "v_align", "text_effects",
+                 "mark_index", "mark_color", "mark_height", "mark_scale")
 
     # The face in use, and the one a .FNT would load: a gate that puts a
     # font on the disk calls load_font() with the same file's bytes, so
@@ -176,6 +222,12 @@ class VDI:
         self.wk = {}                # the open workstations NOT current, by handle
         self._init_wk(WORK_IN)
         # mouse cursor
+        # The palette, per workstation copy: vs_color changes it, and
+        # vq_color answers both what was asked for and what the DAC made
+        # of it (src/vdi/vdi.c, pal_req).
+        self.hw_pal = bytearray(HW_PAL)
+        self.pal_req = [[hw_to_col(GEM_PAL[p * 3 + k]) for k in range(3)]
+                        for p in range(16)]
         self.cur_xhot = self.cur_yhot = 0
         self.cur_bg, self.cur_fg = 0, 1
         self.cur_mask = [0] * 16
@@ -287,6 +339,7 @@ class VDI:
         minus one -- the minus one the ROM's init forgets, which gem4xe
         does not reproduce."""
         self.clip = 0
+        self.h_align, self.v_align, self.text_effects = TA_LEFT, TA_BASE, 0
         self.xmn, self.ymn, self.xmx, self.ymx = 0, 0, SCR_W - 1, SCR_H - 1
         self.wrt_mode = 0
         self.line_width = 1
@@ -299,6 +352,12 @@ class VDI:
         top = MAX_FILL_PATTERN if self.fill_style == FIS_PATTERN else MAX_FILL_HATCH
         self.fill_index = (w[8] if 1 <= w[8] <= top else 1) - 1
         self.fill_color = w[9] if 0 <= w[9] <= 15 else 1
+        self.fill_per = 1
+        # work_in[3] and [4] are the marker: the type, and its colour
+        self.mark_index = (w[3] if MIN_MARK_STYLE <= w[3] <= MAX_MARK_STYLE
+                           else DEF_MARK_STYLE) - 1
+        self.mark_color = w[4] if 0 <= w[4] <= 15 else 1
+        self.mark_height, self.mark_scale = DEF_MKHT, 1
 
     def _paint_pixel(self, x, y, pen, is_set):
         """One pixel of a primitive in the current writing mode, given
@@ -511,21 +570,159 @@ class VDI:
                 else:
                     self._plot(dx, dy, fg if on else bg)
 
+    def _align_x(self, x, n):
+        """Where the point v_gtext is given puts the first cell, given what
+        vst_alignment set (src/vdi/vdi.c, align_x)."""
+        if self.h_align == TA_CENTRE:
+            return x - n * FONT_W // 2
+        if self.h_align == TA_RIGHT:
+            return x - n * FONT_W
+        return x
+
+    def _align_y(self, y):
+        return {TA_HALF: y - FONT_HALF, TA_ASCENT: y - FONT_ASCENT,
+                TA_BOTTOM: y - FONT_H + 1,
+                TA_DESCENT: y - FONT_TOP - FONT_DESCENT,
+                TA_TOP: y}.get(self.v_align, y - FONT_TOP)
+
+    def _glyph(self, code, cx, cy):
+        for row in range(FONT_H):
+            b = self.font[row * FONT_STRIDE + (code & 0xFF)]
+            for col in range(FONT_W):
+                self._paint_pixel(cx + col, cy + row, self.text_color,
+                                  b & (0x80 >> col))
+
     def _gtext(self, pts, ints):
-        """Mirrors vdi_v_gtext().  Left/baseline alignment: y is the BASELINE
-        and the cell top is y - FONT_TOP.  Each glyph pixel goes through the
+        """Mirrors vdi_v_gtext().  The point given is placed by
+        vst_alignment -- left and the BASELINE by default, the cell top
+        then being y - FONT_TOP.  Each glyph pixel goes through the
         writing-mode rules of _paint_pixel (replace paints pen 0 behind the
         glyph, transparent does not, XOR complements, erase paints the
-        paper)."""
-        x, y = pts[0], pts[1]
-        cy = y - FONT_TOP
+        paper).  Thickened draws each glyph again one pixel right;
+        underlined paints the cells' bottom row afterwards."""
+        n = len(ints)
+        x, y = self._align_x(pts[0], n), pts[1]
+        cy = self._align_y(y)
         for i, code in enumerate(ints):
             cx = x + i * FONT_W
-            for row in range(FONT_H):
-                b = self.font[row * FONT_STRIDE + (code & 0xFF)]
-                for col in range(FONT_W):
-                    self._paint_pixel(cx + col, cy + row, self.text_color,
-                                      b & (0x80 >> col))
+            self._glyph(code, cx, cy)
+            if self.text_effects & TXT_THICKEN and cx + 1 + FONT_W <= SCR_W:
+                self._glyph(code, cx + 1, cy)
+        if self.text_effects & TXT_UNDERLINE and n:
+            # SOLID and clipped, in the text colour: an underline is text,
+            # not a filled area, so it does not take the fill pattern.
+            w = n * FONT_W + (1 if self.text_effects & TXT_THICKEN else 0)
+            r = self._clip_rect(x, cy + FONT_H - 1, x + w - 1, cy + FONT_H - 1)
+            if r:
+                self._paint_rect(*r, self.text_color)
+
+    # -- filled areas ----------------------------------------------------
+
+    def _polyline_pts(self, pt, n):
+        """v_pline's loop over an array the caller names."""
+        for i in range(n - 1):
+            self._line(pt[i * 2], pt[i * 2 + 1], pt[i * 2 + 2], pt[i * 2 + 3])
+
+    def _fill_perimeter(self, pt, n):
+        """SOLID and in the FILL colour, whatever the line attributes say
+        (src/vdi/vdi.c, fill_perimeter)."""
+        sv_color, sv_index = self.line_color, self.line_index
+        self.line_color, self.line_index = self.fill_color, 1
+        self._polyline_pts(pt, n)
+        self.line_color, self.line_index = sv_color, sv_index
+
+    def _fill_span(self, x1, x2, y):
+        """One scan line of an interior: the clip rectangle, then the
+        screen."""
+        if self.clip:
+            if x1 < self.xmn:
+                if x2 < self.xmn:
+                    return
+                x1 = self.xmn
+            if x2 > self.xmx:
+                if x1 > self.xmx:
+                    return
+                x2 = self.xmx
+        if x2 < 0 or x1 > SCR_W - 1:
+            return
+        x1, x2 = max(x1, 0), min(x2, SCR_W - 1)
+        self._patt_rect(x1, y, x2, y, self.fill_color)
+
+    @staticmethod
+    def _mul_div(a, b, d):
+        """(a*b)/d truncated TOWARD ZERO, as the 68000's divs and C both
+        do it -- Python's // floors, which differs on negatives."""
+        q = abs(a * b) // abs(d)
+        return q if (a * b < 0) == (d < 0) else -q
+
+    def _clc_flit(self, pt, vectors, start, end):
+        """For each scan line, where every edge crosses it, sorted, filled
+        in pairs.  `end` is one ABOVE the topmost line and the loop stops
+        before it, so a polygon does not paint its own top row -- the
+        donor's rule (src/vdi/vdi.c, clc_flit)."""
+        for y in range(start, end, -1):
+            xs = []
+            for i in range(vectors):
+                y1, y2 = pt[i * 2 + 1], pt[i * 2 + 3]
+                dy = y2 - y1
+                if not dy:
+                    continue
+                dy1, dy2 = y - y1, y - y2
+                if (dy1 ^ dy2) >= 0:
+                    continue
+                if len(xs) >= MAX_INTERSECT:
+                    break
+                x1, x2 = pt[i * 2], pt[i * 2 + 2]
+                dx = (x2 - x1) * 2
+                if dx < 0:
+                    xs.append(((self._mul_div(dy2, dx, dy) + 1) >> 1) + x2)
+                else:
+                    xs.append(((self._mul_div(dy1, dx, dy) + 1) >> 1) + x1)
+            if len(xs) < 2:
+                continue
+            xs.sort()
+            for i in range(0, len(xs) - 1, 2):
+                self._fill_span(xs[i], xs[i + 1], y)
+
+    def _polygon(self, pt, n):
+        """The interior, then the perimeter if vsf_perimeter asked for one.
+        pt is closed here, as the driver closes it in ptsin."""
+        if n < 2:
+            return
+        ys = [pt[i * 2 + 1] for i in range(n)]
+        miny, maxy = min(ys), max(ys)
+        if self.clip:
+            if maxy < self.ymn or miny > self.ymx:
+                return
+            miny = max(miny, self.ymn - 1)
+            maxy = min(maxy, self.ymx)
+        if maxy < 0 or miny > SCR_H - 1:
+            return
+        miny, maxy = max(miny, -1), min(maxy, SCR_H - 1)
+        pt = list(pt[:n * 2]) + [pt[0], pt[1]]
+        self._clc_flit(pt, n, maxy, miny)
+        if self.fill_per:
+            self._fill_perimeter(pt, n + 1)
+
+    def _pmarker(self, pts):
+        """Each point gets the current marker, drawn as the polylines that
+        define it -- solid, in the marker colour, at the marker scale.  The
+        donor also turns clipping on for good here; gem4xe does not."""
+        sv_index, sv_color = self.line_index, self.line_color
+        self.line_index, self.line_color = 1, self.mark_color
+        for i in range(len(pts) // 2):
+            cx, cy = pts[i * 2], pts[i * 2 + 1]
+            m = MARKERS[self.mark_index]
+            k = 1
+            for _ in range(m[0]):
+                n = m[k]; k += 1
+                seg = []
+                for _ in range(min(n, 5)):
+                    seg.append(cx + self.mark_scale * m[k])
+                    seg.append(cy + self.mark_scale * m[k + 1])
+                    k += 2
+                self._polyline_pts(seg, n)
+        self.line_index, self.line_color = sv_index, sv_color
 
     def _workout(self):
         """v_opnwk's work_out, in full: the per-call record carries only the
@@ -754,6 +951,100 @@ class VDI:
             self.intout = [1, self.text_color, 0, 0, 0, self.wrt_mode + 1]
             self.ptsout = [FONT_W, FONT_TOP, FONT_W, FONT_H]
             self.contrl2, self.contrl4 = 2, 6
+        elif op == V_FILLAREA:
+            n = min(len(pts) // 2, MAX_POLY)
+            self._polygon(pts, n)
+        elif op == V_PMARKER:
+            self._pmarker(pts)
+        elif op == VSM_TYPE:
+            v = (ints[0] if MIN_MARK_STYLE <= ints[0] <= MAX_MARK_STYLE
+                 else DEF_MARK_STYLE)
+            self.mark_index = v - 1
+            self.intout[0] = v
+            self.contrl4 = 1
+        elif op == VSM_HEIGHT:
+            h = min(max(pts[1], DEF_MKHT), MAX_MKHT)
+            self.mark_height = h
+            self.mark_scale = (h + DEF_MKHT // 2) // DEF_MKHT
+            self.ptsout = [self.mark_scale * DEF_MKWD,
+                           self.mark_scale * DEF_MKHT, 0]
+            self.contrl2 = 1
+        elif op == VSM_COLOR:
+            v = ints[0] if 0 <= ints[0] <= 15 else 1
+            self.mark_color = v
+            self.intout[0] = v
+            self.contrl4 = 1
+        elif op == VQL_ATTRIBUTES:
+            self.intout = [self.line_index, self.line_color, self.wrt_mode + 1]
+            self.ptsout = [self.line_width, 0, 0]
+            self.contrl2, self.contrl4 = 1, 3
+        elif op == VQM_ATTRIBUTES:
+            # the donor answers with mark_index, one less than the type; a
+            # caller that feeds the answer back must get the same marker
+            self.intout = [self.mark_index + 1, self.mark_color,
+                           self.wrt_mode + 1]
+            self.ptsout = [0, self.mark_height, 0]
+            self.contrl2, self.contrl4 = 1, 3
+        elif op == VQF_ATTRIBUTES:
+            self.intout = [self.fill_style, self.fill_color,
+                           self.fill_index + 1, self.wrt_mode + 1,
+                           self.fill_per]
+            self.contrl4 = 5
+        elif op == VSF_PERIMETER:
+            self.fill_per = 1 if ints[0] else 0
+            self.intout[0] = self.fill_per
+            self.contrl4 = 1
+        elif op == VST_ROTATION:
+            self.intout[0] = 0
+            self.contrl4 = 1
+        elif op == V_GET_PIXEL:
+            x, y = pts[0], pts[1]
+            hw = 0
+            if 0 <= x < SCR_W and 0 <= y < SCR_H:
+                b = self.s.mem[self.base + y * STRIDE + (x >> 1)]
+                hw = (b & 0x0F) if (x & 1) else (b >> 4)
+            self.intout = [hw, MAP_COL.index(hw)]
+            self.contrl4 = 2
+        elif op == VS_COLOR:
+            # one palette entry, in the VDI's thousandths
+            i = ints[0]
+            if 0 <= i <= 15:
+                for k in range(3):
+                    v = ints[k + 1]
+                    self.pal_req[i][k] = 0 if v < 0 else 1000 if v > 1000 else v
+                    self.hw_pal[MAP_COL[i] * 3 + k] = col_to_hw(ints[k + 1])
+        elif op == VQ_COLOR:
+            i = ints[0]
+            if not 0 <= i <= 15:
+                self.intout = [-1, 0, 0, 0]
+            elif ints[1]:               # what the DAC made of it
+                self.intout = [i] + [hw_to_col(col_to_hw(self.pal_req[i][k]))
+                                     for k in range(3)]
+            else:                       # what was asked for
+                self.intout = [i] + list(self.pal_req[i])
+            self.contrl4 = 4
+        elif op == VST_ALIGNMENT:
+            self.h_align = ints[0] if TA_LEFT <= ints[0] <= TA_RIGHT else TA_LEFT
+            self.v_align = ints[1] if TA_BASE <= ints[1] <= TA_TOP else TA_BASE
+            self.intout = [self.h_align, self.v_align]
+            self.contrl4 = 2
+        elif op == VST_EFFECTS:
+            # what was APPLIED, which is not always what was asked for
+            self.text_effects = ints[0] & TXT_DONE
+            self.intout[0] = self.text_effects
+            self.contrl4 = 1
+        elif op == VST_POINT:
+            self.intout[0] = FONT_POINT
+            self.ptsout = [FONT_W, FONT_TOP, FONT_W, FONT_H]
+            self.contrl2, self.contrl4 = 2, 1
+        elif op == VQT_EXTENT:
+            w = len(ints) * FONT_W + (1 if self.text_effects & TXT_THICKEN else 0)
+            self.ptsout = [0, 0, w, 0, w, FONT_H, 0, FONT_H]
+            self.contrl2 = 4
+        elif op == VQT_WIDTH:
+            self.intout[0] = ints[0]
+            self.ptsout = [FONT_W, 0, 0]
+            self.contrl2, self.contrl4 = 3, 1
         elif op == VST_FONT:
             # the face now drawn with: the system's, or the loaded one when
             # its id is asked for (src/vdi/font.c's vdi_font_select)
@@ -886,7 +1177,7 @@ class VDI:
             self.results.append(self.result())
 
     def to_rgb(self):
-        return self.s.to_rgb(self.base, HW_PAL)
+        return self.s.to_rgb(self.base, bytes(self.hw_pal))
 
     def screen_key(self):
         """A fingerprint of the visible screen, for telling whether a turn
