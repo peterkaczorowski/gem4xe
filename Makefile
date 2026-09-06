@@ -558,6 +558,14 @@ build/hello-boot.atr: build/hello.xex
 
 test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-boot
 
+# GACS's engine on the 65816 -- the application gem4xe exists for, asked
+# whether it still compiles, links and computes there (docs/gacs.md).
+# Needs the GACS checkout (GACS=, default ~/dev/gacs) and Calypsi's own
+# simulator, so it is not part of `make test`: it depends on another
+# project, the way test-m14u depends on a flash image.
+gacs-check:
+	python3 tools/gacscheck.py
+
 # The cc65816 code generation bugs gem4xe works around, run in the vendor's
 # own simulator: fails only if a workaround shape has stopped compiling
 # right; a bug that has gone away is reported so its workaround can go.
@@ -760,4 +768,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-boot test-cf demo movie bench emu-stop clean

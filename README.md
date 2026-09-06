@@ -273,6 +273,19 @@ with 14 MB the memory was never the constraint, the AES's fixed character
 cell is. An application's own `.RSC` stays the third file, because a GEM
 dialog's geometry travels with its text.
 
+**The applications this is for** (`docs/gacs.md`). GACS — the GURPS Autoduel
+Construction Set — and RetroWP are why gem4xe was started: a portable C89
+engine each, a shell per platform, the Atari ST first. `make gacs-check`
+compiles GACS's engine with Calypsi for the 65C816 in both data models, links
+it with its working set in far memory, and **runs it in Calypsi's simulator**
+against the six tables GACS ships: 27 chassis, 13 engines, 10 tires, 20
+weapons parsed, a design computed, `ad_compute` answering `AD_OK`, and the
+line GACS's own CLI prints. It wants 24 KB of code and ~56 KB of data, all
+far — and **84 bytes of bank $00**. Every AES call its GEM shell makes is
+implemented here, its resource is the format we read, and its dialogs are laid
+out in character cells that fit 640×240. What is missing is a shell, one
+linker line, and — for both programs, eventually — a printer.
+
 ## Verification
 
 Every gate compares the target against a **host reference model** —
