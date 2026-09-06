@@ -319,6 +319,32 @@ One thing to know for a real machine: the U1MB's own PBI ID is
 the Rapidus's.  Altirra's PBI manager resolves the collision by whichever
 device registered last; hardware would not.  Pick 1, 2 or 3.
 
+### The rest of the flash: the PBI BIOS and the loader
+
+The same image carries two more programs, and both matter to shipping
+(docs/shipping.md, section 3).  The **PBI BIOS** is the hard-disk
+driver: it reads an APT table off a SIDE cartridge's CF card and mounts
+the mapping-slot partitions as `D1:`, `D2:`, ... before any DOS runs, so
+SpartaDOS X needs no `SIDE.SYS` and the card needs nothing on it.  The
+**SIDE Loader** is the flash's own file browser -- FAT16/FAT32 volumes,
+`.ATR` images it can mount, and the APT partitions past the fifteen
+mapping slots.
+
+Driving the BIOS setup, now that a gate does it every run: LEFT and
+RIGHT step the pages along the icon row, UP and DOWN move the field
+cursor, RETURN changes the field under it, and the last page offers
+*Save changes and boot* (`B`), *Save changes* (`S`) and *SIDE Loader*
+(`L`).  On a configured machine, HELP with RESET reopens setup.  A gate
+that wants the setup screen wants a fresh NVRAM, and the emulator keeps
+the NVRAM in its profile, so `tests/emu/cf_boot.py` runs with
+`XDG_CONFIG_HOME` pointed at `build/altirra-cf` -- its own profile,
+thrown away and rebuilt each run, which also keeps the U1MB gates from
+leaving state in the user's own `~/.config/altirra`.
+
+One thing the PBI BIOS will not do is touch the disk while the
+cartridge port is claimed; the wait is at `$D803` in its ROM and
+shipping.md section 3 has it.
+
 `make test-m14u` and `make test-m15u` run the two SpartaDOS gates on
 this configuration (`[u1mb].flash` in `fixtures.toml`, the patched
 emulator via `ALTIRRASDL=`).  They are outside `make test` because they

@@ -47,6 +47,7 @@ full-screen repaints.
 | `make test-m18` | PASS | a program run from the desktop: drive A opened, the window full, M11.G4A double-clicked -- the desktop puts its window's place in the shell buffer as DESKTOP.INF text and exits, the shell runs the program, the desktop comes back and opens the window where it was, File -> Quit -- the desktop transcribed twice against one AES model with the program's calls counted between: six screens, `G` at four waits, 275 calls over the three programs, the pool and far heap back, each run's stack low-water mark (425 and 268 of 640) |
 | `make test-m19` | PASS | the desktop's first writes to a disk: File -> New folder, the name typed into its dialog, `Dcreate`, the folder in the listing; the same name again, refused, and the alert -- text and all -- out of DESKTOP.RSC's free strings; the SUB folder selected and File -> Delete, counted first (three files, two folders, the walk a DTA deep per level), confirmed in a dialog whose counts tick down, and the tree gone -- eight screens, `G` at five waits, 289 calls on both sides, and the disk image itself read back afterwards |
 | `make test-boot` | PASS | both product disks booting into the desktop with nothing typed: `build/gem-sp.atr` (SpartaDOS, `STARTUP.BAT` for 3.2 and `AUTOEXEC.BAT` for X) and `build/gem-boot.atr` (a double-density DOS 2, the system named `AUTORUN.SYS`, `DUP.SYS` still on it and 42 KB free); the 6502 boot runs GEM by itself and ends in the loader's refusal; `COLDST` and the Rapidus switch bring the machine up cold as a 65C816, the DOS starts GEM again, and the far image is spot-checked against the linker's output before the desk is compared pixel for pixel with the desktop model at its first wait |
+| `make test-cf` | PASS | the product **CF card** booting into the desktop: `build/gem-cf.img`, an APT table and two SDFS partitions, on a SIDE 2's IDE bus, with SpartaDOS X *and* the PBI BIOS that mounts those partitions coming from a real Ultimate 1MB flash image. The gate walks the U1MB BIOS setup itself (PBI BIOS on, hard disk on, an ID that is not the Rapidus's) from a fresh profile of its own, keeps the SIDE's SDX bank unmapped so the PBI BIOS will touch the disk, and then runs the same boot as `test-boot` -- refusal, switch, desk against the model. Needs the U1MB fixture and the patched emulator, so not in `make test` |
 | `make test-m14u` `test-m15u` | PASS | the same two on SpartaDOS X 4.49b booted from a real Ultimate 1MB flash image, U1MB switched on -- needs the patched emulator in `tools/altirra/`, so not in `make test` |
 | `make check-cc` | PASS | the ten compiler bugs worked around, in the vendor's simulator |
 | `make movie` | PASS | a session with the AES itself, filmed frame by frame and checked as a gate: `build/movie/gem4xe.mp4` |
@@ -231,9 +232,19 @@ floppy holds, and an enhanced-density one leaves it three sectors of
 room. **Double density** is where the DOS 2 product disk lives now, and
 `tools/atr.py` writes it: 253-byte sectors leave 42 KB free with the
 DOS, its shell and a demonstration program beside GEM — a few programs,
-not a library. The volume gem4xe belongs on is a CF card or a hard disk
-with APT partitions, which SpartaDOS X drives and Altirra emulates
-(`side2`, `side3`, `kmkjzide`, `myide`); the floppy becomes a bootstrap.
+not a library. The volume gem4xe belongs on is a CF card or a hard disk with APT
+partitions, and `make` writes one: `build/gem-cf.img` is a 16 MB image
+with an APT table, two 8 MB SDFS partitions and the install layout on
+the first — the system in `\GEM\`, an application in `\APPS\`, an
+`AUTOEXEC.BAT` that runs it. **`make test-cf` boots that card into the
+desktop**, on the machine the project is for: an Ultimate 1MB whose
+flash holds SpartaDOS X *and* the PBI BIOS, a SIDE 2 with the card on
+its IDE bus. Nothing on the card is a driver — the PBI BIOS reads the
+APT table and mounts the partitions as `D1:` and `D2:` before any DOS
+runs. Three things about that machine had to be read out of its own
+firmware first, including the wait at `$D803` that stops the disk dead
+while the SIDE still claims the cartridge window (`docs/shipping.md`
+§3). The floppy is now the bootstrap, not the ceiling.
 Both product disks now come up in the desktop rather than at a prompt,
 and `make test-boot` boots them with nothing typed: the SpartaDOS one
 from a `STARTUP.BAT` and an `AUTOEXEC.BAT` (3.2 runs the first, X the

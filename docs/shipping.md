@@ -131,34 +131,108 @@ program is also why that gate takes a few minutes.
 
 ## 3. Bigger volumes: partitions, APT, and hard media
 
-What the project can build today is ATR floppy images: `tools/atr.py`
-does 128- and 256-byte sectors, DOS 2 and SDFS, and `tools/mkdisk.py` /
-`tools/mkspdisk.py` build the gates' disks from them.
+**The card is built.**  `make` writes `build/gem-cf.img`: a 16 MB image
+of 512-byte blocks, an **APT** table (Konrad Kokoszkiewicz's Advanced
+Partition Table, which is what SpartaDOS X mounts), and two 8 MB SDFS
+partitions -- the system in `\GEM\`, a demonstration application in
+`\APPS\`, an `AUTOEXEC.BAT` that changes into `\GEM` and runs `GEM`,
+and 7 MB free.  `tools/apt.py` lays out the table and
+`tools/mkcf.py` fills it, the way `mkspdisk.py` fills a floppy, and it
+needs no fixture: a card carries no DOS of its own, because SDX boots
+from a cartridge or from U1MB flash.
 
-What a real installation wants is a hard disk or a CF card, which on
-this platform means:
+The layout was read rather than remembered, out of Altirra's own
+`ATDecodePartitionTable` (`src/ATIO/source/partitiontable.cpp`), which
+reads real APT disks, and its APT writer in `blockdevdiskadapter.cpp`:
 
-- **APT** (Konrad Kokoszkiewicz's Advanced Partition Table), the
-  partition scheme SpartaDOS X uses for ATA media.  A partitioned
-  device gives several SDFS volumes on one card, which is exactly the
-  install layout below.  The details -- the table's layout, the
-  partition-size limits of the SDFS versions SDX supports -- are to be
-  read out of the SDX manual and the fixture before anything is
-  written; nothing here has been verified yet.
-- **The hardware**: SIDE 2/3, KMK/JZ IDE (IDE Plus), MyIDE.  Altirra
-  emulates all of them (`side2`, `side3`, `kmkjzide`, `myide` device
-  tags; `src/Altirra/source/ide*.cpp` handles raw and VHD images), so a
-  gate can boot a partitioned CF image headlessly the same way the
-  floppy gates boot an ATR.  Untested here.
-- **`--hdpath`**, Altirra's host-filesystem device (`H:`), is a
-  development shortcut: a host directory mounted read-only in the
-  emulator.  Useful for iterating on an application without rebuilding
-  an image; not a shipping story, because a real machine has no `H:`.
+    LBA 0    a protective MBR -- one entry, type $7F, pointing at the
+             table, so a PC does not offer to format the card
+    LBA 1    the table: sixteen-byte entries, the first the header
+             ('APT' in bytes 1-3), the rest partitions.  Entries 1-15
+             are the mapping slots, and a DOS mounts them as D1:..D15:
+    LBA 8+   the partitions
 
-The work this implies is in `tools/`: an image writer that lays out an
-APT table and SDFS partitions, the way `mkspdisk.py` lays out a floppy.
-It is a host-side job with a host-side model, which is the kind of thing
-this project is already good at.
+A partition entry says where it starts and how long it is in blocks,
+and how the DOS's sectors sit inside those blocks.  These are **512-byte
+sectors, one to a block**, which is also what SDFS wants on anything
+bigger than a floppy: `Sdfs.format` grew that case (one boot sector
+instead of three, a size byte of 1, a boot header that loads at $0440 --
+`ATDiskFSSDX2::InitNew`, and CLX 1.9 checks it).
+`tests/host/test_apt.py` holds it to those rules, field by field.
+
+**`make test-cf` boots it, and nothing on the card is a driver.**  The
+machine this project is for has an Ultimate 1MB, and the U1MB's flash
+carries three things that matter here: SpartaDOS X, the **PBI BIOS**,
+and the SIDE Loader.  The PBI BIOS is the disk driver.  It reads the APT
+table itself, mounts the mapping-slot partitions as `D1:`, `D2:`, ...
+before any DOS runs, and SDX then finds `AUTOEXEC.BAT` on `D1:` exactly
+as it would on a floppy.  So the card needs no `SIDE.SYS`, no
+`CONFIG.SYS` line and no driver file of its own -- which is just as
+well, because neither SDX we have carries an IDE driver at all.  Listing
+the ROM file systems by hand: the 4.49b in the U1MB flash holds ARCLOCK,
+ATARIDOS, COMEXE, CON64, CONFIG, DOSKEY, ENV, INDUS, JIFFY, QUICKED,
+RAMDISK, RTIME8, RUNEXT, SIO, SPARTA, ULTIME and XEP80, and the 4.50
+cartridge the same less ARCLOCK, CON64 and ULTIME.  The driver was never
+going to come from the DOS.
+
+Three facts about that machine had to be measured, and each is a step of
+`tests/emu/cf_boot.py`:
+
+- **The BIOS setup has to be walked, and the gate walks it.**  A fresh
+  U1MB profile boots into *Ultimate Setup*, and what the card needs is
+  off by default: page 3, *PBI BIOS: Enabled* and *Hard disk: Enabled*.
+  The pages step along the icon row with LEFT and RIGHT, the field
+  cursor moves with UP and DOWN, RETURN changes the field under it, and
+  page 8 offers *Save changes and boot* (`B`) and *SIDE Loader* (`L`).
+  On a machine already configured, HELP with RESET reopens it.  The gate
+  drives all of that through `KEYRAW`, from a config directory of its
+  own (`build/altirra-cf`), so every run starts from the same fresh
+  NVRAM and the user's emulator profile is left alone.
+- **The PBI device ID must not be 0.**  Setting 0 is PBI bit 0, the
+  Rapidus's (docs/phase14.md).
+- **The SIDE must let go of the cartridge window.**  The PBI BIOS's
+  first act is a wait, at `$D803` in its ROM:
+
+        LDA #$80 / STA $D5E4 / BIT $D384 / BVS $D803
+
+  `$D384` bit 6 is the U1MB's *external cart active* sense, and the SIDE
+  asserts it while its own SDX module is mapped -- the state of a SIDE 2
+  whose SDX switch is on.  A machine that runs SpartaDOS X from the U1MB
+  has that switch off.  AltirraSDL has the switch as a device button
+  with no command-line or bridge verb, so the gate unmaps the SDX bank
+  the way the switch does, by writing `$80` to the SIDE's bank register
+  at `$D5E1`; a reset puts the bank back, so it writes it again through
+  the run.  Left alone, the machine sits in that loop forever after
+  printing `Ultimate PBI v.1.85` -- which is what "the card does not
+  work" looked like before it was read out of the ROM.
+
+With those three, the boot is the floppy's boot: the card starts GEM on
+the 6502, the loader refuses the machine, COLDST goes in and the CPU is
+switched, and the desktop comes up on the restart with `DISK A` and
+`DISK B` on it -- the card's two partitions -- pixel for pixel against
+`tools/deskref.py`.
+
+The table itself was never the problem, and there is direct evidence:
+the firmware's own parser state, read out of the machine while its list
+was on screen, showed the signature accepted, three entries counted and
+both partitions intact.  The SIDE Loader's `APT` page saying *No
+Entries* is correct as well -- that list is of partitions **beyond** the
+fifteen mapping slots, and ours are in slots 1 and 2, which is what
+makes them `D1:` and `D2:`.
+
+Two findings from the same afternoon, so nobody repeats them:
+
+- **SIDE 2 and a cartridge cannot both be in the machine.**  SDX 4.50
+  from a MaxFlash `.car` plus `--adddevice side2` boots to a black
+  screen: they are both cartridges.  The pairing that works is SDX in
+  U1MB flash with SIDE 2 in the slot -- the machine this project targets
+  -- or SDX in a cartridge with a PBI interface beside it.
+- **A FAT16 card works too, and is the quickest way to prove the
+  plumbing.**  The SIDE Loader browses FAT volumes off the same card and
+  will mount an `.ATR` from one as `D1:`; a card with `GEM.XEX` in a
+  FAT16 partition shows up in its file list.  That was the control that
+  said the emulated SIDE 2 and its IDE bus were fine long before the
+  APT path ran.
 
 One thing on the target has to move with it: **`Dfree` cannot answer
 more than 999**.  It reads the free count out of the directory
@@ -182,11 +256,13 @@ With a volume that has room, the system stops being one lump:
     \APPS\...            applications, one directory each
     \...                 the user's documents
 
-The desktop already opens a folder in a window and runs a `.G4A` from
-its icon, so this layout is usable the day the volume exists.  Two
-things follow for the loader: an application is found by path, not by
-being on `D1:`, and the shell's command tail (`SH_TAILLEN`, 128 bytes)
-is what carries arguments -- both already true.
+`build/gem-cf.img` is that layout, less the two files that do not exist
+yet (section 5's `LANG.RSC` and a font).  The desktop opens a folder in
+a window and runs a `.G4A` from its icon, and `make test-cf` boots the
+card into that desktop, so the layout is not a plan.  Two things follow for the loader: an
+application is found by path, not by being on `D1:`, and the shell's
+command tail (`SH_TAILLEN`, 128 bytes) is what carries arguments -- both
+already true.
 
 ## 5. Localization: `LANG.RSC`
 
@@ -269,6 +345,15 @@ are cheapest now and dear later:
    Section 2 has the measurements, the names each DOS actually looks
    for, and the one DOS that still will not do it.
 
-After those, in the order they unlock things: the APT/CF image writer in
-`tools/` and a gate that boots one; the install layout on it;
-`LANG.RSC` and the far-string helper; a loadable font.
+3. ~~The APT/CF image writer in `tools/`, and a gate that boots one~~ --
+   done: `make` writes `build/gem-cf.img`, an APT card with the install
+   layout on it; `tests/host/test_apt.py` holds the table and the
+   512-byte SDFS to the rules a reader applies; and `make test-cf` boots
+   it into the desktop on the machine this project is for -- U1MB flash
+   for SpartaDOS X *and* the PBI BIOS that mounts the partitions, a
+   SIDE 2 with the card on its bus.  No driver file on the card, and no
+   SDX distribution disk needed after all.  Section 3 says why, and what
+   three things about that machine had to be measured first.
+
+After that, in the order they unlock things: `LANG.RSC` and the
+far-string helper; a loadable font.

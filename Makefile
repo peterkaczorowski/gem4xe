@@ -74,7 +74,8 @@ APP_STACK  = 256
 # target, otherwise boots a stale image and compares it against a fresh
 # linker map).
 all: build/hello-boot.atr build/m2-boot.atr build/m3-boot.atr build/m6split-boot.atr \
-     build/m12-d2.atr build/m14-boot.atr build/m17-boot.atr build/gem-boot.atr build/gem-sp.atr
+     build/m12-d2.atr build/m14-boot.atr build/m17-boot.atr build/gem-boot.atr build/gem-sp.atr \
+     build/gem-cf.img
 
 build/%.o: src/%.s
 	@mkdir -p build
@@ -443,6 +444,20 @@ build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt b
 	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --name GEM.COM --boot GEM \
 	    $(DISK_FILES) $(DESK_FILES)
 
+# The CF card: an APT table and two SDFS partitions, with the system in
+# \GEM\ and the demonstration application in \APPS\ -- the install
+# layout of docs/shipping.md section 4, on the volume it was written for.
+# It needs no fixture: unlike a floppy, a card carries no DOS of its own,
+# because SpartaDOS X boots from U1MB flash and the U1MB's PBI BIOS --
+# from the same flash -- reads the APT table and mounts the partitions as
+# D1: and D2: before any DOS runs.  No SIDE.SYS, no driver on the card.
+# tools/apt.py writes the table, tests/host/test_apt.py checks it against
+# the rules Altirra's own parser applies, and test-cf boots it.
+build/gem-cf.img: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a \
+                  tools/mkcf.py tools/apt.py tools/atr.py
+	@rm -f $@
+	python3 tools/mkcf.py $@
+
 # The SpartaDOS disk: a fresh SDFS volume booting the 3.2 fixture's DOS,
 # the same files as the DOS 2 disk, the shell's applications and a
 # directory tree for the selector (tools/mkspdisk.py).  2048 sectors of
@@ -635,6 +650,14 @@ test-m19: build/m17-boot.atr build/desktop.g4a build/desktop.sym
 test-boot: build/gem-sp.atr build/desktop.g4a build/desktop.sym
 	python3 tests/emu/product_boot.py
 
+# The same boot off the product CF card, on the machine this project is
+# for: the U1MB flash's SpartaDOS X and PBI BIOS, a SIDE 2 with the card
+# on its IDE bus.  Outside `make test` for the same reason as test-m14u:
+# it needs both the U1MB fixture and the patched emulator (ALTIRRASDL=).
+test-cf: build/gem-cf.img build/desktop.g4a build/desktop.sym
+	@test -n "$(SRC_U1MB)" || { echo "no U1MB fixture: set [u1mb].flash in fixtures.toml"; exit 1; }
+	python3 tests/emu/cf_boot.py
+
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.
 demo: build/m3-boot.atr
@@ -667,4 +690,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-boot demo movie bench emu-stop clean
+.PHONY: all test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-boot test-cf demo movie bench emu-stop clean

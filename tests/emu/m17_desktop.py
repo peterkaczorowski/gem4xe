@@ -101,8 +101,11 @@ def header(path):
 def listing(disk):
     """The image's directories as the target's Fsfirst/Fsnext report
     them (src/sys/gemdos.c gd_next over SDX's raw entries): {path: [(name,
-    attr, time, date, size)]} keyed the way the desktop's specs name them."""
-    fs = atr.Sdfs(atr.ATRImage.load(disk))
+    attr, time, date, size)]} keyed the way the desktop's specs name them.
+
+    `disk` is the path to an image, or a file system already open on one
+    -- a partition of the CF card, in tests/emu/cf_boot.py."""
+    fs = atr.Sdfs(atr.ATRImage.load(disk)) if isinstance(disk, str) else disk
     dirs = {}
 
     def stamp(e):

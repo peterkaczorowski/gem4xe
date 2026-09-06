@@ -805,17 +805,29 @@ class Sdfs:
 
     @classmethod
     def format(cls, img, volname="GEM4XE"):
-        """Lay a blank SDFS on `img`, the way Altirra's disk explorer does:
-        three boot sectors, the bitmap from sector 4, then the root
-        directory's map sector and its first data sector."""
+        """Lay a blank SDFS on `img`, the way Altirra's disk explorer does
+        (diskfssdx2.cpp, InitNew): the boot sectors, then the bitmap, then
+        the root directory's map sector and its first data sector.
+
+        A 512-byte volume -- which is what a partition on a hard disk or a
+        CF card is -- differs in more than the arithmetic: it has ONE boot
+        sector rather than three, its size byte is 1 rather than the size
+        itself, and its boot header loads at $0440 and starts at $07E0,
+        which is what CLX 1.9 checks for."""
         secsize = img.sector_size
         total = img.sector_count
         shift = secsize.bit_length() - 1
         bm_count = (total >> (shift + 3)) + 1
-        bm_start = 4
+        boot = 1 if secsize >= 512 else 3
+        bm_start = boot + 1
         root_map = bm_start + bm_count
         root_data = root_map + 1
         sb = bytearray(cls.BOOT0) + bytes(secsize - len(cls.BOOT0))
+        sb[1] = boot
+        if secsize >= 512:
+            sb[2], sb[3] = 0x00, 0x04       # load to $0440
+            sb[4], sb[5] = 0xE0, 0x07       # init at $07E0
+            sb[6], sb[7], sb[8] = 0x4C, 0x40, 0x04   # launch: JMP $0440
         sb[9], sb[10] = root_map & 0xFF, root_map >> 8
         sb[11], sb[12] = total & 0xFF, total >> 8
         sb[15] = bm_count
@@ -823,12 +835,13 @@ class Sdfs:
         vol = "".join(c for c in volname.upper().partition(".")[0] if c.isalnum())[:8] or "NEWDISK"
         sb[22:30] = vol.ljust(8).encode("latin-1")
         sb[30] = 1
-        sb[31] = secsize & 0xFF          # $80 = 128, 0 = 256
+        sb[31] = secsize & 0xFF if secsize < 512 else 1   # $80 = 128, 0 = 256
         sb[33], sb[34] = secsize & 0xFF, secsize >> 8
         sb[35], sb[36] = (secsize - 4) // 2, 0
         img.write_sector(1, sb[:img.sector_len(1)])
-        img.write_sector(2, cls.BOOT1)
-        img.write_sector(3, bytes())
+        if boot == 3:
+            img.write_sector(2, cls.BOOT1)
+            img.write_sector(3, bytes())
         for i in range(bm_count):
             img.write_sector(bm_start + i, bytes())
         fs = cls(img)
