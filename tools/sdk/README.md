@@ -1,0 +1,121 @@
+# The gem4xe application kit
+
+Everything needed to build a program that runs on gem4xe, and nothing
+of gem4xe itself: an application links against **no** part of the
+system.  It reaches the VDI, the AES and GEMDOS through three call
+gates and is loaded, relocated and called at run time.
+
+    make                        example/hello.c  ->  hello.g4a
+    make APP=mine.c             mine.c           ->  mine.g4a
+    make APP=src/mine.c NAME=ed                  ->  ed.g4a
+
+You need **Calypsi for the 65816** (`cc65816`, `as65816`, `ln65816`),
+free for hobby use from <https://www.calypsi.cc/>.  Point `CALYPSI` at
+it if it is not in `~/dev/toolchains/calypsi-65816`, and Python 3 for
+the packer.
+
+## What is here
+
+    include/gem.h       every call the system serves, declared
+    lib/gemlib.c        the bindings: they fill a parameter block and
+                        make the call
+    lib/gemabi.s        the three call gates -- COP #$73 (VDI),
+                        COP #$C8 (AES), COP #$01 (GEMDOS)
+    lib/crt_gemapp.s    the start-up: a stack, a direct page, the data
+                        sections, main
+    lib/gemapp.scm      the linker's rules and your memory budget
+    tools/mkg4a.py      ELF x3 -> .g4a, deriving the loader's fixups
+    example/hello.c     a whole program, commented
+
+The library is source, not an object, so that it is built by *your*
+compiler with *your* flags -- and so that you can read what a call
+actually does.
+
+## The shape of a program
+
+    #include "gem.h"
+
+    int main(void)
+    {
+        appl_init();
+        ...
+        appl_exit();
+        return 0;
+    }
+
+`main`'s return value is the program's exit status; gem4xe's shell
+takes it and puts the desktop back.  There is no `argc`/`argv`: a
+command tail arrives through `shel_read`, as it does on an ST.
+
+`example/hello.c` opens a workstation, draws, waits and leaves.  An
+interactive program puts an `evnt_multi` loop where the wait is and
+answers the `WM_*` messages the window manager sends it.
+
+## What you can call
+
+Everything in `include/gem.h`, which is the whole surface the system
+serves:
+
+- **VDI** -- the drawing, in the names it has had since 1984:
+  `v_pline`, `v_gtext`, `vr_recfl`, the ten GDPs (`v_bar`, `v_arc`,
+  `v_circle`, `v_rbox`, `v_justified`, …), `v_fillarea`,
+  `v_contourfill`, the markers, the raster calls (`vro_cpyfm`,
+  `vrt_cpyfm`) with a real `MFDB`, the attribute setters, every `vq*`
+  inquiry, `vs_clip`, the mouse form and the vector exchanges.
+- **AES** -- `appl_*`, `evnt_*`, `menu_*`, `objc_*`, `form_*`,
+  `graf_*`, `wind_*`, `rsrc_*`, `shel_*`, and the file selector
+  (`fsel_input`, `fsel_exinput`).
+- **GEMDOS** -- `Fopen`/`Fread`/`Fwrite`/`Fclose`, `Fsfirst`/`Fsnext`,
+  `Dcreate`/`Ddelete`/`Dsetpath`/`Dgetpath`, `Frename`, `Fattrib`,
+  `Fdatime`, `Malloc`, the clock.
+
+Four VDI opcodes have no binding on purpose -- cell array (10 and 27),
+the valuator (29) and 34 -- because the driver answers them with
+nothing, and a call that silently does nothing is worse than a name
+that is not there.
+
+Two names are gem4xe's rather than the ST's, and say so where they are
+declared: `v_string` answers **one** GEM key code per call rather than
+a line, and a `vex_*` vector is a `LONG` rather than a function
+pointer, because a handler is 24 bits under the large code model.
+
+## Your memory
+
+The three numbers at the top of the `Makefile` are the budget, and the
+link enforces every one:
+
+| | |
+|---|---|
+| `BSS` (2048) | near memory with no initial value: your stack and your uninitialised data |
+| `BITS` (256) | near memory with one: constants, and the initial values of data |
+| `STACK` (256) | how much of `BSS` is stack |
+| code | a far bank of its own -- 64 KB, and not part of the above |
+
+The near part comes out of gem4xe's **2 KB application pool** in bank
+`$00`, so it is the scarce one.  Keep large data in far memory:
+`Malloc` answers with a far address, and `__far` pointers reach all
+15 MB.  A `char buf[1024]` on the stack is how a first program runs
+out.
+
+Leave room in `STACK`: the AES calls back **into** your program --
+a redraw while a dialog is up, for instance -- so the deepest stack is
+not the one your own code makes.
+
+## Getting it onto a disk
+
+A `.g4a` is a file like any other.  Put it beside `GEM.COM` and
+`DESKTOP.RSC` on a gem4xe disk, or in `\APPS\`, and the desktop will
+run it when you double-click it.  In the gem4xe source tree,
+`tools/mkspdisk.py <source.atr> <boot.xex> <out.atr> --add mine.g4a
+MINE.G4A` builds an image with it on.
+
+If your program has a resource, `rsrc_load("MINE.RSC")` reads it from
+the same disk, and it must be a real GEM `.RSC`: gem4xe's resource
+loader is the donor's, and the file's format is the ST's.
+
+## Licence
+
+GPLv2 or later, like the rest of gem4xe -- see `COPYING`.  The library
+here is part of gem4xe, so a program that links it inherits that;
+`gem.h` and the bindings are the interface a GEM program has always
+had, and the terms are the ones EmuTOS's are under.

@@ -592,8 +592,26 @@ gacs-check:
 check-cc:
 	python3 tools/ccbug/check.py --calypsi $(CALYPSI)
 
-test-host:
+# The host tests want the gate application built, because the kit's own
+# test rebuilds it out of the kit and compares the bytes: what test-m11
+# proves about that binary is what the kit inherits.
+test-host: build/m11_app.g4a
 	python3 -m unittest discover -s tests/host -t .
+
+# The application kit (tools/mksdk.py, tools/sdk/): what somebody who is
+# not this repository needs in order to build a program that runs on
+# gem4xe -- the header, the bindings and the start-up as source, the
+# linker's rules, the packer, and one whole example.  Its gate is in the
+# host tests (tests/host/test_sdk.py), which builds it out of a copy of
+# itself in a directory of its own.
+SDK_FILES = tools/mksdk.py tools/sdk/README.md tools/sdk/Makefile \
+            tools/sdk/hello.c src/app/gem.h src/app/gemlib.c \
+            src/app/gemabi.s src/app/crt_gemapp.s src/app/gemapp.scm \
+            tools/mkg4a.py tools/mkxex.py COPYING
+
+sdk: build/gem4xe-sdk.tar.gz
+build/gem4xe-sdk.tar.gz: $(SDK_FILES)
+	python3 tools/mksdk.py build/gem4xe-sdk --tar $@
 
 test-emu: 
 	python3 tests/emu/p0_probe.py
@@ -789,4 +807,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-boot test-cf demo movie bench emu-stop clean

@@ -24,7 +24,7 @@ full-screen repaints.
 
 | Gate | | |
 |---|---|---|
-| `make test-host` | 89/89 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts |
+| `make test-host` | 97/97 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; and the application kit, assembled and built out of a copy of itself in a directory of its own |
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
@@ -151,6 +151,16 @@ objects three times and diffing; the loader puts the near part in a
 bank-`$00` pool and the code in a far bank. The gate application makes
 eighteen VDI and AES calls and the harness checks what each returned,
 from the application's own memory, against the reference.
+
+**There is a kit** (`docs/phase21.md`). `make sdk` packs eleven files —
+the header, the bindings and the start-up as source, the linker's rules,
+the packer and a commented example — with no part of gem4xe itself in
+them, because an application links against none of it. `make` in the
+kit turns `example/hello.c` into `hello.g4a`; `make APP=mine.c` turns
+yours into `mine.g4a`. Its gate builds it out of a copy of itself in a
+directory of its own, and then rebuilds the Phase 10 gate application
+with it and compares the bytes: they are identical, so what `test-m11`
+proves about that binary on real hardware is what the kit inherits.
 
 **And there is a binding for every one of them** (`docs/phase20.md`).
 `src/app/gem.h` declares the whole surface the system serves — the VDI
@@ -331,7 +341,8 @@ committed here, so point `EMUTOS=` at one; `CALYPSI=` finds the tool chain.
 Both default to `~/dev/…`.
 
     make            # build
-    make test-host  # the host tests: no emulator, no fixtures, no toolchain
+    make sdk        # the application kit, for writing a program that runs on it
+    make test-host  # the host tests: no emulator, no fixtures
 
 The emulated gates need [AltirraSDL](https://github.com/ilmenit/AltirraSDL),
 and the ones that put an Ultimate 1MB in the machine need the patches in
