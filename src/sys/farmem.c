@@ -168,13 +168,34 @@ void farmem_probe(void)
 /* A bump allocator.  gem4xe has no need to free far memory -- the AES's
  * lifetime is the program's -- and a bump pointer over megabytes is both
  * correct and impossible to fragment. */
+/* ⚠ A BLOCK MAY NOT CROSS A BANK BOUNDARY.  Calypsi's `__far` pointer
+ * arithmetic is 16-bit WITHIN a bank -- carrying into the bank byte is
+ * what `__huge` is for -- so a buffer that straddles one wraps round to
+ * the bottom of its own bank the moment it is indexed past the edge,
+ * and the bottom of a far bank is the far code image.  That is the same
+ * corruption the comment at the top of this file describes, reached by
+ * another road: a fault that moves with the layout, because whether a
+ * block straddles depends on where the image ended.
+ *
+ * So a request that will not fit in what is left of the current bank
+ * starts the next one.  The gap is lost, which costs at most 64 KB of
+ * the fifteen megabytes this machine has -- and buys an allocator whose
+ * blocks can be indexed. */
 uint32_t far_alloc(uint32_t bytes)
 {
     uint32_t base = farmem.brk;
     uint32_t end = (uint32_t)(farmem.last_bank + 1) << 16;
+    uint32_t bank_end;
+
     if (!farmem.banks || bytes == 0)
         return 0;
     bytes = (bytes + 3) & ~3UL;                 /* keep it 4-byte aligned */
+    if (bytes > 0x10000UL)                      /* no block can be indexed
+                                                 * past its own bank */
+        return 0;
+    bank_end = (base | 0xFFFFUL) + 1;
+    if (base + bytes > bank_end)
+        base = bank_end;                        /* start the next bank */
     if (base + bytes > end || base + bytes < base)
         return 0;
     farmem.brk = base + bytes;

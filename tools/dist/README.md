@@ -18,8 +18,9 @@ halves are generated from the program itself.
 
 gem4xe **refuses a plain 6502** rather than corrupting it: writing the
 bank its code lives in needs a 65C816, and on an NMOS 6502 the long
-store is an unstable undocumented opcode.  You will see that refusal on
-the way in — see *Booting*.
+store is an unstable undocumented opcode.  A machine that *has* an
+accelerator sitting in 6502 mode is a different case, and the loader
+switches that one itself — see *Booting*.
 
 ## In the emulator
 
@@ -37,33 +38,41 @@ Devices**; the machine is an 800XL, PAL, BASIC off.
 
 ## Booting
 
-The Rapidus **always cold-boots as a 6502** — Altirra's own device does
-it in `ColdReset()` ("reset FPGA, force boot on 6502"), and the card
-does the same — so the first thing that happens is the refusal:
+**Put the disk in and wait.**  You should see the machine start, stop
+and start again, and then the desktop.
 
-1. The disk boots and starts GEM by itself, and GEM says
+The restart is not a fault.  A Rapidus **always cold-boots as a 6502** —
+Altirra's own device does it in `ColdReset()` ("reset FPGA, force boot
+on 6502"), and the card does the same — so gem4xe begins loading on a
+CPU it cannot run on.  Rather than refuse, the loader looks for the card
+behind that 6502, and when it finds one it sets `COLDST` (so that the
+restart is a *cold* one: a DOS does not run its start-up file after a
+warm start) and switches the CPU.  That reset is the stop you see.  The
+DOS then starts GEM again, this time on a 65C816, and it stays.
 
-       gem4xe needs a 65C816: this is a 6502.
-       Nothing was changed.  Press a key.
+On a machine with an **Ultimate 1MB** the question does not arise: its
+Rapidus plugin sets the CPU over the M1 signal before the OS runs, so
+there is only one boot.
 
-   That is the expected first screen, and nothing has been written.
-   Press a key to get the DOS back.
+If you have put the files on a disk of your own and start GEM **by
+typing its name**, the same thing happens — but the DOS has no start-up
+file to run afterwards, so you come back to a prompt on a machine that
+is now a 65C816.  Type it once more and it stays.  Giving the disk an
+`AUTORUN.SYS` (DOS 2) or a `STARTUP.BAT`/`AUTOEXEC.BAT` holding `GEM`
+(SpartaDOS) is what makes that second one unnecessary.
 
-2. Run **816**, which is on the disk:
+If the machine does **not** switch itself, you will see this instead —
+and nothing will have been written:
 
-   - on the SpartaDOS disk, type `816` at the `D1:` prompt;
-   - on the DOS 2 disk, take the DOS's binary-load option and give it
-     `816.COM`.
+    gem4xe needs a 65C816: this is a 6502.
+    Nothing was changed.  Press a key.
 
-   It sets `COLDST` so the restart is a cold one — the switch resets the
-   CPU, and a DOS does not run its start-up file on a warm start — and
-   then switches the CPU.  The machine restarts.
-
-3. The DOS starts GEM again, and this time the desktop comes up.
-
-**On a machine with an Ultimate 1MB**, its Rapidus plugin sets the CPU
-over the M1 signal before the OS runs, so the machine is already a
-65C816 and steps 1 and 2 do not arise.
+That means no accelerator answered.  On a machine that has one, the
+escape hatch is on the disk: press a key to get the DOS back and run
+**816** — type `816` at the SpartaDOS prompt, or give `816.COM` to the
+DOS 2 disk's binary-load option.  It makes the same three writes by
+hand.  **If you have to do that, it is worth reporting**, because the
+loader should have.
 
 ## What is on the disks
 

@@ -71,7 +71,8 @@ WHAT_IT_IS = {
     "DESKTOP.G4A": "the desktop, which is an application like any other",
     "DESKTOP.RSC": "its resource -- the menu, the dialogs, the icons",
     "LANG.RSC": "what the system says, so a translation is a file",
-    "816.COM": "puts a Rapidus into 65C816 mode (see Booting)",
+    "816.COM": "puts a Rapidus into 65C816 mode by hand, if the loader "
+               "somehow does not",
     "M11.G4A": "a small program, to have something to double-click",
 }
 

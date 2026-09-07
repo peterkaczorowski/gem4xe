@@ -20,28 +20,29 @@ comes up is what the disk itself started.  It runs the machine's real
 sequence, which the Rapidus makes longer than it looks:
 
   1. the disk boots on the 6502 and the DOS starts GEM by itself, and
-     the loader REFUSES the machine it is on -- "this needs a 65C816"
-     through CIO, nothing written, back to the DOS (src/farload.s, and
-     test-m6 for the same refusal reached by hand).  Reaching it from a
-     start-up file is the new part: a boot that lands on a 6502 must be
-     survivable;
-  2. COLDST ($0244) is set and the CPU is switched.  Both halves are
-     needed.  The switch resets the CPU, and the OS treats that reset as
-     a WARM start -- which is exactly when a DOS does not run its
-     start-up file, so without COLDST the machine comes back to a prompt
-     and sits there.  On a real machine the U1MB Rapidus plugin sets the
-     CPU over the M1 signal before the OS runs and the question does not
-     arise; this is the emulator's version of a machine that powers on
-     as a 65C816.  The write must also be made with the machine idle:
-     mid-SIO it is lost and the DOS hangs (measured);
-  3. the machine comes up cold as a 65C816, the DOS starts GEM again,
-     and this time GEM keeps the machine: the desk, its drive icons and
-     the trash under the menu bar.
+     the loader finds a Rapidus behind the 6502 it is running on and
+     SWITCHES IT: COLDST ($0244) so that the restart is a cold one -- the
+     switch resets the CPU, and the OS treats that reset as a warm start,
+     which is exactly when a DOS does not run its start-up file -- then
+     the PBI slot the card answers on, then the FPGA config register.
+     The CPU resets mid-load and nothing below that write runs
+     (src/farload.s, fl_no816);
+  2. the machine comes up cold as a 65C816 and the DOS starts GEM again.
+     Nothing is typed and nothing is poked: what this gate does to the
+     machine after pressing power is NOTHING, which is the whole claim.
+     On a machine with an Ultimate 1MB the question does not arise -- its
+     Rapidus plugin sets the CPU over the M1 signal before the OS runs;
+  3. this time GEM keeps the machine: the desk, its drive icons and the
+     trash under the menu bar.
 
-What is checked: the disk's own files, read out of the image; the
-refusal, on the screen, from a boot nobody drove; the far image, spot
-checked against the linker's own output where a DOS that mangles the
-staging would show (this gate found one that does -- MyDOS, section 2 of
+  The refusal itself -- a machine with no accelerator at all, told so and
+  left alone -- is test-m6's, which boots the same image with the Rapidus
+  taken out of the machine.
+
+What is checked: the disk's own files, read out of the image; the CPU,
+which must start as a 6502 and become a 65C816 with nothing driving it;
+the far image, spot checked against the linker's own output where a DOS
+that mangles the staging would show (this gate found one that does -- MyDOS, section 2 of
 docs/shipping.md); and the desk at the end, pixel for pixel against
 tools/deskref.py, the desktop's own model run to its first wait.
 
@@ -67,7 +68,7 @@ from deskref import Desktop                 # noqa: E402
 from deskrsc import FILEMENU, QUITITEM      # noqa: E402
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
 from m7_form import F                       # noqa: E402
-from m14_sparta import screen, type_line    # noqa: E402
+from m14_sparta import screen               # noqa: E402
 from m17_desktop import header, listing, menu, DESKTOP, DESK_SYM, SHOT  # noqa: E402
 
 BUILD = os.path.join(ROOT, "build")
@@ -86,20 +87,10 @@ STEP = 20                       # frames between screen reads while waiting for
 HEAD = 64                       # and at the head of every chunk: where a DOS
                                 # that loses part of one shows up
 
-# (the image, what starts GEM on it, the echo its prompt shows when it
-# does -- SpartaDOS prints the batch file's line, a DOS 2 menu prints
-# nothing).
-# (the image, what starts GEM on it, the echo its prompt shows when it
-# does, and how the CPU gets switched: "816" types the disk's own
-# switcher at the prompt, None pokes the registers it writes.)
+# (the image, what starts GEM on it, and how it says so)
 PRODUCTS = [
-    ("gem-sp.atr", "GEM.COM", "SpartaDOS 3.2, STARTUP.BAT and AUTOEXEC.BAT",
-     "D1:GEM", "816"),
-    # A DOS 2's command processor is a menu, not a prompt, and driving it
-    # is not what this gate is for; 816.COM is the same file on both disks
-    # and the disk above runs it.
-    ("gem-boot.atr", "AUTORUN.SYS", "a double-density DOS 2, AUTORUN.SYS",
-     None, None),
+    ("gem-sp.atr", "GEM.COM", "SpartaDOS 3.2, STARTUP.BAT and AUTOEXEC.BAT"),
+    ("gem-boot.atr", "AUTORUN.SYS", "a double-density DOS 2, AUTORUN.SYS"),
 ]
 
 
@@ -161,7 +152,7 @@ def dos2_listing(fs):
                      for e in fs.entries() if e.in_use and e.nameable]}
 
 
-def one(name, progname, how, echo, switch, keep, check):
+def one(name, progname, how, keep, check):
     disk = os.path.abspath(os.path.join(BUILD, name))
     syms = symfile.load(SYMS)
     segs, _ = mkxex.read_elf(ELF)
@@ -204,89 +195,33 @@ def one(name, progname, how, echo, switch, keep, check):
     b = emu.bridge
     shot = os.path.join(SHOTDIR, f"product-{name.split('.')[0]}.png")
     try:
-        # -- 1. the 6502 pass, hands off ------------------------------------
-        # The refusal now STAYS on the screen: the loader abandons the
-        # load and waits for a key before it lets the DOS have the machine
-        # back, because coming back is what wipes the message (a DOS 2
-        # redraws its menu over it).  So this poll can no longer miss it,
-        # and the key below is what a person at the machine would press.
-        seen = None
-        for t in range(0, 12000, STEP):
+        # -- 1. and 2. the machine switches itself ---------------------------
+        # Nothing is typed and nothing is poked.  The disk boots on the
+        # 6502, the DOS starts GEM, and the loader finds a Rapidus behind
+        # the 6502 it is running on and switches it (src/farload.s
+        # fl_no816): COLDST so the restart is a cold one -- a DOS does not
+        # run its start-up file on a warm start -- then the PBI slot and
+        # the FPGA config register.  The CPU resets mid-load, the machine
+        # comes up as a 65C816, and the DOS starts GEM again.
+        #
+        # What says it happened: the CPU.  The screen is a poor witness
+        # here, because both passes look the same until the desk appears.
+        was = b.cmd("HWSTATE").get("cpu", {}).get("mode")
+        check(was == "6502", f"{name}: the machine did not start as a 6502 "
+                             f"(it is {was})")
+        for t in range(0, 20000, STEP):
             b.frames(STEP)
-            lines = [ln for ln in screen(b) if ln.strip()]
-            if any(REFUSAL in ln for ln in lines):
-                seen = lines
+            if b.cmd("HWSTATE").get("cpu", {}).get("mode") != "6502":
                 break
-        if seen is None:
-            check(False, f"{name}: the DOS did not start GEM on the 6502")
+        else:
+            check(False, f"{name}: the loader never switched the CPU")
             for ln in screen(b):
                 if ln.strip():
                     print("   |" + ln)
             return
-        lines = seen
-        print(f"  the DOS started GEM and GEM refused, {t + STEP} frames in")
-        # The second line comes a moment after the first, and it is the one
-        # that matters: the machine was not damaged by being asked.
-        b.frames(20)
-        lines = [ln for ln in screen(b) if ln.strip()]
-        check(any("Nothing was changed" in ln for ln in lines),
-              f"{name}: the refusal does not say the machine was left alone")
-        b.key("A")                       # the loader is waiting to be read
-        b.frames(20)
-        if echo:
-            check(any(ln.rstrip().endswith(echo) for ln in lines),
-                  f"{name}: no {echo!r} on the screen: the DOS did not run the batch")
-        # Let the DOS finish with it.  The refusal is printed early -- the
-        # loader identifies the machine at the first staging chunk -- and
-        # the rest of the 92 KB is read after it, in silence, so a screen
-        # that has stopped changing is NOT the same as an idle DOS.  What
-        # says the DOS has the machine back is the screen changing AGAIN:
-        # a prompt on SpartaDOS, the menu on a DOS 2.  The switch has to
-        # wait for it, because a write made while the DOS is mid-SIO is
-        # lost and the DOS hangs.
-        #
-        # SIX quiet samples, not three.  A DOS that has to read its
-        # command processor back in does it AFTER printing the prompt, so
-        # the screen is settled while the drive is still going -- and
-        # COLDST poked into the middle of that is a hung machine.
-        refused, last, same = lines, None, 0
-        for t in range(0, 20000, 100):
-            b.frames(100)
-            now = [ln for ln in screen(b) if ln.strip()]
-            # CRITIC ($42) is the OS's critical-I/O flag: non-zero while
-            # SIO has the machine.  A screen that has not changed AND a
-            # drive that is not running is what "the DOS has it back"
-            # means; the screen alone said so in the middle of the load.
-            same = same + 1 if (now == last and not b.peek(0x42)) else 0
-            last = now
-            if now != refused and same >= 6:
-                break
-        else:
-            check(False, f"{name}: the DOS never took the machine back")
-            return
-        print(f"  the DOS has it back, {t + 100} frames in: {last[-1][:40] if last else ''}")
-
-        # -- 2. cold, and a 65C816 ------------------------------------------
-        # Either by typing the disk's own switcher -- which is what the
-        # "how to try it" page tells a person to do, so it is what this
-        # gate should prove -- or, where the DOS has no prompt, by making
-        # the writes it makes (tools/mk816.py).
-        if switch:
-            type_line(b, switch, wait=120)
-        else:
-            b.poke(COLDST, 0x01)
-            check(b.peek(COLDST) == 0x01, f"{name}: COLDST did not take")
-            b.poke(0xD1FF, 0x01)        # the PBI slot the Rapidus answers on
-            b.poke(0xD191, 0x00)        # bit 6 clear: the 65C816
-        for t in range(0, 3000, 50):
-            b.frames(50)
-            if not [ln for ln in screen(b) if ln.strip()]:
-                break
-        else:
-            check(False, f"{name}: the machine did not restart after the switch")
-            return
-        print(f"  COLDST set, the CPU switched, the machine restarted "
-              f"{t + 50} frames later")
+        mode = b.cmd("HWSTATE").get("cpu", {}).get("mode")
+        print(f"  the loader switched the machine to {mode} by itself, "
+              f"{t + STEP} frames in, with nothing typed")
 
         # -- 3. the desktop, and the model it must match --------------------
         calls = syms["gem_calls"]
@@ -303,9 +238,6 @@ def one(name, progname, how, echo, switch, keep, check):
         print(f"  GEM settled after {t + 250} frames, {n} calls in")
         fault = b.peek(syms["irq_fault"])
         check(fault == 0, f"{name}: irq_fault {fault} (src/sys/irq.s)")
-        if echo:
-            check(any(ln.rstrip().endswith(echo) for ln in screen(b)),
-                  f"{name}: the batch file did not run on the cold start")
         check(not any(REFUSAL in ln for ln in screen(b)),
               f"{name}: GEM refused the 65C816 as well: the switch did not take")
 
@@ -362,13 +294,13 @@ def main(argv):
             print(f"  FAIL: {msg}")
 
     os.makedirs(SHOTDIR, exist_ok=True)
-    for name, progname, how, echo, switch in PRODUCTS:
+    for name, progname, how in PRODUCTS:
         if only and not any(o in name for o in only):
             continue
-        one(name, progname, how, echo, switch, keep, check)
+        one(name, progname, how, keep, check)
     print(f"{'FAIL' if fails else 'PASS'}: the product disks boot into the "
-          f"desktop, one of them with 816 typed and nothing else, "
-          f"{len(fails)} problem(s)")
+          f"desktop with nothing typed -- the loader switches the CPU "
+          f"itself, {len(fails)} problem(s)")
     return 1 if fails else 0
 
 

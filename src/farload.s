@@ -71,6 +71,20 @@ DOSVEC:       .equ    0x000a          ; the DOS's own re-entry
 
 NMIEN:        .equ    0xd40e
 
+;;; The Rapidus, from the 6502 side.  Its registers are mapped only while
+;;; its PBI device is SELECTED -- Altirra's rapidus.cpp does it in
+;;; SelectPBIDevice(), which enables the memory layer -- so PDVS comes
+;;; first, and $D190/$D191 read open bus until it does.  Measured at a DOS
+;;; prompt on a booted machine (docs/phase23.md): with the Rapidus's slot
+;;; selected, $D190 reads $00 (the FPGA bank register, which answers only
+;;; in 6502 mode) and $D191 reads $40 (bit 6 set: the 6502); every other
+;;; slot, and a machine with no Rapidus in it, reads $FF at both.
+PDVS:         .equ    0xd1ff          ; PBI device select, one bit per device
+RAPBANK:      .equ    0xd190          ; FPGA bank register
+RAPCFG:       .equ    0xd191          ; FPGA config: bit 6 set = 6502
+RAPCFG_6502:  .equ    0x40
+COLDST:       .equ    0x0244          ; the OS: non-zero at RESET means cold
+
 ;;; --- staging area -----------------------------------------------------------
 ;;; Placed by src/gem4xe.scm at $8000.  The header and the payload are ADJACENT
 ;;; ON PURPOSE: that lets mkxex.py describe a whole chunk -- where it goes, how
@@ -278,7 +292,63 @@ fl_hex:       cmp     #10
 fl_hex_d:     adc     #'0'
               rts
 
-fl_no816:     ldx     #.byte0 msg_no816
+;;; ---------------------------------------------------------------------------
+;;; fl_no816 -- this is not a 65816.  Before saying so, look for a Rapidus
+;;; that has simply cold-booted as a 6502, which is how one ALWAYS comes up:
+;;; Altirra's device does it in ColdReset() ("reset FPGA, force boot on
+;;; 6502") and the card does the same.  A machine that can run gem4xe would
+;;; otherwise need a person to switch it before gem4xe would load, which is
+;;; a poor first screen for a program that could do it itself.
+;;;
+;;; What is written, in the order it is written:
+;;;
+;;;   PDVS         the slot, because the card's registers are mapped only
+;;;                while its PBI device is selected -- so this comes
+;;;                first, and it comes before the two reads as well
+;;;   COLDST = 1   the switch RESETS the CPU, and the OS treats that reset
+;;;                as a WARM start -- which is exactly when a DOS does not
+;;;                run its start-up file.  Without this the machine comes
+;;;                back to a prompt instead of loading GEM again.
+;;;   RAPCFG = 0   bit 6 clear: the 65816.  The CPU resets HERE and nothing
+;;;                below this runs.
+;;;
+;;; The slot is not assumed.  Every one of the eight is tried -- one bit
+;;; each, so the mask is shifted left and the eighth shift leaves $00,
+;;; which is also "nothing selected" -- and the card must answer with BOTH
+;;; of the bytes measured above, so a machine with something else on the
+;;; bus is left alone.  The select is put back either way, which is the PBI
+;;; convention: a driver selects for the length of its own call and
+;;; deselects after.  This runs only on a machine that has already failed
+;;; the CPU test, so the alternative to looking at the bus here is refusing
+;;; a machine that could have run.
+;;;
+;;; Every instruction is a plain 6502 one: that is the machine we are on.
+;;; ---------------------------------------------------------------------------
+fl_no816:     lda     #1              ; PBI device 1, then 2, 4, ...
+fl_slot:      sta     PDVS            ; select it; the registers appear
+              pha
+              lda     RAPBANK
+              bne     fl_next         ; open bus, or not in 6502 mode
+              lda     RAPCFG
+              and     #RAPCFG_6502
+              beq     fl_next         ; a 65816 already: not our business
+;;; It answers on both.  Come up cold, and switch.
+              lda     #1
+              sta     COLDST
+              lda     #0
+              sta     RAPCFG          ; ...and the CPU resets here
+;;; Still running, so nothing took the write: try the next slot, and let
+;;; COLDST stand.  A card that answers a probe and then ignores a switch
+;;; is a machine that will refuse below anyway, and a cold RESET on it is
+;;; no worse than a warm one.
+fl_next:      pla
+              asl     a
+              bcc     fl_slot
+;;; Eight shifts and A is $00, which is also "nothing selected" -- the PBI
+;;; convention, and what the bus was before we looked.
+              sta     PDVS
+
+              ldx     #.byte0 msg_no816
               ldy     #.byte1 msg_no816
               lda     #msg_no816_end-msg_no816
 ;;; fl_fail -- say why on IOCB #0, wait to be read, and give the machine

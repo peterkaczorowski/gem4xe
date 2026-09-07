@@ -80,16 +80,25 @@ def far_byte(far, addr):
 
 
 def check_refuses_6502(disk, far):
-    """Boot the same disk on a 6502 and require a clean refusal.
+    """Boot the same disk on a machine with NO ACCELERATOR and require a
+    clean refusal.
 
     On an NMOS 6502 the long store the copier needs ($9F) is an unstable
     undocumented opcode, so "it crashes" is not an acceptable answer: nothing
     may be written at all.  src/farload.s identifies the CPU before its first
     store and prints a line instead.
+
+    The Rapidus is taken out of the machine for this, and that is now part
+    of what is being checked: on a 6502 WITH one the loader switches the
+    card rather than refusing (fl_no816, and test-boot boots a disk that
+    way with nothing typed), so the refusal is only correct where there is
+    nothing to switch -- and the probe that looks for the card must leave
+    a machine without one exactly as it found it.
     """
     fails = []
     firsts = [base for base, _ in far]
-    emu = launch(tag="m6no816", memsize="1088K", extra_args=["--disk", disk])
+    emu = launch(tag="m6no816", memsize="1088K", rapidus=False,
+                 extra_args=["--disk", disk])
     b = emu.bridge
     try:
         b.frames(300)                       # no CPU switch: still a 6502

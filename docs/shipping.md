@@ -41,6 +41,12 @@ volume.
 
 ## 2. Booting straight into the desktop
 
+**Since phase 23 the machine also switches its own CPU** (`phase23.md`):
+a Rapidus cold-boots as a 6502, and rather than refuse a machine that
+could run it, the loader probes the PBI slots for the card, sets
+`COLDST` and switches. What follows is about the other half -- which
+file each DOS runs at boot -- and is unchanged by that.
+
 Every DOS on this platform runs something at boot, and no two of them
 agree on its name.  What follows was read out of the DOSes themselves
 and then booted, because the received wisdom was wrong twice.

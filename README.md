@@ -24,7 +24,7 @@ full-screen repaints.
 
 | Gate | | |
 |---|---|---|
-| `make test-host` | 105/105 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; and the application kit, assembled and built out of a copy of itself in a directory of its own |
+| `make test-host` | 108/108 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; the application kit, assembled and built out of a copy of itself in a directory of its own; and the far allocator, asked for the blocks that used to straddle a bank |
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
@@ -48,7 +48,7 @@ full-screen repaints.
 | `make test-m19` | PASS | the desktop's writes to a disk: File -> New folder, the name typed into its dialog, `Dcreate`, the folder in the listing; the same name again, refused, and the alert -- text and all -- out of DESKTOP.RSC's free strings; an item dragged into the new folder and copied there, the walk a DTA deep per level; the window fulled and File -> Show info on the folder -- what it holds, counted -- and then on a file, whose extension is edited in place and whose OK renames it (`Frename`); the SUB tree selected and File -> Delete, counted first, confirmed in a dialog whose counts tick down, and the tree gone -- fifteen screens, `G` at eight waits, 549 calls on both sides, and the disk image itself read back afterwards |
 | `make test-m20` | PASS | what the system says comes off the disk: `form_error` on three disks — the product's `LANG.RSC`, a German translation of it, and no file at all — each compared with the model given the strings that disk carries, so the first and third draw the same screen and the second draws the translation |
 | `make test-m21` | PASS | a loadable font: the system font inverted so every glyph differs, read as `SYSTEM.FNT` at start-up off one disk and absent from another, with `vqt_name`, `vst_font` and GDOS's `vst_load_fonts`/`vst_unload_fonts` answering for the right face either way |
-| `make test-boot` | PASS | both product disks booting into the desktop, one of them with `816` typed at the prompt and nothing else: `build/gem-sp.atr` (SpartaDOS, `STARTUP.BAT` for 3.2 and `AUTOEXEC.BAT` for X) and `build/gem-boot.atr` (a double-density DOS 2, the system named `AUTORUN.SYS`, `DUP.SYS` still on it and 42 KB free); the 6502 boot runs GEM by itself and ends in the loader's refusal; `COLDST` and the Rapidus switch bring the machine up cold as a 65C816, the DOS starts GEM again, and the far image is spot-checked against the linker's output before the desk is compared pixel for pixel with the desktop model at its first wait |
+| `make test-boot` | PASS | both product disks booting into the desktop with **nothing typed and nothing poked** — the loader finds the Rapidus behind the 6502 the machine came up as and switches it itself: `build/gem-sp.atr` (SpartaDOS, `STARTUP.BAT` for 3.2 and `AUTOEXEC.BAT` for X) and `build/gem-boot.atr` (a double-density DOS 2, the system named `AUTORUN.SYS`, `DUP.SYS` still on it and 42 KB free); the 6502 boot runs GEM by itself and ends in the loader's refusal; `COLDST` and the Rapidus switch bring the machine up cold as a 65C816, the DOS starts GEM again, and the far image is spot-checked against the linker's output before the desk is compared pixel for pixel with the desktop model at its first wait |
 | `make test-cf` | PASS | the product **CF card** booting into the desktop: `build/gem-cf.img`, an APT table and two SDFS partitions, on a SIDE 2's IDE bus, with SpartaDOS X *and* the PBI BIOS that mounts those partitions coming from a real Ultimate 1MB flash image. The gate walks the U1MB BIOS setup itself (PBI BIOS on, hard disk on, an ID that is not the Rapidus's) from a fresh profile of its own, keeps the SIDE's SDX bank unmapped so the PBI BIOS will touch the disk, and then runs the same boot as `test-boot` -- refusal, switch, desk against the model. Needs the U1MB fixture and the patched emulator, so not in `make test` |
 | `make test-m14u` `test-m15u` | PASS | the same two on SpartaDOS X 4.49b booted from a real Ultimate 1MB flash image, U1MB switched on -- needs the patched emulator in `tools/altirra/`, so not in `make test` |
 | `make check-cc` | PASS | the ten compiler bugs worked around, in the vendor's simulator |
@@ -151,6 +151,38 @@ objects three times and diffing; the loader puts the near part in a
 bank-`$00` pool and the code in a far bank. The gate application makes
 eighteen VDI and AES calls and the harness checks what each returned,
 from the application's own memory, against the reference.
+
+**The loader switches the machine** (`docs/phase23.md`). A Rapidus always
+cold-boots as a 6502 — Altirra's device does it in `ColdReset()` and the
+card does the same — so gem4xe used to refuse a machine that could have
+run it, and every gate got past that by poking `$D1FF`/`$D191` over the
+test bridge. Thirty-five bytes in `src/farload.s` now probe the eight PBI
+slots for a card that answers on **both** of the registers measured at a
+DOS prompt (`$D190` reads `$00`, `$D191` bit 6 set; open bus reads `$FF`
+at each), set `COLDST` so the restart is a cold one, and switch. The CPU
+resets inside that write. `test-boot` now does nothing to the machine
+after power, and `test-m6` boots the same image with the Rapidus taken
+out, which is where the refusal is still right — and gates that the probe
+leaves such a machine exactly as it found it.
+
+**⚠ And it found a real one** (`docs/phase24.md`). Those thirty-five
+bytes turned `test-m14x` red, and thirty-five bytes of *dead padding*
+did the same, at some sizes and not others — a fault with no clean
+boundary. It was not the near memory at all: `far_alloc` was a bump
+allocator with nothing stopping a block from **straddling a bank
+boundary**, and Calypsi's `__far` pointer arithmetic is 16 bits *within*
+a bank (carrying into the bank byte is what `__huge` is for). A buffer
+that straddles one wraps to the bottom of its own bank the moment it is
+indexed past the edge — and the bottom of a far bank is the far code
+image. It is the phase 6 corruption by another road, the file selector's
+900-byte name list was the block, and **master was green by luck**.
+Eight lines start the next bank rather than straddle, and
+`tests/host/test_farmem.py` asks the allocator for the blocks that used
+to break it. Bank `$00` is still full — four bytes free in the runner's
+link — but growing it no longer corrupts anything; the 608 bytes of fill
+patterns that would fix that are on the branch `near-room`, unmerged,
+because moving them makes `patptr` a far pointer and two comparisons in
+the workstation code compare it against a near array.
 
 **`make dist` is what a tester is handed** (`docs/phase22.md`): the
 bootable disks, the system's files loose for a disk of their own, the
@@ -286,9 +318,9 @@ while the SIDE still claims the cartridge window (`docs/shipping.md`
 Both product disks now come up in the desktop rather than at a prompt:
 the SpartaDOS one from a `STARTUP.BAT` and an `AUTOEXEC.BAT` (3.2 runs
 the first, X the second), the DOS 2 one from `AUTORUN.SYS` — which
-DOS II+/D, the disk's old DOS, turns out not to have at all. The only
-thing typed on the way in is `816`, which switches the CPU, because a
-Rapidus always cold-boots as a 6502 (`docs/phase22.md`). **No string a person
+DOS II+/D, the disk's old DOS, turns out not to have at all. Nothing is
+typed on the way in: a Rapidus always cold-boots as a 6502, and the
+loader switches it (`docs/phase23.md`). **No string a person
 reads belongs in the C**, and none does now: the desktop's eleven alerts are nine free strings of DESKTOP.RSC,
 asked for by index (`fun_alert`, the donor's shape), and the gate puts
 one on the screen and compares it. The one exception is the alert that

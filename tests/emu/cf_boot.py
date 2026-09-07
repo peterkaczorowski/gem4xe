@@ -45,8 +45,9 @@ of the run below:
     again through the run.
 
 The rest is the boot the floppy gate runs (tests/emu/product_boot.py):
-the card starts GEM on the 6502 and the loader refuses the machine, the
-gate sets COLDST and switches the CPU, and the desktop comes up on the
+the card starts GEM on the 6502 the machine came up as, the loader finds
+the Rapidus behind it and switches the CPU itself, and the desktop comes
+up on the
 restart and is compared with the model.
 
   python3 tests/emu/cf_boot.py [--shot]
@@ -72,7 +73,7 @@ import apt, atr, mkxex, symfile, vbxeref    # noqa: E402
 from m4_aes import SHOTDIR                  # noqa: E402
 from m14_sparta import screen               # noqa: E402
 from m17_desktop import listing             # noqa: E402
-from product_boot import (COLDST, FARMEM_BRK, REFUSAL, desk_model,   # noqa: E402
+from product_boot import (FARMEM_BRK, REFUSAL, desk_model,          # noqa: E402
                           far_byte, far_probes)
 
 CARD = os.path.join(BUILD, "gem-cf.img")
@@ -188,52 +189,37 @@ def main(argv):
         print(f"  the BIOS configured in {len(SETUP)} keys: "
               f"{SETUP[2][1]}, {SETUP[6][1]}")
 
-        # -- 2. the card boots, on the 6502 --------------------------------
-        for t in range(0, 12000, 100):
+        # -- 2. and 3. the card boots and the machine switches itself ------
+        # As on the floppies (tests/emu/product_boot.py): the PBI BIOS
+        # mounts the card, SpartaDOS X runs AUTOEXEC.BAT, GEM begins
+        # loading on the 6502 this machine came up as, and the loader
+        # finds the Rapidus behind it and switches it (src/farload.s
+        # fl_no816).  Nothing here types or pokes.
+        #
+        # The PBI BIOS that mounted the card is itself a PBI device, and
+        # the probe writes the select register: it selects the slot the
+        # card answers on, and the CPU resets inside that same write, so
+        # what the BIOS had selected never has to be put back.
+        was = b.cmd("HWSTATE").get("cpu", {}).get("mode")
+        check(was == "6502", f"the machine did not start as a 6502 (it is {was})")
+        banner = False
+        for t in range(0, 20000, 100):
             keep_switch(b, 100)
             lines = [ln for ln in screen(b) if ln.strip()]
-            if any(REFUSAL in ln for ln in lines):
+            banner = banner or any(PBI_BANNER in ln for ln in lines)
+            if b.cmd("HWSTATE").get("cpu", {}).get("mode") != "6502":
                 break
         else:
-            check(False, "the card did not start GEM on the 6502")
+            check(False, "the loader never switched the CPU")
             for ln in screen(b):
                 if ln.strip():
                     print("   |" + ln)
             return 1
-        check(any(PBI_BANNER in ln for ln in lines),
-              "no PBI BIOS banner: the card was not mounted by it")
-        print(f"  the PBI BIOS mounted the card and SpartaDOS X ran "
-              f"AUTOEXEC.BAT; GEM refused the 6502, {t + 100} frames in")
-        b.key("A")                       # the loader waits to be read
-        keep_switch(b, 20)
-
-        refused, last, same = lines, None, 0
-        for t in range(0, 20000, 100):
-            keep_switch(b, 100)
-            now = [ln for ln in screen(b) if ln.strip()]
-            same = same + 1 if now == last else 0
-            last = now
-            if now != refused and same >= 3:
-                break
-        else:
-            check(False, "the DOS never took the machine back")
-            return 1
-        print(f"  the DOS has it back, {t + 100} frames in")
-
-        # -- 3. cold, and a 65C816 -----------------------------------------
-        b.poke(COLDST, 0x01)
-        check(b.peek(COLDST) == 0x01, "COLDST did not take")
-        b.poke(0xD1FF, 0x01)            # the PBI slot the Rapidus answers on
-        b.poke(0xD191, 0x00)            # bit 6 clear: the 65C816
-        for t in range(0, 6000, 50):
-            keep_switch(b, 50)
-            if not [ln for ln in screen(b) if ln.strip()]:
-                break
-        else:
-            check(False, "the machine did not restart after the switch")
-            return 1
-        print(f"  COLDST set, the CPU switched, the machine restarted "
-              f"{t + 50} frames later")
+        check(banner, "no PBI BIOS banner: the card was not mounted by it")
+        mode = b.cmd("HWSTATE").get("cpu", {}).get("mode")
+        print(f"  the PBI BIOS mounted the card, SpartaDOS X ran "
+              f"AUTOEXEC.BAT, and the loader switched the machine to "
+              f"{mode} by itself, {t + 100} frames in")
 
         # -- 4. the desktop ------------------------------------------------
         calls = syms["gem_calls"]

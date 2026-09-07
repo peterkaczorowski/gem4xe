@@ -8,6 +8,12 @@ one page that says how to try it.
     make test-boot    both disks, one of them switched by typing 816
     make test-host    105 tests, eight of them the distribution's
 
+> **Superseded in part by `phase23.md`.**  Writing the page made it
+> obvious that the loader should do this itself, and it now does: a disk
+> boots into the desktop with nothing typed.  `816.COM` stays on the
+> disks as the escape hatch, and everything below is why it exists and
+> what it writes.
+
 ## The thing that was actually missing
 
 Not the packaging.  **A machine that can run gem4xe cannot start it.**
@@ -94,8 +100,8 @@ are there so that a person can build a disk from a DOS of their own.
   config register reads back — but only against Altirra's model of it,
   and selecting a PBI slot that belongs to somebody else's hardware is
   the kind of guess this project does not make without measuring.
-- **The refusal is still the first thing a tester sees.**  The loader
-  could make the switch itself when it finds a 6502 with a Rapidus
-  behind it, and then a disk would boot into the desktop unattended.
-  That is a change to what the loader does on a machine it cannot run
-  on, and it needs the identification above.
+- ~~**The refusal is still the first thing a tester sees.**~~  Paid, in
+  `phase23.md`: the loader probes the PBI slots, identifies the card on
+  two registers measured at a DOS prompt, and switches it.  A disk boots
+  into the desktop with nothing typed, and the refusal is left for the
+  machine it was written for -- one with no accelerator at all.
