@@ -497,18 +497,24 @@ build/m3-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt b
 # is named AUTORUN.SYS because that is what the DOS runs at boot, and
 # --sweep takes everything but the DOS off the fixture, which was
 # somebody's magazine disk (docs/shipping.md, section 2).
-build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc
+build/816.com: tools/mk816.py
+	@mkdir -p build
+	python3 tools/mk816.py $@
+
+build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com
 	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
 	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
-	    --add build/m11_app.g4a M11.G4A --add build/lang.rsc LANG.RSC
+	    --add build/m11_app.g4a M11.G4A --add build/lang.rsc LANG.RSC \
+	    --add build/816.com 816.COM
 
-build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc build/lang.rsc $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
+build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc build/lang.rsc build/816.com $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --name GEM.COM --boot GEM \
-	    $(DISK_FILES) $(DESK_FILES) --add build/lang.rsc LANG.RSC
+	    $(DISK_FILES) $(DESK_FILES) --add build/lang.rsc LANG.RSC \
+	    --add build/816.com 816.COM
 
 # The CF card: an APT table and two SDFS partitions, with the system in
 # \GEM\ and the demonstration application in \APPS\ -- the install
@@ -612,6 +618,21 @@ SDK_FILES = tools/mksdk.py tools/sdk/README.md tools/sdk/Makefile \
 sdk: build/gem4xe-sdk.tar.gz
 build/gem4xe-sdk.tar.gz: $(SDK_FILES)
 	python3 tools/mksdk.py build/gem4xe-sdk --tar $@
+
+# The distribution: what a tester is handed -- the bootable disks, the
+# system's files loose for a disk of their own, the kit, and a page that
+# says how to try it (tools/dist/README.md, filled in by tools/mkdist.py
+# from the images and from the desktop's own menu, so the half of it
+# that could go stale cannot).  DIST is the name it takes: the date and
+# the commit unless you say otherwise.
+DIST ?= build/gem4xe-$(shell date +%F)-$(shell git rev-parse --short HEAD 2>/dev/null || echo local)
+DIST_DISKS = build/gem-sp.atr build/gem-boot.atr build/gem-cf.img
+DIST_SYS   = build/gem.xex build/desktop.g4a build/desktop.rsc \
+             build/lang.rsc build/816.com build/m11_app.g4a
+
+dist: $(DIST_SYS) $(DIST_DISKS) build/gem4xe-sdk.tar.gz \
+      tools/mkdist.py tools/dist/README.md tools/mksdk.py
+	python3 tools/mkdist.py $(DIST) --tar $(DIST).tar.gz
 
 test-emu: 
 	python3 tests/emu/p0_probe.py
@@ -807,4 +828,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-boot test-cf demo movie bench emu-stop clean

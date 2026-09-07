@@ -24,7 +24,7 @@ full-screen repaints.
 
 | Gate | | |
 |---|---|---|
-| `make test-host` | 97/97 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; and the application kit, assembled and built out of a copy of itself in a directory of its own |
+| `make test-host` | 105/105 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; and the application kit, assembled and built out of a copy of itself in a directory of its own |
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
@@ -48,7 +48,7 @@ full-screen repaints.
 | `make test-m19` | PASS | the desktop's writes to a disk: File -> New folder, the name typed into its dialog, `Dcreate`, the folder in the listing; the same name again, refused, and the alert -- text and all -- out of DESKTOP.RSC's free strings; an item dragged into the new folder and copied there, the walk a DTA deep per level; the window fulled and File -> Show info on the folder -- what it holds, counted -- and then on a file, whose extension is edited in place and whose OK renames it (`Frename`); the SUB tree selected and File -> Delete, counted first, confirmed in a dialog whose counts tick down, and the tree gone -- fifteen screens, `G` at eight waits, 549 calls on both sides, and the disk image itself read back afterwards |
 | `make test-m20` | PASS | what the system says comes off the disk: `form_error` on three disks — the product's `LANG.RSC`, a German translation of it, and no file at all — each compared with the model given the strings that disk carries, so the first and third draw the same screen and the second draws the translation |
 | `make test-m21` | PASS | a loadable font: the system font inverted so every glyph differs, read as `SYSTEM.FNT` at start-up off one disk and absent from another, with `vqt_name`, `vst_font` and GDOS's `vst_load_fonts`/`vst_unload_fonts` answering for the right face either way |
-| `make test-boot` | PASS | both product disks booting into the desktop with nothing typed: `build/gem-sp.atr` (SpartaDOS, `STARTUP.BAT` for 3.2 and `AUTOEXEC.BAT` for X) and `build/gem-boot.atr` (a double-density DOS 2, the system named `AUTORUN.SYS`, `DUP.SYS` still on it and 42 KB free); the 6502 boot runs GEM by itself and ends in the loader's refusal; `COLDST` and the Rapidus switch bring the machine up cold as a 65C816, the DOS starts GEM again, and the far image is spot-checked against the linker's output before the desk is compared pixel for pixel with the desktop model at its first wait |
+| `make test-boot` | PASS | both product disks booting into the desktop, one of them with `816` typed at the prompt and nothing else: `build/gem-sp.atr` (SpartaDOS, `STARTUP.BAT` for 3.2 and `AUTOEXEC.BAT` for X) and `build/gem-boot.atr` (a double-density DOS 2, the system named `AUTORUN.SYS`, `DUP.SYS` still on it and 42 KB free); the 6502 boot runs GEM by itself and ends in the loader's refusal; `COLDST` and the Rapidus switch bring the machine up cold as a 65C816, the DOS starts GEM again, and the far image is spot-checked against the linker's output before the desk is compared pixel for pixel with the desktop model at its first wait |
 | `make test-cf` | PASS | the product **CF card** booting into the desktop: `build/gem-cf.img`, an APT table and two SDFS partitions, on a SIDE 2's IDE bus, with SpartaDOS X *and* the PBI BIOS that mounts those partitions coming from a real Ultimate 1MB flash image. The gate walks the U1MB BIOS setup itself (PBI BIOS on, hard disk on, an ID that is not the Rapidus's) from a fresh profile of its own, keeps the SIDE's SDX bank unmapped so the PBI BIOS will touch the disk, and then runs the same boot as `test-boot` -- refusal, switch, desk against the model. Needs the U1MB fixture and the patched emulator, so not in `make test` |
 | `make test-m14u` `test-m15u` | PASS | the same two on SpartaDOS X 4.49b booted from a real Ultimate 1MB flash image, U1MB switched on -- needs the patched emulator in `tools/altirra/`, so not in `make test` |
 | `make check-cc` | PASS | the ten compiler bugs worked around, in the vendor's simulator |
@@ -151,6 +151,18 @@ objects three times and diffing; the loader puts the near part in a
 bank-`$00` pool and the code in a far bank. The gate application makes
 eighteen VDI and AES calls and the harness checks what each returned,
 from the application's own memory, against the reference.
+
+**`make dist` is what a tester is handed** (`docs/phase22.md`): the
+bootable disks, the system's files loose for a disk of their own, the
+kit, and a page that says how to try it — half of which is generated
+from the desktop's own menu and from the disk images, so it cannot
+claim something the resource greys out. It carries **`816.COM`**, which
+is the piece that was actually missing: a Rapidus always cold-boots as
+a 6502, so a tester's first screen is the loader's refusal, and until
+now only the test harness could make the switch. Fourteen bytes set
+`COLDST` and write `$D1FF`/`$D191`; `test-boot` now types `816` at the
+SpartaDOS prompt rather than poking those registers, so what the page
+says to do is what the gate does.
 
 **There is a kit** (`docs/phase21.md`). `make sdk` packs eleven files —
 the header, the bindings and the start-up as source, the linker's rules,
@@ -271,11 +283,12 @@ runs. Three things about that machine had to be read out of its own
 firmware first, including the wait at `$D803` that stops the disk dead
 while the SIDE still claims the cartridge window (`docs/shipping.md`
 §3). The floppy is now the bootstrap, not the ceiling.
-Both product disks now come up in the desktop rather than at a prompt,
-and `make test-boot` boots them with nothing typed: the SpartaDOS one
-from a `STARTUP.BAT` and an `AUTOEXEC.BAT` (3.2 runs the first, X the
-second), the DOS 2 one from `AUTORUN.SYS` — which DOS II+/D, the disk's
-old DOS, turns out not to have at all. **No string a person
+Both product disks now come up in the desktop rather than at a prompt:
+the SpartaDOS one from a `STARTUP.BAT` and an `AUTOEXEC.BAT` (3.2 runs
+the first, X the second), the DOS 2 one from `AUTORUN.SYS` — which
+DOS II+/D, the disk's old DOS, turns out not to have at all. The only
+thing typed on the way in is `816`, which switches the CPU, because a
+Rapidus always cold-boots as a 6502 (`docs/phase22.md`). **No string a person
 reads belongs in the C**, and none does now: the desktop's eleven alerts are nine free strings of DESKTOP.RSC,
 asked for by index (`fun_alert`, the donor's shape), and the gate puts
 one on the screen and compares it. The one exception is the alert that
@@ -342,6 +355,7 @@ Both default to `~/dev/…`.
 
     make            # build
     make sdk        # the application kit, for writing a program that runs on it
+    make dist       # what a tester is handed: the disks, the kit, and how to try it
     make test-host  # the host tests: no emulator, no fixtures
 
 The emulated gates need [AltirraSDL](https://github.com/ilmenit/AltirraSDL),

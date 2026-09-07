@@ -67,7 +67,7 @@ from deskref import Desktop                 # noqa: E402
 from deskrsc import FILEMENU, QUITITEM      # noqa: E402
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
 from m7_form import F                       # noqa: E402
-from m14_sparta import screen               # noqa: E402
+from m14_sparta import screen, type_line    # noqa: E402
 from m17_desktop import header, listing, menu, DESKTOP, DESK_SYM, SHOT  # noqa: E402
 
 BUILD = os.path.join(ROOT, "build")
@@ -89,9 +89,17 @@ HEAD = 64                       # and at the head of every chunk: where a DOS
 # (the image, what starts GEM on it, the echo its prompt shows when it
 # does -- SpartaDOS prints the batch file's line, a DOS 2 menu prints
 # nothing).
+# (the image, what starts GEM on it, the echo its prompt shows when it
+# does, and how the CPU gets switched: "816" types the disk's own
+# switcher at the prompt, None pokes the registers it writes.)
 PRODUCTS = [
-    ("gem-sp.atr", "GEM.COM", "SpartaDOS 3.2, STARTUP.BAT and AUTOEXEC.BAT", "D1:GEM"),
-    ("gem-boot.atr", "AUTORUN.SYS", "a double-density DOS 2, AUTORUN.SYS", None),
+    ("gem-sp.atr", "GEM.COM", "SpartaDOS 3.2, STARTUP.BAT and AUTOEXEC.BAT",
+     "D1:GEM", "816"),
+    # A DOS 2's command processor is a menu, not a prompt, and driving it
+    # is not what this gate is for; 816.COM is the same file on both disks
+    # and the disk above runs it.
+    ("gem-boot.atr", "AUTORUN.SYS", "a double-density DOS 2, AUTORUN.SYS",
+     None, None),
 ]
 
 
@@ -153,7 +161,7 @@ def dos2_listing(fs):
                      for e in fs.entries() if e.in_use and e.nameable]}
 
 
-def one(name, progname, how, echo, keep, check):
+def one(name, progname, how, echo, switch, keep, check):
     disk = os.path.abspath(os.path.join(BUILD, name))
     syms = symfile.load(SYMS)
     segs, _ = mkxex.read_elf(ELF)
@@ -259,10 +267,17 @@ def one(name, progname, how, echo, keep, check):
         print(f"  the DOS has it back, {t + 100} frames in: {last[-1][:40] if last else ''}")
 
         # -- 2. cold, and a 65C816 ------------------------------------------
-        b.poke(COLDST, 0x01)
-        check(b.peek(COLDST) == 0x01, f"{name}: COLDST did not take")
-        b.poke(0xD1FF, 0x01)            # the PBI slot the Rapidus answers on
-        b.poke(0xD191, 0x00)            # bit 6 clear: the 65C816
+        # Either by typing the disk's own switcher -- which is what the
+        # "how to try it" page tells a person to do, so it is what this
+        # gate should prove -- or, where the DOS has no prompt, by making
+        # the writes it makes (tools/mk816.py).
+        if switch:
+            type_line(b, switch, wait=120)
+        else:
+            b.poke(COLDST, 0x01)
+            check(b.peek(COLDST) == 0x01, f"{name}: COLDST did not take")
+            b.poke(0xD1FF, 0x01)        # the PBI slot the Rapidus answers on
+            b.poke(0xD191, 0x00)        # bit 6 clear: the 65C816
         for t in range(0, 3000, 50):
             b.frames(50)
             if not [ln for ln in screen(b) if ln.strip()]:
@@ -347,12 +362,13 @@ def main(argv):
             print(f"  FAIL: {msg}")
 
     os.makedirs(SHOTDIR, exist_ok=True)
-    for name, progname, how, echo in PRODUCTS:
+    for name, progname, how, echo, switch in PRODUCTS:
         if only and not any(o in name for o in only):
             continue
-        one(name, progname, how, echo, keep, check)
-    print(f"{'FAIL' if fails else 'PASS'}: the product disks boot into the desktop "
-          f"with nothing typed, {len(fails)} problem(s)")
+        one(name, progname, how, echo, switch, keep, check)
+    print(f"{'FAIL' if fails else 'PASS'}: the product disks boot into the "
+          f"desktop, one of them with 816 typed and nothing else, "
+          f"{len(fails)} problem(s)")
     return 1 if fails else 0
 
 

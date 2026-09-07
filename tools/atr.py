@@ -84,7 +84,8 @@ class ATRImage:
 
     @classmethod
     def load(cls, path):
-        blob = open(path, "rb").read()
+        with open(path, "rb") as f:
+            blob = f.read()
         if len(blob) < HEADER_SIZE:
             raise ATRError("file too small")
         magic, plo, ssz, phi = struct.unpack_from("<HHHB", blob, 0)
