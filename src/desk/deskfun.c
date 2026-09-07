@@ -15,6 +15,11 @@
  * A delete counts first and then deletes, so the dialog can say what
  * it is about to do and count down as it does it -- the donor's
  * OP_COUNT pass followed by OP_DELETE, with its ADCPALER dialog.
+ *
+ * Show info (fun_info, the donor's deskinf.c inf_file_folder) is the
+ * same dialog machinery pointed at one item: what it is, and the two
+ * things about it a person can change here -- its name, which makes
+ * this the desktop's rename, and its read-only bit.
  */
 #include "desk.h"
 
@@ -113,6 +118,75 @@ static void inf_numset(OBJECT *tree, WORD obj, LONG value)
         text[--i] = ' ';
 }
 
+/* Two digits at `at`, as a date's fields are written. */
+static void inf_two(char *at, WORD v)
+{
+    at[0] = (char)('0' + (WORD)((v / 10) % 10));
+    at[1] = (char)('0' + (WORD)(v % 10));
+}
+
+/* The stamp a directory entry carries, into the ten places its field
+ * scatters: day, month, year, hour, minute.  The ORDER is the one thing
+ * in the line a translation cannot move -- the separators are the
+ * resource's, the order is here -- where the donor picks it from the
+ * country the ROM was built for (deskinf.c inf_dttm, datestr). */
+static void inf_dttm(OBJECT *tree, WORD obj, UWORD date, UWORD time)
+{
+    char places[11];
+
+    inf_two(places + 0, (WORD)(date & 0x1F));           /* day */
+    inf_two(places + 2, (WORD)((date >> 5) & 0x0F));    /* month */
+    inf_two(places + 4, (WORD)(((date >> 9) + 80) % 100));
+    inf_two(places + 6, (WORD)((time >> 11) & 0x1F));   /* hour */
+    inf_two(places + 8, (WORD)((time >> 5) & 0x3F));    /* minute */
+    places[10] = 0;
+    inf_sset(tree, obj, places);
+}
+
+/* "ONE.TXT" -> the eleven places "________.___" scatters, "ONE     TXT"
+ * (the donor's fmt_str, util/optimize.c).  A name with no extension is
+ * NOT padded out -- "SUB" stays three characters -- because the places
+ * left over are where the edit cursor then sits, ready to be typed
+ * into rather than backspaced through. */
+static void fmt_name(const char __far *name, char *places)
+{
+    WORD i, j = 0;
+
+    for (i = 0; name[i] && name[i] != '.'; i++)
+        if (j < 8)
+            places[j++] = name[i];          /* excess before the dot is eaten */
+    if (name[i] == '.') {
+        i++;
+        while (j < 8)
+            places[j++] = ' ';
+        while (j < 11 && name[i])
+            places[j++] = name[i++];
+    }
+    places[j] = 0;
+}
+
+/* ...and back (unfmt_str): a blank place is not part of the name, in
+ * the extension as well as in the name, and an extension of nothing but
+ * blanks takes its dot with it. */
+static void unfmt_name(const char *places, char *name)
+{
+    WORD i, j = 0, dot;
+
+    for (i = 0; places[i] && i < 8; i++)
+        if (places[i] != ' ')
+            name[j++] = places[i];
+    if (places[i]) {
+        dot = j;
+        name[j++] = '.';
+        for (; places[i]; i++)
+            if (places[i] != ' ')
+                name[j++] = places[i];
+        if (j == (WORD)(dot + 1))
+            j = dot;
+    }
+    name[j] = 0;
+}
+
 /* Which of the two buttons after ok is selected: 0 for it, 1 for the
  * next (the donor's inf_what through inf_gindex), the state cleared. */
 static WORD inf_what(OBJECT *tree, WORD ok)
@@ -173,6 +247,16 @@ static char *add_fname(char *path, const char __far *name)
     char *tail = path_tail(path);
 
     put_far(tail, name);
+    return tail;
+}
+
+/* ...and the same from a name in bank $00, which is where a name typed
+ * into a dialog is. */
+static char *add_name(char *path, const char *name)
+{
+    char *tail = path_tail(path);
+
+    put_str(tail, name);
     return tail;
 }
 
@@ -377,6 +461,8 @@ static WORD walk(WORD level, WORD op)
                 tail = add_fname(op_path, dta->d_fname);
                 if (op == OP_COUNT) {
                     G.g_nfiles++;
+                    G.g_opsize += dta->d_length;    /* what Show info calls
+                                                     * a folder's size */
                 } else if (op == OP_DELETE) {
                     if (!del_file())
                         return FALSE;
@@ -400,18 +486,37 @@ static WORD walk(WORD level, WORD op)
 
 /* -- the two operations ------------------------------------------------- */
 
-/* The dialog serves all three operations and says which one it is from
- * a string of the resource -- a title in the C could not be translated
+/* A dialog's title, from a free string of the resource, and centred on
+ * the box then rather than placed in the file: the donor's align_title
+ * (deskmain.c), which moves the object rather than padding the string,
+ * so a title of any length -- a translated one included -- sits in the
+ * middle.  Only ob_x moves; the width the resource gave it is the
+ * longest title's, so nothing clips. */
+static void dlg_title(OBJECT *tree, WORD obj, WORD stnum)
+{
+    char *str;
+    WORD len;
+
+    rsrc_gaddr(R_STRING, stnum, (void **)&str);
+    tree[obj].ob_spec = (LONG)(uint32_t)(char __far *)str;
+    for (len = 0; str[len]; len++)
+        ;
+    len = (WORD)(len * G.g_wchar);
+    if (len > tree[ROOT].ob_width)
+        len = tree[ROOT].ob_width;
+    tree[obj].ob_x = (WORD)((tree[ROOT].ob_width - len) / 2);
+}
+
+/* The operation dialog serves all three and says which one it is from a
+ * string of the resource -- a title in the C could not be translated
  * (docs/shipping.md).  The donor has a dialog each; one and a title is
  * the same dialog with less of DESKTOP.RSC spent on it. */
 static void op_title(WORD op)
 {
-    char *str;
     WORD stnum = (op == OP_COPY) ? STCPYTTL
                : (op == OP_MOVE) ? STMOVTTL : STDELTTL;
 
-    rsrc_gaddr(R_STRING, stnum, (void **)&str);
-    G.a_delete[CDTITLE].ob_spec = (LONG)(uint32_t)(char __far *)str;
+    dlg_title(G.a_delete, CDTITLE, stnum);
 }
 
 /* Where a drop landed, as a path ending in "*.*": a window's own
@@ -574,8 +679,7 @@ void fun_mkdir(WNODE *pw)
 {
     OBJECT *tree = G.a_mkdir;
     char name[LEN_ZFNAME], made[LEN_ZFNAME];
-    char *tail;
-    WORD i, j;
+    WORD i;
 
     put_str(op_path, pw->w_path.p_spec);
     inf_sset(tree, MKNAME, "");
@@ -586,20 +690,12 @@ void fun_mkdir(WNODE *pw)
         return;
 
     inf_sget(tree, MKNAME, name);
-    for (i = 0, j = 0; name[i] && i < 8; i++)   /* the donor's unfmt_str: */
-        if (name[i] != ' ')                     /* the places, then a dot */
-            made[j++] = name[i];                /* before the extension */
-    if (name[i]) {
-        made[j++] = '.';
-        while (name[i])
-            made[j++] = name[i++];
-    }
-    made[j] = 0;
-    if (!j)
+    unfmt_name(name, made);                     /* the places, then a dot
+                                                 * before the extension */
+    if (!made[0])
         return;
 
-    tail = path_tail(op_path);
-    put_str(tail, made);
+    add_name(op_path, made);
     desk_busy(TRUE);
     i = (WORD)(Dcreate(op_path) == E_OK);
     desk_busy(FALSE);
@@ -608,6 +704,138 @@ void fun_mkdir(WNODE *pw)
         return;
     }
     win_rebld(pw);
+}
+
+/* File -> Show info: the selected item, what the listing knows about
+ * it, and the two things this dialog can change -- the name, which is
+ * where the desktop's rename lives, and the read-only bit.
+ *
+ * The donor shows the dialog once per selected item and has a Skip
+ * button for the ones the person does not want after all; this desktop
+ * selects one item at a time, so there is nothing to skip and the
+ * button is not in the tree.  The loop is the donor's other one: a
+ * rename the DOS refuses comes back to the dialog with the name still
+ * in it, so it can be corrected rather than typed again. */
+void fun_info(WNODE *pw)
+{
+    OBJECT *tree = G.a_finfo;
+    FNODE __far *pf;
+    char places[LEN_ZFNAME], name[LEN_ZFNAME], was[LEN_ZFNAME];
+    WORD i, folder, attr, ok, changed = FALSE;
+
+    pf = pw->w_path.p_flist;                    /* what is selected */
+    for (i = 0; i < pw->w_path.p_count; i++, pf++)
+        if (pf->f_flags & F_SELECTED)
+            break;
+    if (i >= pw->w_path.p_count)
+        return;
+    folder = (WORD)((pf->f_attr & FA_SUBDIR) != 0);
+    dlg_title(tree, FITITLE, folder ? STFOINFO : STFIINFO);
+
+    fmt_name(pf->f_name, places);
+    inf_sset(tree, FINAME, places);
+    unfmt_name(places, was);                    /* what the field started
+                                                 * as, which is what a
+                                                 * changed name is compared
+                                                 * with -- not the entry's
+                                                 * name, because eleven
+                                                 * places cannot hold every
+                                                 * name a file system can */
+    inf_dttm(tree, FIDATE, pf->f_date, pf->f_time);
+
+    /* A FOLDER's name is not the DOS's to change: XIO 32 renames a
+     * file, and asked for a directory both SpartaDOS 3.2 and SpartaDOS X
+     * answer "file not found" -- measured, tests/emu/m15_gdos.py.  So
+     * the field is shown and not editable, rather than editable and
+     * always refused.  A DOS that can do it takes the flag back. */
+    if (folder)
+        tree[FINAME].ob_flags = (UWORD)(tree[FINAME].ob_flags & ~EDITABLE);
+    else
+        tree[FINAME].ob_flags = (UWORD)(tree[FINAME].ob_flags | EDITABLE);
+    if (folder) {
+        /* a folder is as big as what it holds, which is the count pass
+         * a delete runs -- and it can refuse, on a path too deep */
+        put_str(op_path, pw->w_path.p_spec);
+        if (!add_path(op_path, pf->f_name)) {
+            fun_alert(1, STDEEPPA);
+            return;
+        }
+        G.g_nfiles = 0;
+        G.g_ndirs = 0;
+        G.g_opsize = 0;
+        desk_busy(TRUE);
+        ok = walk(0, OP_COUNT);
+        desk_busy(FALSE);
+        if (!ok)
+            return;
+        inf_numset(tree, FISIZE, G.g_opsize);
+        inf_numset(tree, FIFILES, G.g_nfiles);
+        inf_numset(tree, FIFOLDS, G.g_ndirs);
+    } else {
+        inf_numset(tree, FISIZE, pf->f_size);
+        inf_sset(tree, FIFILES, "");            /* a file holds nothing: the
+                                                 * places stay as the
+                                                 * template has them */
+        inf_sset(tree, FIFOLDS, "");
+    }
+    tree[FIFILES].ob_state = (UWORD)(folder ? NORMAL : DISABLED);
+    tree[FIFOLDS].ob_state = (UWORD)(folder ? NORMAL : DISABLED);
+
+    for (;;) {
+        if (folder) {                           /* not a folder's to change */
+            tree[FIRDWR].ob_state = DISABLED;
+            tree[FIRONLY].ob_state = DISABLED;
+        } else if (pf->f_attr & FA_RDONLY) {
+            tree[FIRDWR].ob_state = NORMAL;
+            tree[FIRONLY].ob_state = SELECTED;
+        } else {
+            tree[FIRDWR].ob_state = SELECTED;
+            tree[FIRONLY].ob_state = NORMAL;
+        }
+        tree[FIOK].ob_state = NORMAL;
+        fun_start(tree);
+        form_do(tree, 0);
+        fun_end();
+        if (!inf_what(tree, FIOK))              /* Cancel: nothing changes */
+            break;
+
+        desk_busy(TRUE);
+        put_str(op_path, pw->w_path.p_spec);
+        add_fname(op_path, pf->f_name);
+        if (!folder) {
+            attr = pf->f_attr;
+            if (tree[FIRONLY].ob_state & SELECTED)
+                attr = (WORD)(attr | FA_RDONLY);
+            else
+                attr = (WORD)(attr & ~FA_RDONLY);
+            if (attr != pf->f_attr) {
+                Fattrib(op_path, 1, attr);      /* the DOS's lock, and like
+                                                 * the ST we do not ask what
+                                                 * it thought of it */
+                pf->f_attr = attr;
+                changed = TRUE;
+            }
+        }
+        inf_sget(tree, FINAME, places);
+        unfmt_name(places, name);
+        if (folder || !name[0] || same_path(name, was)) {
+            desk_busy(FALSE);                   /* the name it already had */
+            break;
+        }
+        put_str(dst_path, pw->w_path.p_spec);
+        add_name(dst_path, name);
+        ok = (WORD)(Frename(op_path, dst_path) == E_OK);
+        desk_busy(FALSE);
+        if (ok) {
+            changed = TRUE;
+            break;
+        }
+        if (fun_alert(1, STRENAME) == 2)        /* Cancel: give it up */
+            break;
+    }
+
+    if (changed)
+        win_rebld(pw);
 }
 
 /* File -> Delete: what is selected in the window, counted, confirmed

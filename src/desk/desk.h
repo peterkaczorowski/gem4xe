@@ -130,6 +130,7 @@ typedef struct {
     OBJECT  *a_info;                    /* ADDINFO */
     OBJECT  *a_mkdir;                   /* ADMKDBOX */
     OBJECT  *a_delete;                  /* ADDELDIA */
+    OBJECT  *a_finfo;                   /* ADFINFO */
     ICONBLK *a_iblist;                  /* IB_HARD .. IB_DOCU */
     WORD     g_handle;                  /* the AES's VDI handle */
     WORD     g_wchar, g_hchar, g_wbox, g_hbox;
@@ -141,6 +142,9 @@ typedef struct {
     WORD     g_wcnt;                    /* windows open */
     LONG     g_nfiles, g_ndirs;         /* what a delete counted, then what
                                          * is left of it */
+    LONG     g_opsize;                  /* ...and their bytes together, which
+                                         * is what Show info calls a folder's
+                                         * size */
     DTA __far *g_dta;                   /* the listing's DTA, then the FNODEs */
     DTA __far *g_opdta;                 /* MAX_DELLEVEL of them, one per level
                                          * of the walk: our GEMDOS keeps a
@@ -195,5 +199,8 @@ void fun_mkdir(WNODE *pw);
  * a move when SHIFT is held, a delete over the trash. */
 void fun_file2any(WNODE *pw, WORD dst_wh, WORD dst_obj, WORD kstate);
 void fun_del(WNODE *pw);
+/* File -> Show info: what the selected item is, and the two things the
+ * dialog can change about it -- its name and its read-only bit. */
+void fun_info(WNODE *pw);
 
 #endif /* GEM4XE_DESK_H */

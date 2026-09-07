@@ -8,7 +8,14 @@ keyboard through two operations that change what is on the disk:
   field ("NEWDIR"), OK -> Dcreate, and the window lists the folder that
   was not there before;
 
-  the SUB folder selected, File -> Delete counts what it is about to do
+  the window fulled, the SUB folder selected and File -> Show info
+  counting what is inside it (three files, one folder, their bytes)
+  and showing it -- with the name and the attributes not editable,
+  because a folder is neither the DOS's to rename nor its to lock;
+  then the same on a FILE, whose extension is edited in place and
+  whose OK renames it (Frename) -- the desktop's rename;
+
+  and then File -> Delete counts what it is about to do
   (the donor's OP_COUNT pass: the folders inside folders walked, a DTA
   per level), says so in ADDELDIA -- three files, two folders -- and on
   OK deletes them, the counts ticking down as they go, and the window
@@ -34,17 +41,18 @@ from a8test.launcher import launch          # noqa: E402
 import aesref, vdiref, vbxeref, symfile, atr    # noqa: E402
 import deskref                              # noqa: E402
 from deskref import Desktop, DROOT, GLOBES_SIZE, LEN_ZPATH  # noqa: E402
-from deskrsc import (FILEMENU, NFOLITEM, DELTITEM, QUITITEM,  # noqa: E402
-                     MKOK, CDOK)
+from deskrsc import (FILEMENU, SHOWITEM, NFOLITEM, DELTITEM,  # noqa: E402
+                     QUITITEM, MKOK, CDOK, FIOK, FICNCL)
 from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE,  # noqa: E402
-                     F, B, K, M, RETURN, DCLICK, drive, compare)
+                     F, B, K, M, RETURN, BACKSPACE, DCLICK, drive, compare)
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
 from m12_file import Runner                 # noqa: E402
 from m13_alert import ALLOC                 # noqa: E402
 from m14_sparta import boot, screen         # noqa: E402
 from m16_shell import SHELL                 # noqa: E402
 from m17_desktop import (DISK as SRC_DISK, DESKTOP, DESK_SYM, SYMS,  # noqa: E402
-                         SHOT, PROBE, DRVBYT, header, listing, menu)
+                         SHOT, PROBE, DRVBYT, GCLICK, header, listing, menu)
+from aesref import W_FULLER                 # noqa: E402
 from demo_aes import path                   # noqa: E402
 
 DISK = os.path.abspath(os.path.join(ROOT, "build", "m19-run.atr"))
@@ -62,14 +70,22 @@ CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME",
                           "altirra")
 NEWDIR = "NEWDIR"                           # the folder the gate makes
 KILLDIR = "SUB"                             # ...and the tree it deletes
+# What Show info renames, and to what.  A FILE: renaming a folder is
+# not the DOS's to do -- XIO 32 answers "file not found" for a
+# directory on both SpartaDOS 3.2 and SpartaDOS X (tests/emu/
+# m15_gdos.py measures it), so the desktop shows a folder's name and
+# does not let it be edited.
+RENAME_FROM, RENAME_TO = "OUT.TXT", "OUT.DAT"
 # What it drags into NEWDIR: the SUB tree, so the walk copies a folder,
 # the files in it and the folder inside that.  It has to be an item on
 # the window's FIRST row -- the second row's cells hang below the work
 # area, where a press belongs to the control manager and never reaches
 # the desktop at all.
+# One per SHOT, in order, named for what the screen shows at it.
 STOPS = ["desktop", "window-a", "new-folder", "made", "exists",
-         "picked", "copy-dialog", "copied",
-         "selected", "delete", "deleted"]
+         "picked", "copy-dialog", "copied", "fulled",
+         "folder-info", "file-info", "renamed", "selected",
+         "delete", "deleted"]
 
 
 
@@ -137,10 +153,63 @@ def inputs(memo):
         return [F(3), B(0), F(2), SHOT, *path(d.pointer(), ok), F(4),
                 B(1), F(14), B(0)]
 
-    def selected(d):
+    def copied(d):
         # the window has been read again after the copy -- that is the
-        # shot -- and one click selects SUB
+        # shot.  The fuller then: at the window's opening size only two
+        # cells are in the work area and both hold folders, and Show
+        # info wants a FILE to rename
+        g = d.gadget(memo["wh"], W_FULLER)
+        return [F(3), probe(d), SHOT, *path(d.pointer(), g), F(2), *GCLICK(g)]
+
+    def fulled(d):
+        # the window is the desk now, every entry in it: one click
+        # selects SUB, for Show info and then the delete
         pw = d.win_ontop()
+        sub = d.item(pw, KILLDIR)
+        return [F(3), B(0), F(2), probe(d), SHOT, *path(d.pointer(), sub),
+                F(4), B(1), F(2), B(0), F(14)]
+
+    def folder_menu(d):
+        # SUB is selected: File -> Show info.  The count pass runs
+        # before the dialog, as a delete's does -- a folder is as big
+        # as what it holds
+        return [F(3), *menu(d, FILEMENU, SHOWITEM, False)[1:]]
+
+    def folder_info(d):
+        # ADFINFO on a folder: the title says FOLDER, the counts are
+        # the walk's, and the name and the attributes are both shown
+        # and not editable.  Cancel.
+        cncl = d.centre(d.a_finfo, FICNCL)
+        return [F(3), B(0), F(2), SHOT, *path(d.pointer(), cncl), F(4),
+                B(1), F(14), B(0)]
+
+    def file_pick(d):
+        # ...and one click on a file, for the rename
+        pw = d.win_ontop()
+        it = d.item(pw, RENAME_FROM)
+        return [F(3), *path(d.pointer(), it), F(4), B(1), F(2), B(0), F(14)]
+
+    def file_menu(d):
+        return [F(3), *menu(d, FILEMENU, SHOWITEM, False)[1:]]
+
+    def file_info(d):
+        # ADFINFO on a file: the title says FILE, the size and stamp
+        # are the listing's, the attribute buttons live and the name
+        # editable -- the cursor at the end of the places, where three
+        # BACKSPACEs take the extension out and three letters put
+        # another in.  That is the desktop's rename.
+        ok = d.centre(d.a_finfo, FIOK)
+        ext = RENAME_TO[RENAME_TO.index(".") + 1:]
+        return [F(3), B(0), F(2), SHOT,
+                *[K("BACKSPACE", BACKSPACE) for _ in ext],
+                *[K(c, ord(c.lower())) for c in ext], F(2),
+                *path(d.pointer(), ok), F(4), B(1), F(14), B(0)]
+
+    def renamed(d):
+        # the window listed again, the file under its new name: one
+        # click selects SUB for the delete
+        pw = d.win_ontop()
+        d.item(pw, RENAME_TO)                   # it is there, or KeyError
         sub = d.item(pw, KILLDIR)
         return [F(3), probe(d), SHOT, *path(d.pointer(), sub), F(4), B(1),
                 F(2), B(0), F(14)]
@@ -160,7 +229,9 @@ def inputs(memo):
 
     return [desktop, window_a, new_folder, made, again, exists,
             picked, dragged, copy_dialog,
-            selected, chosen, delete, deleted]
+            copied, fulled, folder_menu, folder_info,
+            file_pick, file_menu, file_info, renamed, chosen,
+            delete, deleted]
 
 
 def model(mark, brk, pointer, drvmap):
@@ -234,6 +305,9 @@ def check_disk(check, written):
                       f"the copy of DEEP holds {deep}")
     check(KILLDIR not in names,
           f"{KILLDIR} is still in the image's root after the delete")
+    check(RENAME_TO in names and RENAME_FROM not in names,
+          f"Show info did not rename {RENAME_FROM} to {RENAME_TO}: "
+          f"the root has {sorted(names)}")
     print(f"  the image afterwards: {sorted(names)}")
 
 
@@ -490,8 +564,8 @@ def main(argv):
     if not fails and not keep:
         for p in shots:
             os.remove(p)
-    print(f"gem4xe-m19: {'PASS' if not fails else 'FAIL'} -- New folder and "
-          f"Delete, {len(fails)} problem(s)")
+    print(f"gem4xe-m19: {'PASS' if not fails else 'FAIL'} -- New folder, "
+          f"Delete, Show info, {len(fails)} problem(s)")
     return 1 if fails else 0
 
 

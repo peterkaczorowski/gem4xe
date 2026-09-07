@@ -44,6 +44,7 @@ import deskrsc                              # noqa: E402
 from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
                     G_BOX, G_IBOX, G_ICON, NONE, NORMAL, SELECTED, WHITEBAK,
                     NIL, ROOT, MAX_DEPTH, ARROW, HOURGLASS, M_OFF, M_ON,
+                    DISABLED, EDITABLE, FA_RDONLY, FRENAME, FATTRIB,
                     BEG_UPDATE, END_UPDATE, MU_KEYBD, MU_BUTTON, MU_MESAG,
                     MU_TIMER, FMD_START, FMD_FINISH,
                     NAME, CLOSER, FULLER, MOVER, INFO, SIZER, UPARROW,
@@ -67,15 +68,18 @@ from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
                     GRAF_MKSTATE, GRAF_DRAGBOX,
                     FOPEN, FCREATE, FCLOSE, FREAD, FWRITE, GD_EACCDN)
 from rsc import R_TREE, R_ICONBLK, R_STRING, ICONBLK_SIZE  # noqa: E402
-from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA,  # noqa: E402
+from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA, ADFINFO,  # noqa: E402
                      DESKMENU, FILEMENU, ABOUITEM,
-                     OPENITEM, NFOLITEM, DELTITEM, CLOSITEM, CLSWITEM,
-                     QUITITEM, DEVERSN, DEOK,
+                     OPENITEM, SHOWITEM, NFOLITEM, DELTITEM, CLOSITEM,
+                     CLSWITEM, QUITITEM, DEVERSN, DEOK,
                      MKNAME, MKOK, CDTITLE, CDFILES, CDFOLDS, CDOK,
+                     FITITLE, FINAME, FISIZE, FIDATE, FIFILES, FIFOLDS,
+                     FIRDWR, FIRONLY, FIOK,
                      STDISK, STTRASH, STNOMEM, STNOWIND, STDEFDIR,
                      STDELFIL, STDELDIR, STFOFAIL, STFO8DEE, STDEEPPA,
                      STCPYFIL, STDISKFU, STNOTHIN, STSAMEPL,
                      STDELTTL, STCPYTTL, STMOVTTL,
+                     STFIINFO, STFOINFO, STRENAME,
                      IB_HARD, IB_FLOPPY, IB_TRASH,
                      IB_FOLDER, IB_APPL, IB_DOCU, NOT_YET)
 
@@ -139,11 +143,11 @@ WIN_YCELL = (6, 8, 10, 13)
 # cc65816 lays them out (WORD 2, a near pointer 2, a far pointer 4,
 # GRECT 8, no padding).
 GLOBES = [("a_menu", 2), ("a_info", 2), ("a_mkdir", 2), ("a_delete", 2),
-          ("a_iblist", 2), ("g_handle", 2),
+          ("a_finfo", 2), ("a_iblist", 2), ("g_handle", 2),
           ("g_wchar", 2), ("g_hchar", 2), ("g_wbox", 2), ("g_hbox", 2),
           ("g_desk", 8), ("g_wicon", 2), ("g_hicon", 2), ("g_icw", 2),
           ("g_ich", 2), ("g_screenfree", 2), ("g_rmsg", 16),
-          ("g_wcnt", 2), ("g_nfiles", 4), ("g_ndirs", 4),
+          ("g_wcnt", 2), ("g_nfiles", 4), ("g_ndirs", 4), ("g_opsize", 4),
           ("g_dta", 4), ("g_opdta", 4), ("g_cnxsave", 4), ("g_shelbuf", 4),
           ("g_copybuf", 4),
           ("g_wlist", NUM_WNODES * WNODE_SIZE),
@@ -307,8 +311,8 @@ class Desktop:
         self.screenfree = 0
         self.rmsg = [0] * 8
         self.wcnt, self.dta, self.opdta = 0, 0, 0
-        self.nfiles = self.ndirs = 0
-        self.a_mkdir = self.a_delete = 0
+        self.nfiles = self.ndirs = self.opsize = 0
+        self.a_mkdir = self.a_delete = self.a_finfo = 0
         self.cnxsave = self.shelbuf = self.copybuf = 0
         self.wsave = [Wsave() for _ in range(NUM_WNODES)]
         # the desktop's copy of the shell buffer, a far CharArray the
@@ -1186,6 +1190,36 @@ class Desktop:
         old = self.a.mem[ted.ptext]
         self.a.mem[ted.ptext] = Text(f"{value:{n}d}"[-n:], old.size)
 
+    @staticmethod
+    def inf_dttm_places(date, time):
+        """The ten places a stamp fills: day, month, year, hour, minute
+        (deskfun.c inf_dttm)."""
+        return "%02d%02d%02d%02d%02d" % (
+            date & 0x1F, (date >> 5) & 0x0F, ((date >> 9) + 80) % 100,
+            (time >> 11) & 0x1F, (time >> 5) & 0x3F)
+
+    @staticmethod
+    def fmt_name(name):
+        """"ONE.TXT" -> the eleven places "________.___" scatters
+        (deskfun.c fmt_name); a name with no extension is not padded."""
+        stem, dot, ext = name.partition(".")
+        places = stem[:8]
+        if dot:
+            places = places.ljust(8) + ext[:3]
+        return places
+
+    @staticmethod
+    def unfmt_name(places):
+        """...and back (deskfun.c unfmt_name): a blank place is not part
+        of the name, and an extension of nothing but blanks takes its
+        dot with it."""
+        name = places[:8].replace(" ", "")
+        if len(places) > 8:
+            ext = places[8:].replace(" ", "")
+            if ext:
+                name += "." + ext
+        return name
+
     def inf_what(self, tree, ok):
         """Which of the two buttons after `ok` is selected, its state
         cleared: 1 for `ok` itself (the donor's inf_what)."""
@@ -1214,10 +1248,7 @@ class Desktop:
         self.end_dialog()
         if not self.inf_what(tree, MKOK):
             return
-        name = self.inf_sget(tree, MKNAME)
-        made = name[:8].replace(" ", "")        # the donor's unfmt_str
-        if len(name) > 8:
-            made += "." + name[8:]
+        made = self.unfmt_name(self.inf_sget(tree, MKNAME))
         if not made:
             return
         self.add_fname(made)
@@ -1395,6 +1426,7 @@ class Desktop:
                     self.add_fname(name)
                     if op == OP_COUNT:
                         self.nfiles += 1
+                        self.opsize += _size
                     elif op == OP_DELETE:
                         if self.op_gemdos(FDELETE) != E_OK:
                             self.fun_alert(1, STDELFIL)
@@ -1415,6 +1447,113 @@ class Desktop:
     def op_count(self, field, left):
         self.inf_numset(self.a_delete, field, left)
         self.fun_fld(self.a_delete, field)
+
+    def rename(self):
+        """Frename, whose trap frame is a reserved word and then the two
+        paths (src/app/gemlib.c) -- the model keeps them at the two
+        stack-string addresses op_gemdos and dst_gemdos use."""
+        self.a.mem[STACK_STRING] = Text(self.op_path)
+        self.a.mem[STACK_STRING2] = Text(self.dst_path)
+        return self.gemdos(FRENAME,
+                           (0, STACK_STRING & 0xFFFF, STACK_STRING >> 16,
+                            STACK_STRING2 & 0xFFFF, STACK_STRING2 >> 16))
+
+    def fun_info(self, pw):
+        """deskfun.c fun_info: the item selected in the window, what the
+        listing knows about it, and the two things this dialog changes --
+        its name, which is the desktop's rename, and its read-only bit."""
+        tree = self.a_finfo
+        pn = pw.path
+        pf = None
+        for x in pn.fnodes[:pn.count]:
+            if x.flags & F_SELECTED:
+                pf = x
+                break
+        if pf is None:
+            return
+        folder = bool(pf.attr & FA_SUBDIR)
+        self.dlg_title(tree, FITITLE, STFOINFO if folder else STFIINFO)
+
+        objs = self.a.trees[tree]
+        places = self.fmt_name(pf.name)
+        self.inf_sset(tree, FINAME, places)
+        was = self.unfmt_name(places)           # what the field started as
+        self.inf_sset(tree, FIDATE, self.inf_dttm_places(pf.date, pf.time))
+        # A folder's name is not the DOS's to change (deskfun.c: XIO 32
+        # renames a file, and answers EFILNF for a directory on both
+        # SpartaDOS 3.2 and SpartaDOS X), so the field is shown and not
+        # editable rather than editable and always refused.
+        if folder:
+            objs[FINAME].ob_flags &= ~EDITABLE
+        else:
+            objs[FINAME].ob_flags |= EDITABLE
+        if folder:                              # as big as what it holds
+            self.op_path = pn.spec.s
+            if not self.add_path(pf.name):
+                self.fun_alert(1, STDEEPPA)
+                return
+            self.nfiles = self.ndirs = self.opsize = 0
+            self.busy(True)
+            ok = self.walk(0, OP_COUNT)
+            self.busy(False)
+            if not ok:
+                return
+            self.inf_numset(tree, FISIZE, self.opsize)
+            self.inf_numset(tree, FIFILES, self.nfiles)
+            self.inf_numset(tree, FIFOLDS, self.ndirs)
+        else:
+            self.inf_numset(tree, FISIZE, pf.size)
+            self.inf_sset(tree, FIFILES, "")
+            self.inf_sset(tree, FIFOLDS, "")
+        objs[FIFILES].ob_state = NORMAL if folder else DISABLED
+        objs[FIFOLDS].ob_state = NORMAL if folder else DISABLED
+
+        changed = False
+        while True:
+            if folder:                          # not a folder's to change
+                objs[FIRDWR].ob_state = DISABLED
+                objs[FIRONLY].ob_state = DISABLED
+            elif pf.attr & FA_RDONLY:
+                objs[FIRDWR].ob_state = NORMAL
+                objs[FIRONLY].ob_state = SELECTED
+            else:
+                objs[FIRDWR].ob_state = SELECTED
+                objs[FIRONLY].ob_state = NORMAL
+            objs[FIOK].ob_state = NORMAL
+            self.start_dialog(tree)
+            self.call(FORM_DO, (ROOT,), tree=tree,
+                      steps=self.take_input("form_do"))
+            self.end_dialog()
+            if not self.inf_what(tree, FIOK):   # Cancel: nothing changes
+                break
+
+            self.busy(True)
+            self.op_path = self.p_add_fname(pn.spec.s, pf.name)
+            if not folder:
+                attr = pf.attr
+                if objs[FIRONLY].ob_state & SELECTED:
+                    attr |= FA_RDONLY
+                else:
+                    attr &= ~FA_RDONLY
+                if attr != pf.attr:
+                    self.op_gemdos(FATTRIB, 1, attr)
+                    pf.attr = attr
+                    changed = True
+            name = self.unfmt_name(self.inf_sget(tree, FINAME))
+            if folder or not name or name == was:   # the name it started with
+                self.busy(False)
+                break
+            self.dst_path = self.p_add_fname(pn.spec.s, name)
+            ok = self.rename() == E_OK
+            self.busy(False)
+            if ok:
+                changed = True
+                break
+            if self.fun_alert(1, STRENAME) == 2:    # Cancel: give it up
+                break
+
+        if changed:
+            self.win_rebld(pw)
 
     def fun_del(self, pw):
         """deskfun.c fun_del: what is selected, counted (the donor's
@@ -1489,13 +1628,23 @@ class Desktop:
         self.win_rebld(pw)
         return
 
+    def dlg_title(self, tree, obj, stnum):
+        """A title from the resource, centred on the box as the donor's
+        align_title centres it: only ob_x moves (deskfun.c dlg_title)."""
+        addr = self.rsrc_gaddr(R_STRING, stnum)
+        objs = self.a.trees[tree]
+        objs[obj].ob_spec = addr
+        length = len(self.a.mem[addr].s) * self.wchar
+        if length > objs[ROOT].ob_width:
+            length = objs[ROOT].ob_width
+        objs[obj].ob_x = (objs[ROOT].ob_width - length) // 2
+
     def op_title(self, op):
-        """The dialog says which of the three it is, from a free string
-        of the resource (deskfun.c op_title)."""
+        """The operation dialog says which of the three it is, from a
+        free string of the resource (deskfun.c op_title)."""
         stnum = (STCPYTTL if op == OP_COPY else
                  STMOVTTL if op == OP_MOVE else STDELTTL)
-        addr = self.rsrc_gaddr(R_STRING, stnum)
-        self.a.trees[self.a_delete][CDTITLE].ob_spec = addr
+        self.dlg_title(self.a_delete, CDTITLE, stnum)
 
     def drop_path(self, dst_wh, dst_obj):
         """Where a drop landed, as a path ending in "*.*", or None."""
@@ -1628,6 +1777,9 @@ class Desktop:
             obj = self.sel_item(DROOT)
             if obj:
                 return self.do_open(DESKWH, obj)
+        elif item == SHOWITEM:                  # what the selection is,
+            if pw:                              # and its name to change
+                self.fun_info(pw)
         elif item == NFOLITEM:                  # a folder in the top
             if pw:                              # window's directory
                 self.fun_mkdir(pw)              # never done: only a
@@ -1736,6 +1888,7 @@ class Desktop:
         self.a_info = self.rsrc_gaddr(R_TREE, ADDINFO)
         self.a_mkdir = self.rsrc_gaddr(R_TREE, ADMKDBOX)
         self.a_delete = self.rsrc_gaddr(R_TREE, ADDELDIA)
+        self.a_finfo = self.rsrc_gaddr(R_TREE, ADFINFO)
         self.a_iblist = self.rsrc_gaddr(R_ICONBLK, 0)
         self.set_version()
         for item in NOT_YET:
@@ -1791,11 +1944,12 @@ class Desktop:
         d = self.desk
         out = b"".join(w(x) for x in (
             self.a_menu, self.a_info, self.a_mkdir, self.a_delete,
-            self.a_iblist, self.handle,
+            self.a_finfo, self.a_iblist, self.handle,
             self.wchar, self.hchar, self.wbox, self.hbox,
             d.x, d.y, d.w, d.h, self.wicon, self.hicon, self.icw, self.ich,
             self.screenfree)) + b"".join(w(x) for x in self.rmsg)
         out += (w(self.wcnt) + dw(self.nfiles) + dw(self.ndirs)
+                + dw(self.opsize)
                 + dw(self.dta) + dw(self.opdta) + dw(self.cnxsave)
                 + dw(self.shelbuf) + dw(self.copybuf))
         out += b"".join(pw.pack() for pw in self.wlist)

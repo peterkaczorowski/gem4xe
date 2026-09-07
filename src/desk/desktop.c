@@ -13,9 +13,10 @@
  * milestone 6 a program run from its icon -- the desktop exits with
  * its windows' places in the shell buffer, and opens them again when
  * the shell loads it back; milestone 7 New folder and Delete
- * (deskfun.c), the first things the desktop does TO a disk.  The items
- * of later milestones are in the menu, disabled, until the milestone
- * that brings them (NOT_YET_ITEMS, build/deskrsc.h).
+ * (deskfun.c), the first things the desktop does TO a disk; then the
+ * drag that copies or moves, and Show info, which is also the rename.
+ * The items of later milestones are in the menu, disabled, until the
+ * milestone that brings them (NOT_YET_ITEMS, build/deskrsc.h).
  */
 #include "desk.h"
 
@@ -165,6 +166,11 @@ static WORD do_filemenu(WORD item)
             return do_open(pw->w_id, obj);
         if ((obj = sel_item(DROOT)) != 0)
             return do_open(DESKWH, obj);
+        break;
+    case SHOWITEM:                              /* what the selection is,
+                                                 * and its name to change */
+        if (pw)
+            fun_info(pw);
         break;
     case NFOLITEM:                              /* a folder in the top
                                                  * window's directory */
@@ -346,6 +352,7 @@ int main(void)
     rsrc_gaddr(R_TREE, ADDINFO, (void **)&G.a_info);
     rsrc_gaddr(R_TREE, ADMKDBOX, (void **)&G.a_mkdir);
     rsrc_gaddr(R_TREE, ADDELDIA, (void **)&G.a_delete);
+    rsrc_gaddr(R_TREE, ADFINFO, (void **)&G.a_finfo);
     rsrc_gaddr(R_ICONBLK, 0, (void **)&G.a_iblist);
     set_version();
     for (i = 0; i < N_NOT_YET; i++)

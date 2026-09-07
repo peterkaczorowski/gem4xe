@@ -420,7 +420,15 @@ def cases(g, r, check, fs, kind, b, clock=False):
         ret, _ = g.call("Fsfirst", L(g.string("*.*")), W(FA_SUBDIR))
         check(ret == ENMFIL, f"the new directory lists {ret}")
         g.call("Dsetpath", L(g.string("\\")))
-        ret, _ = g.call("Ddelete", L(g.string("A:\\NEWDIR")))
+        # A FOLDER renamed, which is what the desktop's Show info asks
+        # for when the item selected is one (src/desk/deskfun.c).
+        ret, _ = g.call("Frename", W(0), L(g.string("A:\\NEWDIR")),
+                        L(g.string("A:\\NEWDIR2", 1)))
+        got, _ = g.listing("A:\\*.*", FA_SUBDIR)
+        print(f"  Frename of a folder: {ret}; the root now has "
+              f"{'NEWDIR2' if 'NEWDIR2' in got else 'NEWDIR'}")
+        gone = "A:\\NEWDIR2" if "NEWDIR2" in got else "A:\\NEWDIR"
+        ret, _ = g.call("Ddelete", L(g.string(gone)))
         check(ret == 0, f"Ddelete {ret}")
         ret, _ = g.call("Fsfirst", L(g.string("A:\\NEWDIR")), W(FA_SUBDIR))
         check(ret == ENMFIL, f"NEWDIR after Ddelete: {ret}")

@@ -4254,6 +4254,56 @@ class AES:
                 return GD_EFILNF & 0xFFFFFFFF
             self.dos_dirs[parent] = [e for e in entries if e[0] != name]
             return 0
+        if fn == 0x43:                  # Fattrib: the DOS's lock, and
+            # nothing else -- src/sys/gemdos.c gd_fattrib refuses a read
+            # outright, because reading an attribute back is what a
+            # search answers
+            if not ints[2]:
+                return GD_EINVFN & 0xFFFFFFFF
+            path, attr = self.mem[long_(0)].s, ints[3]
+            k = path.rfind("\\") + 1
+            parent, name = path[:k], path[k:]
+            entries = self.dos_dirs.get(parent)
+            if entries is None:
+                return GD_EPTHNF & 0xFFFFFFFF
+            out, found = [], False
+            for e in entries:
+                if e[0] == name and not e[1] & FA_SUBDIR:
+                    found = True
+                    e = (e[0], (e[1] & ~FA_RDONLY) | (attr & FA_RDONLY),
+                         e[2], e[3], e[4])
+                out.append(e)
+            if not found:
+                return GD_EFILNF & 0xFFFFFFFF
+            self.dos_dirs[parent] = out
+            return 0
+        if fn == 0x56:                  # Frename: within one directory,
+            # which is all the DOS's own rename does (gd_rename builds
+            # CIO's "path,newname" out of the destination's last
+            # component).  A name already taken is refused, as XIO 32 is
+            # refused; what a DOS does with a LOCKED file is not modelled
+            # here, so nothing may rename one until it is
+            old, new = self.mem[long_(1)].s, self.mem[long_(3)].s
+            k = old.rfind("\\") + 1
+            parent, oldname = old[:k], old[k:]
+            newname = new[new.rfind("\\") + 1:]
+            entries = self.dos_dirs.get(parent)
+            if entries is None:
+                return GD_EPTHNF & 0xFFFFFFFF
+            hit = [e for e in entries if e[0] == oldname]
+            if not hit:
+                return GD_EFILNF & 0xFFFFFFFF
+            if any(e[0] == newname for e in entries):
+                return GD_EACCDN & 0xFFFFFFFF
+            e = hit[0]
+            self.dos_dirs[parent] = [x if x[0] != oldname
+                                     else (newname,) + tuple(e[1:])
+                                     for x in entries]
+            if e[1] & FA_SUBDIR:        # its listing travels with it
+                was, now = parent + oldname + "\\", parent + newname + "\\"
+                for key in [k2 for k2 in self.dos_dirs if k2.startswith(was)]:
+                    self.dos_dirs[now + key[len(was):]] = self.dos_dirs.pop(key)
+            return 0
         if fn == 0x3D or fn == 0x3C:    # Fopen / Fcreate
             path = self.mem[long_(0)].s
             k = path.rfind("\\") + 1
@@ -4350,11 +4400,13 @@ DSETDRV, DGETDRV, DSETPATH = GEMDOS_OP + 0x0E, GEMDOS_OP + 0x19, GEMDOS_OP + 0x3
 FSETDTA, FGETDTA, MALLOC = GEMDOS_OP + 0x1A, GEMDOS_OP + 0x2F, GEMDOS_OP + 0x48
 FSFIRST, FSNEXT = GEMDOS_OP + 0x4E, GEMDOS_OP + 0x4F
 DCREATE, DDELETE, FDELETE = GEMDOS_OP + 0x39, GEMDOS_OP + 0x3A, GEMDOS_OP + 0x41
+FATTRIB, FRENAME = GEMDOS_OP + 0x43, GEMDOS_OP + 0x56
 FCREATE, FOPEN, FCLOSE = GEMDOS_OP + 0x3C, GEMDOS_OP + 0x3D, GEMDOS_OP + 0x3E
 FREAD, FWRITE = GEMDOS_OP + 0x3F, GEMDOS_OP + 0x40
 # src/sys/gemdos.h: the attributes and the error the searches answer
 FA_RDONLY, FA_HIDDEN, FA_SYSTEM, FA_VOLUME, FA_SUBDIR, FA_ARCHIVE = (
     0x01, 0x02, 0x04, 0x08, 0x10, 0x20)
+GD_EINVFN = -32
 GD_EPTHNF, GD_EACCDN, GD_EFILNF, GD_ENMFIL = -34, -36, -33, -49
 GD_ENHNDL, GD_EIHNDL = -35, -37
 

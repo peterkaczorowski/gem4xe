@@ -319,7 +319,7 @@ build/app_blob.o: build/app_blob.c
 # is the gate application's 256 bytes and more: the folder window's open
 # -- the button, do_open, do_dopen, do_wopen, a call to the AES on top --
 # ran 256 bytes out (phase 14, milestone 5).  It shares the pool with
-# DESKTOP.RSC (4652 bytes) and with GEMDOS's work area (src/sys/gemdos.c),
+# DESKTOP.RSC (6076 bytes) and with GEMDOS's work area (src/sys/gemdos.c),
 # which is why the desktop gates run a runner whose staging leaves the
 # pool the room GEM.COM leaves it (build/m3desk.xex, above).
 DESK_OBJS  = $(G4A_LIB) build/desk/desktop.o build/desk/deskobj.o build/desk/deskwin.o \
@@ -716,9 +716,10 @@ test-m17: build/m17-boot.atr build/desktop.g4a build/desktop.sym
 test-m18: build/m17-boot.atr build/desktop.g4a build/desktop.sym
 	python3 tests/emu/m18_launch.py
 
-# The desktop's first writes to a disk (phase 14, milestone 7): File ->
-# New folder and File -> Delete, driven at the mouse and the keyboard
-# against the model, and the disk image read back when the run is over.
+# The desktop's writes to a disk (phase 14, milestone 7; phase 19): File
+# -> New folder, File -> Delete, and File -> Show info -- which is also
+# the rename -- driven at the mouse and the keyboard against the model,
+# and the disk image read back when the run is over.
 # The gate boots a copy of milestone 5's disk, made afresh every run --
 # it is the first whose target rewrites the directory it booted from.
 test-m19: build/m17-boot.atr build/desktop.g4a build/desktop.sym

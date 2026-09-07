@@ -44,11 +44,11 @@ import rsc                                  # noqa: E402
 from rsc import ch, NIL                     # noqa: E402
 from aesref import (G_BOX, G_IBOX, G_STRING, G_BUTTON, G_TITLE, G_FTEXT,  # noqa: E402
                     NONE, NORMAL, SELECTABLE, DEFAULT, EXIT, DISABLED,
-                    EDITABLE, OUTLINED, CHECKED, LASTOB)
+                    EDITABLE, RBUTTON, OUTLINED, CHECKED, LASTOB)
 import deskicons                            # noqa: E402
 
 # -- trees ---------------------------------------------------------------------
-ADMENU, ADDINFO, ADMKDBOX, ADDELDIA = 0, 1, 2, 3
+ADMENU, ADDINFO, ADMKDBOX, ADDELDIA, ADFINFO = 0, 1, 2, 3, 4
 
 # ADMENU objects, in the donor's names where the donor has the item
 ROOT, THEBAR, THEACTIVE = 0, 1, 2
@@ -79,6 +79,16 @@ NOBS_MKD = 5
 CDBOX, CDTITLE, CDFILES, CDFOLDS, CDOK, CDCNCL = 0, 1, 2, 3, 4, 5
 NOBS_CDEL = 6
 
+# ADFINFO objects: the donor's ADFFINFO (deskinf.c inf_file_folder) with
+# its date and time in one field, its folder and file counts in another,
+# and no Skip -- Skip is for a dialog shown once per item of a multiple
+# selection, and this desktop selects one item at a time.  FIOK and
+# FICNCL are adjacent because inf_what reads the two objects after OK.
+FIBOX, FITITLE, FINAME, FISIZE, FIDATE = 0, 1, 2, 3, 4
+FIFILES, FIFOLDS, FIATTBX = 5, 6, 7
+FIRDWR, FIRONLY, FIOK, FICNCL = 8, 9, 10, 11
+NOBS_FINF = 12
+
 # Free strings: the icon labels, and every alert the desktop puts up.
 # No string a person reads belongs in the C -- an alert written as a
 # literal cannot be translated, and the donor does not write them that
@@ -93,6 +103,8 @@ STDISK, STTRASH = 0, 1
 # The operation dialog's title, by operation: one dialog does the three,
 # and which one it is is a string of this file rather than a word of C.
 STDELTTL, STCPYTTL, STMOVTTL = 14, 15, 16
+# Show info wears two of the same kind, and says so when a rename fails.
+STFIINFO, STFOINFO, STRENAME = 17, 18, 19
 
 # (index, name, text) in index order; the alerts as form_alert parses
 # them -- [icon][the lines, | between][the buttons]
@@ -120,6 +132,15 @@ TITLES = [
     (STDELTTL, "STDELTTL", "DELETE FILE(S)"),
     (STCPYTTL, "STCPYTTL", "COPY FILE(S)"),
     (STMOVTTL, "STMOVTTL", "MOVE FILE(S)"),
+    (STFIINFO, "STFIINFO", "FILE INFORMATION"),
+    (STFOINFO, "STFOINFO", "FOLDER INFORMATION"),
+]
+
+# What Show info says when the DOS will not take the new name: the
+# donor's alert, whose second button is the one that gives up.
+RENAME_ALERT = [
+    (STRENAME, "STRENAME", "[1][That name cannot be used|for this item.]"
+                           "[ Retry | Cancel ]"),
 ]
 
 # ICONBLKs, in the order of the table; IG_* name them
@@ -145,17 +166,22 @@ INDICES = [
     ("ADDELDIA", ADDELDIA), ("CDTITLE", CDTITLE),
     ("CDFILES", CDFILES), ("CDFOLDS", CDFOLDS),
     ("CDOK", CDOK), ("CDCNCL", CDCNCL),
+    ("ADFINFO", ADFINFO), ("FITITLE", FITITLE), ("FINAME", FINAME),
+    ("FISIZE", FISIZE), ("FIDATE", FIDATE),
+    ("FIFILES", FIFILES), ("FIFOLDS", FIFOLDS),
+    ("FIRDWR", FIRDWR), ("FIRONLY", FIRONLY),
+    ("FIOK", FIOK), ("FICNCL", FICNCL),
     ("STDISK", STDISK), ("STTRASH", STTRASH),
     *[(name, i) for i, name, _ in ALERTS],
     *[(name, i) for i, name, _ in TITLES],
+    *[(name, i) for i, name, _ in RENAME_ALERT],
     ("IB_HARD", IB_HARD), ("IB_FLOPPY", IB_FLOPPY), ("IB_TRASH", IB_TRASH),
     ("IB_FOLDER", IB_FOLDER), ("IB_APPL", IB_APPL), ("IB_DOCU", IB_DOCU),
 ]
 
 # The items the desktop does not do yet: disabled at start (menu_ienable),
 # not in the file, so the file stays RCS-shaped.
-NOT_YET = (SHOWITEM,
-           FORMITEM, TEXTITEM, NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM,
+NOT_YET = (FORMITEM, TEXTITEM, NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM,
            NSRTITEM, FITITEM, IICNITEM, IAPPITEM, PREFITEM, READITEM,
            SAVEITEM)
 
@@ -206,6 +232,18 @@ MKD_TMPL, MKD_VALID = "Name: ________.___", "F"    # 11 places, 8 and 3
 CDEL_W, CDEL_H = 34, 9
 CDEL_FILES = "Number of files:   _____"
 CDEL_FOLDS = "Number of folders: _____"
+# Show info's fields.  The name is the only editable one, and it is the
+# rename: what the dialog leaves in it is what the item is called
+# afterwards.  Date and time share a field, and so do the two counts a
+# folder has, because a field costs an object and an object costs the
+# application pool.
+FINF_W, FINF_H = 40, 14
+FINF_NAME = "Name: ________.___"                    # 8 places and 3
+FINF_SIZE = "Size: ________ bytes"
+FINF_DATE = "Date: __-__-__  __:__"                 # DD-MM-YY  HH:MM
+FINF_FILES = CDEL_FILES                             # what a folder holds,
+FINF_FOLDS = CDEL_FOLDS                             # counted, in the same
+                                                    # words the delete uses
 
 
 def menu_tree(r):
@@ -313,17 +351,65 @@ def delete_tree(r):
     return r.tree(objs)
 
 
+def finfo_tree(r):
+    """ADFINFO: what an item is, and the one field that changes it.
+    The title is replaced per item (STFIINFO or STFOINFO) and centred
+    then, the donor's align_title, so a translation of either length
+    sits in the middle of the box.  A file has no counts and a folder
+    no attributes, and each disables the fields the other uses."""
+    objs = [
+        (NIL, FITITLE, FICNCL, G_BOX, NONE, OUTLINED, 0x00021100,
+         ch(0), ch(0), ch(FINF_W), ch(FINF_H)),
+        (FINAME, NIL, NIL, G_STRING, NONE, NORMAL, r.string("FILE INFORMATION"),
+         ch(11), ch(1), ch(18), ch(1)),         # replaced per item
+        (FISIZE, NIL, NIL, G_FTEXT, EDITABLE, NORMAL,
+         r.ted(" " * FINF_NAME.count("_"), FINF_NAME, "F"),
+         ch(4), ch(3), ch(len(FINF_NAME)), ch(1)),
+        (FIDATE, NIL, NIL, G_FTEXT, NONE, NORMAL,
+         r.ted(" " * FINF_SIZE.count("_"), FINF_SIZE, "9"),
+         ch(4), ch(4), ch(len(FINF_SIZE)), ch(1)),
+        (FIFILES, NIL, NIL, G_FTEXT, NONE, NORMAL,
+         r.ted(" " * FINF_DATE.count("_"), FINF_DATE, "9"),
+         ch(4), ch(5), ch(len(FINF_DATE)), ch(1)),
+        (FIFOLDS, NIL, NIL, G_FTEXT, NONE, NORMAL,
+         r.ted(" " * FINF_FILES.count("_"), FINF_FILES, "9"),
+         ch(8), ch(7), ch(len(FINF_FILES)), ch(1)),
+        (FIATTBX, NIL, NIL, G_FTEXT, NONE, NORMAL,
+         r.ted(" " * FINF_FOLDS.count("_"), FINF_FOLDS, "9"),
+         ch(8), ch(8), ch(len(FINF_FOLDS)), ch(1)),
+        # the two attributes are radio buttons of one parent: the AES
+        # turns the other off by walking that parent's children
+        # (src/aes/form.c fm_button), which is what the box is for
+        (FIOK, FIRDWR, FIRONLY, G_IBOX, NONE, NORMAL, 0,
+         ch(3), ch(10), ch(34), ch(1)),
+        (FIRONLY, NIL, NIL, G_BUTTON, SELECTABLE | RBUTTON, NORMAL,
+         r.string("Read/Write"), ch(0), ch(0), ch(16), ch(1)),
+        (FIATTBX, NIL, NIL, G_BUTTON, SELECTABLE | RBUTTON, NORMAL,
+         r.string("Read only"), ch(18), ch(0), ch(16), ch(1)),
+        (FICNCL, NIL, NIL, G_BUTTON, SELECTABLE | DEFAULT | EXIT, NORMAL,
+         r.string("OK"), ch(7), ch(12), ch(9), ch(1)),
+        (ROOT, NIL, NIL, G_BUTTON, SELECTABLE | EXIT | LASTOB, NORMAL,
+         r.string("Cancel"), ch(24), ch(12), ch(9), ch(1)),
+    ]
+    assert len(objs) == NOBS_FINF, (len(objs), NOBS_FINF)
+    assert objs[FIOK][3] == G_BUTTON and objs[FICNCL][3] == G_BUTTON
+    return r.tree(objs)
+
+
 def build():
     r = rsc.Rsc()
     assert menu_tree(r) == ADMENU
     assert info_tree(r) == ADDINFO
     assert mkdir_tree(r) == ADMKDBOX
     assert delete_tree(r) == ADDELDIA
+    assert finfo_tree(r) == ADFINFO
     assert r.free_string("DISK") == STDISK
     assert r.free_string("TRASH") == STTRASH
     for i, name, text in ALERTS:
         assert r.free_string(text) == i, (name, i)
     for i, name, text in TITLES:
+        assert r.free_string(text) == i, (name, i)
+    for i, name, text in RENAME_ALERT:
         assert r.free_string(text) == i, (name, i)
     for ib, ig in IB_TABLE:
         (mask, data, char, xchar, ychar, xicon, yicon, wicon, hicon,
@@ -359,8 +445,9 @@ def main(argv):
     with open(argv[2], "w") as f:
         f.write(c_header(data))
     print(f"{argv[1]}: {len(data)} bytes, "
-          f"{NOBS_MENU} + {NOBS_INFO} + {NOBS_MKD} + {NOBS_CDEL} objects in "
-          f"four trees, {len(IB_TABLE)} icons; {argv[2]}")
+          f"{NOBS_MENU} + {NOBS_INFO} + {NOBS_MKD} + {NOBS_CDEL} + "
+          f"{NOBS_FINF} objects in five trees, {len(IB_TABLE)} icons; "
+          f"{argv[2]}")
     return 0
 
 
