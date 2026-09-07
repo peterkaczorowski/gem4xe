@@ -3461,9 +3461,17 @@ static void vdi_vqt_extent(void)
 static void vdi_vqt_width(void)
 {
     intout[0] = intin[0];
+    /* Three POINTS, and the VDI reads the two deltas out of the words
+     * a point apart: [0] the cell's width, [2] the left delta, [4] the
+     * right one (EmuTOS vdi_text.c writes exactly those three).  All
+     * six are set, because a caller reads what contrl[2] declares and
+     * the three odd words would otherwise be the last call's. */
     ptsout[0] = FONT_W;
     ptsout[1] = 0;
-    ptsout[2] = 0;
+    ptsout[2] = 0;                  /* left delta: a fixed cell has none */
+    ptsout[3] = 0;
+    ptsout[4] = 0;                  /* right delta */
+    ptsout[5] = 0;
     contrl[2] = 3;
     contrl[4] = 1;
 }

@@ -1421,8 +1421,10 @@ class VDI:
             self.ptsout = [0, 0, w, 0, w, FONT_H, 0, FONT_H]
             self.contrl2 = 4
         elif op == VQT_WIDTH:
+            # three points, and the deltas are a point apart: [0] the
+            # cell, [2] the left delta, [4] the right one
             self.intout[0] = ints[0]
-            self.ptsout = [FONT_W, 0, 0]
+            self.ptsout = [FONT_W, 0, 0, 0, 0, 0]
             self.contrl2, self.contrl4 = 3, 1
         elif op == VST_FONT:
             # the face now drawn with: the system's, or the loaded one when

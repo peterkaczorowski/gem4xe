@@ -24,7 +24,7 @@ full-screen repaints.
 
 | Gate | | |
 |---|---|---|
-| `make test-host` | 41/41 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — and .xex far-code staging |
+| `make test-host` | 89/89 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts |
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
@@ -151,6 +151,20 @@ objects three times and diffing; the loader puts the near part in a
 bank-`$00` pool and the code in a far bank. The gate application makes
 eighteen VDI and AES calls and the harness checks what each returned,
 from the application's own memory, against the reference.
+
+**And there is a binding for every one of them** (`docs/phase20.md`).
+`src/app/gem.h` declares the whole surface the system serves — the VDI
+in the names it has had since 1984, the GDPs as `v_bar`/`v_arc`/… rather
+than a raw `v_gdp`, every `vq*` inquiry, the raster calls with a real
+`MFDB`, the file selector, `objc_edit`, the `shel_*` family, and the
+GEMDOS calls phase 16 added — so GEM source written for an ST compiles
+against it. The four opcodes the driver answers with `v_nop` are
+deliberately absent: a binding that silently does nothing is worse than
+a name that is not there. `tests/host/test_bind.py` calls every binding
+in the compiler's simulator with the three call gates replaced by
+recorders, and compares the parameter block each one builds with the
+contract — which is how a `vqt_width` that put its deltas in the wrong
+words was found, in a gap the conformance gate cannot see.
 
 **SpartaGEM: gem4xe runs on SpartaDOS** (`docs/phase13.md`), 3.2 from
 disk and X 4.50 from its cartridge, as well as on DOS 2 -- the same

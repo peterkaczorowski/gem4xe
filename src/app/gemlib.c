@@ -23,14 +23,21 @@ LONG addr_in[3], addr_out[1];
 static VDIPB vpb = { contrl, intin, ptsin, intout, ptsout };
 static AESPB apb = { control, global, int_in, int_out, addr_in, addr_out };
 
-static void vdi(WORD op, WORD npts, WORD nint, WORD handle)
+/* contrl[5] is the sub-function: the GDP for opcode 11, the escape for
+ * opcode 5, and zero for everything else. */
+static void vdi_sub(WORD op, WORD sub, WORD npts, WORD nint, WORD handle)
 {
     contrl[0] = op;
     contrl[1] = npts;
     contrl[3] = nint;
-    contrl[5] = 0;
+    contrl[5] = sub;
     contrl[6] = handle;
     vdi_call(&vpb);
+}
+
+static void vdi(WORD op, WORD npts, WORD nint, WORD handle)
+{
+    vdi_sub(op, 0, npts, nint, handle);
 }
 
 static WORD aes(WORD op, WORD nin, WORD nout, WORD nain, WORD naout)
@@ -101,6 +108,531 @@ WORD vsf_color(WORD handle, WORD color)    { return attr1(25, handle, color); }
 WORD vsf_interior(WORD handle, WORD style) { return attr1(23, handle, style); }
 WORD vsl_color(WORD handle, WORD color)    { return attr1(17, handle, color); }
 WORD vst_color(WORD handle, WORD color)    { return attr1(22, handle, color); }
+
+/* -- VDI: the rest of the surface --------------------------------------
+ *
+ * Every opcode src/vdi/vdi.c serves has a binding here, in the names and
+ * the argument order the VDI has had since 1984, so that GEM source
+ * written for an ST compiles against this header.  What is deliberately
+ * absent: opcodes 10 and 27 (cell array), 29 (valuator) and 34, which
+ * the driver answers with v_nop -- a binding that silently does nothing
+ * is worse than a name that is not there.  v_clswk and v_updwk ARE here,
+ * because every GEM program calls them and a screen driver has nothing
+ * to do for either, which is what DRI's own driver does with them too.
+ */
+
+static void pts(const WORD *p, WORD n)
+{
+    WORD i;
+    for (i = 0; i < n; i++)
+        ptsin[i] = p[i];
+}
+
+static void ptsx(WORD *p, WORD n)
+{
+    WORD i;
+    for (i = 0; i < n; i++)
+        p[i] = ptsout[i];
+}
+
+static void intx(WORD *p, WORD n)
+{
+    WORD i;
+    for (i = 0; i < n; i++)
+        p[i] = intout[i];
+}
+
+/* A string into intin, as v_gtext and v_justified pass one. */
+static WORD str_in(const char *s, WORD at)
+{
+    WORD n = at;
+    while (*s && n < 128)
+        intin[n++] = (WORD)(unsigned char)*s++;
+    return n;
+}
+
+/* An MFDB travels as an address in contrl, and lives in bank $00: the
+ * driver reads it with a near pointer (src/vdi/vdi.c, rform_of). */
+static void form_in(WORD at, const MFDB *f)
+{
+    contrl[at] = (WORD)(uint16_t)f;
+    contrl[at + 1] = 0;
+}
+
+void v_opnwk(WORD *work_in, WORD *handle, WORD *work_out)
+{
+    WORD i;
+    for (i = 0; i < 11; i++)
+        intin[i] = work_in[i];
+    vdi(1, 0, 11, 0);
+    *handle = contrl[6];
+    for (i = 0; i < 45; i++)
+        work_out[i] = intout[i];
+    for (i = 0; i < 12; i++)
+        work_out[45 + i] = ptsout[i];
+}
+
+void v_clswk(WORD handle)       { vdi(2, 0, 0, handle); }
+void v_clrwk(WORD handle)       { vdi(3, 0, 0, handle); }
+void v_updwk(WORD handle)       { vdi(4, 0, 0, handle); }
+void v_enter_cur(WORD handle)   { vdi_sub(5, 3, 0, 0, handle); }
+void v_exit_cur(WORD handle)    { vdi_sub(5, 2, 0, 0, handle); }
+
+void v_pmarker(WORD handle, WORD count, const WORD *pxy)
+{
+    pts(pxy, (WORD)(count * 2));
+    vdi(7, count, 0, handle);
+}
+
+void v_fillarea(WORD handle, WORD count, const WORD *pxy)
+{
+    pts(pxy, (WORD)(count * 2));
+    vdi(9, count, 0, handle);
+}
+
+/* The GDPs, opcode 11 with the sub-function in contrl[5]. */
+void v_bar(WORD handle, const WORD *pxy)
+{
+    pts(pxy, 4);
+    vdi_sub(11, 1, 2, 0, handle);
+}
+
+static void arc_in(WORD x, WORD y, WORD radius, WORD begang, WORD endang)
+{
+    WORD i;
+    ptsin[0] = x;
+    ptsin[1] = y;
+    for (i = 2; i < 6; i++)
+        ptsin[i] = 0;
+    ptsin[6] = radius;
+    ptsin[7] = 0;
+    intin[0] = begang;
+    intin[1] = endang;
+}
+
+void v_arc(WORD handle, WORD x, WORD y, WORD radius, WORD begang, WORD endang)
+{
+    arc_in(x, y, radius, begang, endang);
+    vdi_sub(11, 2, 4, 2, handle);
+}
+
+void v_pieslice(WORD handle, WORD x, WORD y, WORD radius, WORD begang,
+                WORD endang)
+{
+    arc_in(x, y, radius, begang, endang);
+    vdi_sub(11, 3, 4, 2, handle);
+}
+
+void v_circle(WORD handle, WORD x, WORD y, WORD radius)
+{
+    ptsin[0] = x;
+    ptsin[1] = y;
+    ptsin[2] = ptsin[3] = ptsin[5] = 0;
+    ptsin[4] = radius;
+    vdi_sub(11, 4, 3, 0, handle);
+}
+
+void v_ellipse(WORD handle, WORD x, WORD y, WORD xrad, WORD yrad)
+{
+    ptsin[0] = x;
+    ptsin[1] = y;
+    ptsin[2] = xrad;
+    ptsin[3] = yrad;
+    vdi_sub(11, 5, 2, 0, handle);
+}
+
+void v_ellarc(WORD handle, WORD x, WORD y, WORD xrad, WORD yrad,
+              WORD begang, WORD endang)
+{
+    ptsin[0] = x;
+    ptsin[1] = y;
+    ptsin[2] = xrad;
+    ptsin[3] = yrad;
+    intin[0] = begang;
+    intin[1] = endang;
+    vdi_sub(11, 6, 2, 2, handle);
+}
+
+void v_ellpie(WORD handle, WORD x, WORD y, WORD xrad, WORD yrad,
+              WORD begang, WORD endang)
+{
+    ptsin[0] = x;
+    ptsin[1] = y;
+    ptsin[2] = xrad;
+    ptsin[3] = yrad;
+    intin[0] = begang;
+    intin[1] = endang;
+    vdi_sub(11, 7, 2, 2, handle);
+}
+
+void v_rbox(WORD handle, const WORD *pxy)
+{
+    pts(pxy, 4);
+    vdi_sub(11, 8, 2, 0, handle);
+}
+
+void v_rfbox(WORD handle, const WORD *pxy)
+{
+    pts(pxy, 4);
+    vdi_sub(11, 9, 2, 0, handle);
+}
+
+void v_justified(WORD handle, WORD x, WORD y, const char *s, WORD length,
+                 WORD word_space, WORD char_space)
+{
+    WORD n;
+    ptsin[0] = x;
+    ptsin[1] = y;
+    ptsin[2] = length;
+    ptsin[3] = 0;
+    intin[0] = word_space;
+    intin[1] = char_space;
+    n = str_in(s, 2);
+    vdi_sub(11, 10, 2, n, handle);
+}
+
+void vst_height(WORD handle, WORD height, WORD *char_width, WORD *char_height,
+                WORD *cell_width, WORD *cell_height)
+{
+    ptsin[0] = 0;
+    ptsin[1] = height;
+    vdi(12, 1, 0, handle);
+    *char_width = ptsout[0];
+    *char_height = ptsout[1];
+    *cell_width = ptsout[2];
+    *cell_height = ptsout[3];
+}
+
+WORD vst_rotation(WORD handle, WORD angle) { return attr1(13, handle, angle); }
+
+void vs_color(WORD handle, WORD index, const WORD *rgb)
+{
+    intin[0] = index;
+    intin[1] = rgb[0];
+    intin[2] = rgb[1];
+    intin[3] = rgb[2];
+    vdi(14, 0, 4, handle);
+}
+
+WORD vsl_type(WORD handle, WORD style) { return attr1(15, handle, style); }
+
+WORD vsl_width(WORD handle, WORD width)
+{
+    ptsin[0] = width;
+    ptsin[1] = 0;
+    vdi(16, 1, 0, handle);
+    return ptsout[0];
+}
+
+WORD vsm_type(WORD handle, WORD symbol) { return attr1(18, handle, symbol); }
+
+WORD vsm_height(WORD handle, WORD height)
+{
+    ptsin[0] = 0;
+    ptsin[1] = height;
+    vdi(19, 1, 0, handle);
+    return ptsout[1];
+}
+
+WORD vsm_color(WORD handle, WORD color) { return attr1(20, handle, color); }
+WORD vst_font(WORD handle, WORD font)   { return attr1(21, handle, font); }
+WORD vsf_style(WORD handle, WORD style) { return attr1(24, handle, style); }
+
+void vq_color(WORD handle, WORD index, WORD flag, WORD *rgb)
+{
+    intin[0] = index;
+    intin[1] = flag;
+    vdi(26, 0, 2, handle);
+    rgb[0] = intout[1];
+    rgb[1] = intout[2];
+    rgb[2] = intout[3];
+}
+
+/* The locator, sampled: the position comes back whether or not one was
+ * given, and the terminator is 0 when nothing ended the sample. */
+WORD v_locator(WORD handle, WORD x, WORD y, WORD *xout, WORD *yout,
+               WORD *term)
+{
+    ptsin[0] = x;
+    ptsin[1] = y;
+    vdi(28, 1, 0, handle);
+    *xout = ptsout[0];
+    *yout = ptsout[1];
+    *term = intout[0];
+    return contrl[4];
+}
+
+/* The choice device sampled.  This machine has none -- there are no
+ * function keys on a GEM keyboard here -- so the answer is always 0,
+ * which is what "nothing was chosen" means. */
+WORD vsm_choice(WORD handle, WORD *choice)
+{
+    vdi(30, 0, 0, handle);              /* sampled: nothing goes in */
+    *choice = intout[0];
+    return contrl[4];
+}
+
+/* One key, as a GEM key code -- scan code over ASCII -- or nothing:
+ * gem4xe's string device answers a key at a time (src/vdi/vdi.c). */
+WORD v_string(WORD handle, WORD *key)
+{
+    vdi(31, 0, 0, handle);
+    if (contrl[4] < 1)
+        return 0;
+    *key = intout[0];
+    return 1;
+}
+
+WORD vswr_mode(WORD handle, WORD mode) { return attr1(32, handle, mode); }
+
+WORD vsin_mode(WORD handle, WORD dev, WORD mode)
+{
+    intin[0] = dev;
+    intin[1] = mode;
+    vdi(33, 0, 2, handle);
+    return intout[0];
+}
+
+void vql_attributes(WORD handle, WORD *attr)
+{
+    vdi(35, 0, 0, handle);
+    intx(attr, 3);
+    attr[3] = ptsout[0];
+}
+
+void vqm_attributes(WORD handle, WORD *attr)
+{
+    vdi(36, 0, 0, handle);
+    intx(attr, 3);
+    attr[3] = ptsout[1];
+}
+
+void vqf_attributes(WORD handle, WORD *attr)
+{
+    vdi(37, 0, 0, handle);
+    intx(attr, 5);                      /* style, colour, index, mode,
+                                         * perimeter */
+}
+
+void vqt_attributes(WORD handle, WORD *attr)
+{
+    vdi(38, 0, 0, handle);
+    intx(attr, 6);
+    ptsx(attr + 6, 4);
+}
+
+void vst_alignment(WORD handle, WORD hin, WORD vin, WORD *hout, WORD *vout)
+{
+    intin[0] = hin;
+    intin[1] = vin;
+    vdi(39, 0, 2, handle);
+    *hout = intout[0];
+    *vout = intout[1];
+}
+
+void vq_extnd(WORD handle, WORD owflag, WORD *work_out)
+{
+    WORD i;
+    intin[0] = owflag;
+    vdi(102, 0, 1, handle);
+    for (i = 0; i < 45; i++)
+        work_out[i] = intout[i];
+    for (i = 0; i < 12; i++)
+        work_out[45 + i] = ptsout[i];
+}
+
+void v_contourfill(WORD handle, WORD x, WORD y, WORD index)
+{
+    ptsin[0] = x;
+    ptsin[1] = y;
+    intin[0] = index;
+    vdi(103, 1, 1, handle);
+}
+
+WORD vsf_perimeter(WORD handle, WORD vis) { return attr1(104, handle, vis); }
+
+void v_get_pixel(WORD handle, WORD x, WORD y, WORD *pel, WORD *index)
+{
+    ptsin[0] = x;
+    ptsin[1] = y;
+    vdi(105, 1, 0, handle);
+    *pel = intout[0];
+    *index = intout[1];
+}
+
+WORD vst_effects(WORD handle, WORD effects) { return attr1(106, handle, effects); }
+
+WORD vst_point(WORD handle, WORD point, WORD *char_width, WORD *char_height,
+               WORD *cell_width, WORD *cell_height)
+{
+    intin[0] = point;
+    vdi(107, 0, 1, handle);
+    *char_width = ptsout[0];
+    *char_height = ptsout[1];
+    *cell_width = ptsout[2];
+    *cell_height = ptsout[3];
+    return intout[0];
+}
+
+void vsl_ends(WORD handle, WORD beg_style, WORD end_style)
+{
+    intin[0] = beg_style;
+    intin[1] = end_style;
+    vdi(108, 0, 2, handle);
+}
+
+void vro_cpyfm(WORD handle, WORD mode, const WORD *pxy, const MFDB *src,
+               const MFDB *dst)
+{
+    pts(pxy, 8);
+    intin[0] = mode;
+    form_in(7, src);
+    form_in(9, dst);
+    vdi(109, 4, 1, handle);
+}
+
+void vr_trnfm(WORD handle, const MFDB *src, const MFDB *dst)
+{
+    form_in(7, src);
+    form_in(9, dst);
+    vdi(110, 0, 0, handle);
+}
+
+void vsc_form(WORD handle, const WORD *form)
+{
+    WORD i;
+    for (i = 0; i < 37; i++)
+        intin[i] = form[i];
+    vdi(111, 0, 37, handle);
+}
+
+void vsf_udpat(WORD handle, const WORD *pattern, WORD planes)
+{
+    WORD i;
+    for (i = 0; i < 16; i++)
+        intin[i] = pattern[i];
+    (void)planes;                       /* one plane's worth here */
+    vdi(112, 0, 16, handle);
+}
+
+void vsl_udsty(WORD handle, WORD pattern)
+{
+    intin[0] = pattern;
+    vdi(113, 0, 1, handle);
+}
+
+void vqin_mode(WORD handle, WORD dev, WORD *mode)
+{
+    intin[0] = dev;
+    vdi(115, 0, 1, handle);
+    *mode = intout[0];
+}
+
+void vqt_extent(WORD handle, const char *s, WORD *extent)
+{
+    WORD n = str_in(s, 0);
+    vdi(116, 0, n, handle);
+    ptsx(extent, 8);
+}
+
+/* Three points, and the deltas are a point apart -- [0] the cell, [2]
+ * the left delta, [4] the right one. */
+WORD vqt_width(WORD handle, WORD ch, WORD *cell_width, WORD *left_delta,
+               WORD *right_delta)
+{
+    intin[0] = ch;
+    vdi(117, 0, 1, handle);
+    *cell_width = ptsout[0];
+    *left_delta = ptsout[2];
+    *right_delta = ptsout[4];
+    return intout[0];
+}
+
+/* The vector exchanges.  A handler is 24 bits under the large code model,
+ * so the address travels as the LONG at contrl[7] and the one that was
+ * there comes back at contrl[9] (src/vdi/vdi.c, vex). */
+static LONG vex(WORD op, LONG newv, WORD handle)
+{
+    contrl[7] = (WORD)newv;
+    contrl[8] = (WORD)(newv >> 16);
+    contrl[9] = contrl[10] = 0;
+    vdi(op, 0, 0, handle);
+    return (LONG)((uint32_t)(UWORD)contrl[9]
+                  | ((uint32_t)(UWORD)contrl[10] << 16));
+}
+
+WORD vex_timv(WORD handle, LONG newv, LONG *oldv)
+{
+    *oldv = vex(118, newv, handle);
+    return intout[0];                   /* the tick, in milliseconds */
+}
+
+void vex_butv(WORD handle, LONG newv, LONG *oldv) { *oldv = vex(125, newv, handle); }
+void vex_motv(WORD handle, LONG newv, LONG *oldv) { *oldv = vex(126, newv, handle); }
+void vex_curv(WORD handle, LONG newv, LONG *oldv) { *oldv = vex(127, newv, handle); }
+
+WORD vst_load_fonts(WORD handle, WORD select)
+{
+    return attr1(119, handle, select);
+}
+
+void vst_unload_fonts(WORD handle, WORD select)
+{
+    intin[0] = select;
+    vdi(120, 0, 1, handle);
+}
+
+void vrt_cpyfm(WORD handle, WORD mode, const WORD *pxy, const MFDB *src,
+               const MFDB *dst, const WORD *color)
+{
+    pts(pxy, 8);
+    intin[0] = mode;
+    intin[1] = color[0];
+    intin[2] = color[1];
+    form_in(7, src);
+    form_in(9, dst);
+    vdi(121, 4, 3, handle);
+}
+
+void v_show_c(WORD handle, WORD reset)
+{
+    intin[0] = reset;
+    vdi(122, 0, 1, handle);
+}
+
+void v_hide_c(WORD handle) { vdi(123, 0, 0, handle); }
+
+void vq_mouse(WORD handle, WORD *pstatus, WORD *x, WORD *y)
+{
+    vdi(124, 0, 0, handle);
+    *pstatus = intout[0];
+    *x = ptsout[0];
+    *y = ptsout[1];
+}
+
+void vq_key_s(WORD handle, WORD *state)
+{
+    vdi(128, 0, 0, handle);
+    *state = intout[0];
+}
+
+void vs_clip(WORD handle, WORD clip_flag, const WORD *pxy)
+{
+    pts(pxy, 4);
+    intin[0] = clip_flag;
+    vdi(129, 2, 1, handle);
+}
+
+WORD vqt_name(WORD handle, WORD element, char *name)
+{
+    WORD i;
+    intin[0] = element;
+    vdi(130, 0, 1, handle);
+    for (i = 0; i < 32; i++)
+        name[i] = (char)intout[i + 1];
+    name[32] = 0;
+    return intout[0];
+}
 
 /* -- AES ------------------------------------------------------------- */
 
@@ -528,6 +1060,183 @@ WORD shel_put(const void __far *data, WORD len)
     return aes(123, 1, 1, 1, 0);
 }
 
+/* -- AES: the rest of the surface --------------------------------------
+ *
+ * The calls src/sys/abi.c serves and the library did not reach: an
+ * application can now make every one of them by name.  The counts are
+ * the ST's -- the AES reads control[1..4] to know how much to copy in
+ * and out, so a binding that miscounts is a binding that loses an
+ * argument.
+ */
+
+WORD appl_write(WORD id, WORD length, const WORD *msg)
+{
+    int_in[0] = id;
+    int_in[1] = length;
+    addr_in[0] = (LONG)(uint32_t)(const WORD __far *)msg;
+    return aes(12, 2, 1, 1, 0);
+}
+
+WORD evnt_mouse(WORD flags, WORD x, WORD y, WORD w, WORD h,
+                WORD *mx, WORD *my, WORD *button, WORD *kstate)
+{
+    WORD r;
+    int_in[0] = flags;
+    int_in[1] = x;
+    int_in[2] = y;
+    int_in[3] = w;
+    int_in[4] = h;
+    r = aes(22, 5, 5, 0, 0);
+    *mx = int_out[1];
+    *my = int_out[2];
+    *button = int_out[3];
+    *kstate = int_out[4];
+    return r;
+}
+
+WORD evnt_dclick(WORD rate, WORD setit)
+{
+    int_in[0] = rate;
+    int_in[1] = setit;
+    return aes(26, 2, 1, 0, 0);
+}
+
+WORD menu_text(OBJECT *tree, WORD item, const char *text)
+{
+    int_in[0] = item;
+    addr_in[0] = tree_addr(tree);
+    addr_in[1] = (LONG)(uint32_t)(const char __far *)text;
+    return aes(34, 1, 1, 2, 0);
+}
+
+WORD menu_register(WORD pid, const char *str)
+{
+    int_in[0] = pid;
+    addr_in[0] = (LONG)(uint32_t)(const char __far *)str;
+    return aes(35, 1, 1, 1, 0);
+}
+
+/* objc_edit: `idx` is both the cursor position going in and the one
+ * that comes back (the ST passes it by address; here it is a word in
+ * and a word out, which is what the shim does with it). */
+WORD objc_edit(OBJECT *tree, WORD obj, WORD in_char, WORD *idx, WORD kind)
+{
+    WORD r;
+    int_in[0] = obj;
+    int_in[1] = in_char;
+    int_in[2] = *idx;
+    int_in[3] = kind;
+    addr_in[0] = tree_addr(tree);
+    r = aes(46, 4, 2, 1, 0);
+    *idx = int_out[1];
+    return r;
+}
+
+WORD form_keybd(OBJECT *tree, WORD obj, WORD nxt_obj, WORD thechar,
+                WORD *pnxt_obj, WORD *pchar)
+{
+    WORD r;
+    int_in[0] = obj;
+    int_in[1] = thechar;
+    int_in[2] = nxt_obj;
+    addr_in[0] = tree_addr(tree);
+    r = aes(55, 3, 3, 1, 0);
+    *pnxt_obj = int_out[1];
+    *pchar = int_out[2];
+    return r;
+}
+
+WORD form_button(OBJECT *tree, WORD obj, WORD clks, WORD *pnxt_obj)
+{
+    WORD r;
+    int_in[0] = obj;
+    int_in[1] = clks;
+    addr_in[0] = tree_addr(tree);
+    r = aes(56, 2, 2, 1, 0);
+    *pnxt_obj = int_out[1];
+    return r;
+}
+
+WORD graf_rubbox(WORD x, WORD y, WORD w, WORD h, WORD *pw, WORD *ph)
+{
+    WORD r;
+    int_in[0] = x;
+    int_in[1] = y;
+    int_in[2] = w;
+    int_in[3] = h;
+    r = aes(70, 4, 3, 0, 0);
+    *pw = int_out[1];
+    *ph = int_out[2];
+    return r;
+}
+
+WORD graf_watchbox(OBJECT *tree, WORD obj, WORD instate, WORD outstate)
+{
+    int_in[1] = obj;
+    int_in[2] = instate;
+    int_in[3] = outstate;
+    addr_in[0] = tree_addr(tree);
+    return aes(75, 4, 1, 1, 0);
+}
+
+/* The file selector.  The path and the name are the caller's buffers
+ * and come back written; the button is 1 for OK and 0 for Cancel. */
+WORD fsel_input(char *path, char *sel, WORD *button)
+{
+    WORD r;
+    addr_in[0] = (LONG)(uint32_t)(char __far *)path;
+    addr_in[1] = (LONG)(uint32_t)(char __far *)sel;
+    r = aes(90, 0, 2, 2, 0);
+    *button = int_out[1];
+    return r;
+}
+
+WORD fsel_exinput(char *path, char *sel, WORD *button, const char *label)
+{
+    WORD r;
+    addr_in[0] = (LONG)(uint32_t)(char __far *)path;
+    addr_in[1] = (LONG)(uint32_t)(char __far *)sel;
+    addr_in[2] = (LONG)(uint32_t)(const char __far *)label;
+    r = aes(91, 0, 2, 3, 0);
+    *button = int_out[1];
+    return r;
+}
+
+WORD rsrc_saddr(WORD type, WORD index, void *addr)
+{
+    int_in[0] = type;
+    int_in[1] = index;
+    addr_in[0] = (LONG)(uint32_t)(void __far *)addr;
+    return aes(113, 2, 1, 1, 0);
+}
+
+WORD rsrc_obfix(OBJECT *tree, WORD obj)
+{
+    int_in[0] = obj;
+    addr_in[0] = tree_addr(tree);
+    return aes(114, 1, 1, 1, 0);
+}
+
+WORD shel_read(char *cmd, char *tail)
+{
+    addr_in[0] = (LONG)(uint32_t)(char __far *)cmd;
+    addr_in[1] = (LONG)(uint32_t)(char __far *)tail;
+    return aes(120, 0, 1, 2, 0);
+}
+
+WORD shel_find(char *path)
+{
+    addr_in[0] = (LONG)(uint32_t)(char __far *)path;
+    return aes(124, 0, 1, 1, 0);
+}
+
+WORD shel_envrn(char **value, const char *name)
+{
+    addr_in[0] = (LONG)(uint32_t)(void __far *)value;
+    addr_in[1] = (LONG)(uint32_t)(const char __far *)name;
+    return aes(125, 0, 1, 2, 0);
+}
+
 /* -- GEMDOS ---------------------------------------------------------- */
 
 static GDPB dpb;
@@ -639,4 +1348,24 @@ LONG Fattrib(const char __far *name, WORD wflag, WORD attr)
     dw(10, wflag);
     dw(12, attr);
     return dos(0x43);
+}
+
+/* The three GEMDOS calls phase 16 filled in and the library had not
+ * caught up with (src/sys/gemdos.c). */
+LONG Fdatime(WORD *timeptr, WORD handle, WORD wflag)
+{
+    dl(6, (LONG)(uint32_t)(WORD __far *)timeptr);
+    dw(10, handle);
+    dw(12, wflag);
+    return dos(0x57);
+}
+
+WORD Tgetdate(void)
+{
+    return (WORD)dos(0x2A);
+}
+
+WORD Tgettime(void)
+{
+    return (WORD)dos(0x2C);
 }

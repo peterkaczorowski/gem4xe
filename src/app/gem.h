@@ -263,6 +263,110 @@ WORD vsf_interior(WORD handle, WORD style);
 WORD vsl_color(WORD handle, WORD color);
 WORD vst_color(WORD handle, WORD color);
 
+/* An MFDB, the raster calls' form descriptor, laid out as the VDI has
+ * had it since 1984 -- with one change forced by the compiler:
+ * fd_addr is a 32-bit word, not a pointer, because the small data
+ * model makes `void *` 16 bits and would shift every field after it
+ * (src/vdi/vdi.h has the account).  A form lives in bank $00 here, so
+ * only the low half is ever used; 0 means the screen. */
+typedef struct {
+    uint32_t fd_addr;
+    WORD fd_w, fd_h;
+    WORD fd_wdwidth;            /* (fd_w + 15) / 16 -- WORDS, per the spec */
+    WORD fd_stand;              /* 0 device-specific, 1 VDI standard */
+    WORD fd_nplanes;
+    WORD fd_r1, fd_r2, fd_r3;
+} MFDB;
+
+/* The rest of the VDI, in the names and the argument order it has had
+ * since 1984.  Absent by choice: cell array (10, 27), the valuator
+ * (29) and 34, which the driver answers with v_nop -- a binding that
+ * silently does nothing is worse than a name that is not there. */
+void v_opnwk(WORD *work_in, WORD *handle, WORD *work_out);
+void v_clswk(WORD handle);
+void v_clrwk(WORD handle);
+void v_updwk(WORD handle);      /* a screen has nothing to write out */
+void v_enter_cur(WORD handle);
+void v_exit_cur(WORD handle);
+void v_pmarker(WORD handle, WORD count, const WORD *pxy);
+void v_fillarea(WORD handle, WORD count, const WORD *pxy);
+void v_bar(WORD handle, const WORD *pxy);
+void v_arc(WORD handle, WORD x, WORD y, WORD radius, WORD begang, WORD endang);
+void v_pieslice(WORD handle, WORD x, WORD y, WORD radius, WORD begang,
+                WORD endang);
+void v_circle(WORD handle, WORD x, WORD y, WORD radius);
+void v_ellipse(WORD handle, WORD x, WORD y, WORD xrad, WORD yrad);
+void v_ellarc(WORD handle, WORD x, WORD y, WORD xrad, WORD yrad,
+              WORD begang, WORD endang);
+void v_ellpie(WORD handle, WORD x, WORD y, WORD xrad, WORD yrad,
+              WORD begang, WORD endang);
+void v_rbox(WORD handle, const WORD *pxy);
+void v_rfbox(WORD handle, const WORD *pxy);
+void v_justified(WORD handle, WORD x, WORD y, const char *s, WORD length,
+                 WORD word_space, WORD char_space);
+void vst_height(WORD handle, WORD height, WORD *char_width, WORD *char_height,
+                WORD *cell_width, WORD *cell_height);
+WORD vst_rotation(WORD handle, WORD angle);
+void vs_color(WORD handle, WORD index, const WORD *rgb);
+WORD vsl_type(WORD handle, WORD style);
+WORD vsl_width(WORD handle, WORD width);
+WORD vsm_type(WORD handle, WORD symbol);
+WORD vsm_height(WORD handle, WORD height);
+WORD vsm_color(WORD handle, WORD color);
+WORD vst_font(WORD handle, WORD font);
+WORD vsf_style(WORD handle, WORD style);
+void vq_color(WORD handle, WORD index, WORD flag, WORD *rgb);
+WORD v_locator(WORD handle, WORD x, WORD y, WORD *xout, WORD *yout,
+               WORD *term);
+WORD vsm_choice(WORD handle, WORD *choice);
+/* The string device answers ONE key per call, as a GEM key code -- scan
+ * code over ASCII, the value evnt_keybd hands out -- or 0 if none is
+ * waiting.  That is this driver's convention, not the ST's vsm_string
+ * (src/vdi/vdi.c), which is why it does not wear that name. */
+WORD v_string(WORD handle, WORD *key);
+WORD vswr_mode(WORD handle, WORD mode);
+WORD vsin_mode(WORD handle, WORD dev, WORD mode);
+void vql_attributes(WORD handle, WORD *attr);   /* type, colour, mode, width */
+void vqm_attributes(WORD handle, WORD *attr);   /* type, colour, mode, height */
+void vqf_attributes(WORD handle, WORD *attr);   /* style, colour, index,
+                                                 * mode, perimeter */
+void vqt_attributes(WORD handle, WORD *attr);   /* six words and four points */
+void vst_alignment(WORD handle, WORD hin, WORD vin, WORD *hout, WORD *vout);
+void vq_extnd(WORD handle, WORD owflag, WORD *work_out);
+void v_contourfill(WORD handle, WORD x, WORD y, WORD index);
+WORD vsf_perimeter(WORD handle, WORD vis);
+void v_get_pixel(WORD handle, WORD x, WORD y, WORD *pel, WORD *index);
+WORD vst_effects(WORD handle, WORD effects);
+WORD vst_point(WORD handle, WORD point, WORD *char_width, WORD *char_height,
+               WORD *cell_width, WORD *cell_height);
+void vsl_ends(WORD handle, WORD beg_style, WORD end_style);
+void vro_cpyfm(WORD handle, WORD mode, const WORD *pxy, const MFDB *src,
+               const MFDB *dst);
+void vr_trnfm(WORD handle, const MFDB *src, const MFDB *dst);
+void vsc_form(WORD handle, const WORD *form);   /* the 37 words of a cursor */
+void vsf_udpat(WORD handle, const WORD *pattern, WORD planes);
+void vsl_udsty(WORD handle, WORD pattern);
+void vqin_mode(WORD handle, WORD dev, WORD *mode);
+void vqt_extent(WORD handle, const char *s, WORD *extent);  /* four points */
+WORD vqt_width(WORD handle, WORD ch, WORD *cell_width, WORD *left_delta,
+               WORD *right_delta);
+/* A handler is 24 bits under the large code model, so a vector is a
+ * LONG here rather than a native function pointer. */
+WORD vex_timv(WORD handle, LONG newv, LONG *oldv);   /* answers the tick, in ms */
+void vex_butv(WORD handle, LONG newv, LONG *oldv);
+void vex_motv(WORD handle, LONG newv, LONG *oldv);
+void vex_curv(WORD handle, LONG newv, LONG *oldv);
+WORD vst_load_fonts(WORD handle, WORD select);
+void vst_unload_fonts(WORD handle, WORD select);
+void vrt_cpyfm(WORD handle, WORD mode, const WORD *pxy, const MFDB *src,
+               const MFDB *dst, const WORD *color);
+void v_show_c(WORD handle, WORD reset);
+void v_hide_c(WORD handle);
+void vq_mouse(WORD handle, WORD *pstatus, WORD *x, WORD *y);
+void vq_key_s(WORD handle, WORD *state);
+void vs_clip(WORD handle, WORD clip_flag, const WORD *pxy);
+WORD vqt_name(WORD handle, WORD element, char *name);   /* name[33] */
+
 WORD appl_init(void);
 WORD appl_exit(void);
 
@@ -351,10 +455,33 @@ WORD shel_write(WORD doex, WORD isgr, WORD iscr, const char *cmd, const char *ta
 WORD shel_get(void __far *buffer, WORD len);
 WORD shel_put(const void __far *data, WORD len);
 
+/* The rest of the AES. */
+WORD appl_write(WORD id, WORD length, const WORD *msg);
+WORD evnt_mouse(WORD flags, WORD x, WORD y, WORD w, WORD h,
+                WORD *mx, WORD *my, WORD *button, WORD *kstate);
+WORD evnt_dclick(WORD rate, WORD setit);
+WORD menu_text(OBJECT *tree, WORD item, const char *text);
+WORD menu_register(WORD pid, const char *str);
+WORD objc_edit(OBJECT *tree, WORD obj, WORD in_char, WORD *idx, WORD kind);
+WORD form_keybd(OBJECT *tree, WORD obj, WORD nxt_obj, WORD thechar,
+                WORD *pnxt_obj, WORD *pchar);
+WORD form_button(OBJECT *tree, WORD obj, WORD clks, WORD *pnxt_obj);
+WORD graf_rubbox(WORD x, WORD y, WORD w, WORD h, WORD *pw, WORD *ph);
+WORD graf_watchbox(OBJECT *tree, WORD obj, WORD instate, WORD outstate);
+WORD fsel_input(char *path, char *sel, WORD *button);
+WORD fsel_exinput(char *path, char *sel, WORD *button, const char *label);
+WORD rsrc_saddr(WORD type, WORD index, void *addr);
+WORD rsrc_obfix(OBJECT *tree, WORD obj);
+WORD shel_read(char *cmd, char *tail);
+WORD shel_find(char *path);
+WORD shel_envrn(char **value, const char *name);
+
 /* -- GEMDOS, the ST's osbind names.  Pointers are far so that a buffer
  * Malloc gave out -- which is far memory -- can be read into directly;
  * a near pointer widens to one.  Errors are the ST's negative numbers,
- * src/sys/gemdos.h; Fseek, Fdatime and Tget* answer EINVFN today. */
+ * src/sys/gemdos.h.  Fseek, Fdatime and the clock were the four
+ * gaps phase 16 filled; nothing here answers EINVFN any more
+ * except Tsetdate, which has no clock to set. */
 #define E_OK      0L
 #define EINVFN  -32L
 #define EFILNF  -33L
@@ -409,5 +536,9 @@ LONG Frename(const char __far *oldname, const char __far *newname);
 LONG Fattrib(const char __far *name, WORD wflag, WORD attr);
 LONG Malloc(LONG size);         /* -1 asks how much is left */
 LONG Mfree(void __far *block);
+
+LONG Fdatime(WORD *timeptr, WORD handle, WORD wflag);   /* two words: time, date */
+WORD Tgetdate(void);
+WORD Tgettime(void);
 
 #endif /* GEM4XE_APP_GEM_H */
