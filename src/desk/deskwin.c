@@ -840,6 +840,19 @@ static char __far *put_far(char __far *d, const char __far *s)
     return d;
 }
 
+/* The file the layout lives in, on the drive the desktop was started
+ * from -- the donor's INF_FILE_NAME with the boot drive's letter put
+ * into it (deskapp.c read_inf_file).  An absolute path, so that a
+ * desktop which has been walking around a disk still writes it where
+ * it will be found at the next boot. */
+static void inf_name(char *name)
+{
+    name[0] = (char)('A' + Dgetdrv());
+    name[1] = ':';
+    name[2] = '\\';
+    put_str(name + 3, INF_NAME);
+}
+
 /* The INF text from the slots; its length with the NUL. */
 static WORD inf_write(void)
 {
@@ -867,6 +880,49 @@ static WORD inf_write(void)
     return (WORD)((uint32_t)p - (uint32_t)G.g_shelbuf + 1);
 }
 
+/* The text after CPDATA_LEN, and how long it is without the NUL. */
+static WORD inf_len(WORD len)
+{
+    return (WORD)(len - CPDATA_LEN - 1);
+}
+
+/* The file into the shell buffer, FALSE when there is none to read or
+ * what is there is not INF text. */
+static WORD inf_load(void)
+{
+    char name[LEN_ZFNAME + 4];
+    char __far *buf = G.g_shelbuf + CPDATA_LEN;
+    LONG fd, got;
+
+    inf_name(name);
+    fd = Fopen(name, 0);
+    if (fd < 0)
+        return FALSE;
+    got = Fread((WORD)fd, (LONG)(SIZE_SHELBUF - CPDATA_LEN - 1), buf);
+    Fclose((WORD)fd);
+    if (got < 0)
+        got = 0;
+    buf[got] = 0;
+    return (WORD)(buf[0] == '#');
+}
+
+/* ...and the buffer out to it.  `len` is inf_write's, so the NUL and
+ * the copy/paste bytes in front of the text are not written: what goes
+ * on the disk is the text a person could read. */
+static WORD inf_store(WORD len)
+{
+    char name[LEN_ZFNAME + 4];
+    LONG fd, put, n = (LONG)inf_len(len);
+
+    inf_name(name);
+    fd = Fcreate(name, 0);
+    if (fd < 0)
+        return FALSE;
+    put = Fwrite((WORD)fd, n, G.g_shelbuf + CPDATA_LEN);
+    Fclose((WORD)fd);
+    return (WORD)(put == n);
+}
+
 /* No INF text yet: the donor's desk_inf_data1 windows, each lower
  * than the one before, as text for app_start to read like any other. */
 static void build_inf(void)
@@ -886,17 +942,12 @@ static void build_inf(void)
     inf_write();
 }
 
-/* The shell buffer, and the slots from its "#W" lines. */
-void app_start(void)
+/* The slots from the "#W" lines of INF text. */
+static void inf_parse(const char __far *pcurr)
 {
-    const char __far *pcurr;
     WSAVE __far *pws;
     WORD wincnt = 0, rev, i;
 
-    shel_get(G.g_shelbuf, SIZE_SHELBUF);
-    pcurr = G.g_shelbuf + CPDATA_LEN;
-    if (*pcurr != '#')
-        build_inf();
     while (*pcurr) {
         if (*pcurr++ != '#')
             continue;
@@ -927,6 +978,44 @@ void app_start(void)
             break;
         }
     }
+}
+
+/* Where the desktop's layout comes from at start-up, in the order the
+ * donor looks: what the shell buffer holds -- which is how a desktop
+ * that has just run a program gets its windows back -- then the file,
+ * which is how it gets them back after the machine has been off, and
+ * then the built-in default. */
+void app_start(void)
+{
+    shel_get(G.g_shelbuf, SIZE_SHELBUF);
+    if (G.g_shelbuf[CPDATA_LEN] != '#' && !inf_load())
+        build_inf();
+    inf_parse(G.g_shelbuf + CPDATA_LEN);
+}
+
+/* Options -> Save desktop: the windows as they are now, into the slots,
+ * into the text, onto the disk. */
+WORD inf_save(void)
+{
+    cnx_put();
+    return inf_store(inf_write());
+}
+
+/* Options -> Read .INF file: the file back, and the windows with it --
+ * what is open is closed first, so that what comes up is what was
+ * saved and not what was saved on top of what is there. */
+WORD inf_read(void)
+{
+    WORD i;
+
+    if (!inf_load())
+        return FALSE;
+    inf_parse(G.g_shelbuf + CPDATA_LEN);
+    for (i = 0; i < NUM_WNODES; i++)
+        if (G.g_wlist[i].w_id > 0)
+            win_close(&G.g_wlist[i], TRUE);
+    cnx_get();
+    return TRUE;
 }
 
 /* The slots into the shell buffer, for the next desktop. */

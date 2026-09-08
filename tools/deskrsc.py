@@ -105,6 +105,9 @@ STDISK, STTRASH = 0, 1
 STDELTTL, STCPYTTL, STMOVTTL = 14, 15, 16
 # Show info wears two of the same kind, and says so when a rename fails.
 STFIINFO, STFOINFO, STRENAME = 17, 18, 19
+# ...and what the Options menu says when the layout will not go to the
+# disk, or is not there to come back from.
+STSVINF, STRDINF = 20, 21
 
 # (index, name, text) in index order; the alerts as form_alert parses
 # them -- [icon][the lines, | between][the buttons]
@@ -137,10 +140,14 @@ TITLES = [
 ]
 
 # What Show info says when the DOS will not take the new name: the
-# donor's alert, whose second button is the one that gives up.
+# donor's alert, whose second button is the one that gives up.  The two
+# after it are the Options menu's, and carry the donor's names.
 RENAME_ALERT = [
     (STRENAME, "STRENAME", "[1][That name cannot be used|for this item.]"
                            "[ Retry | Cancel ]"),
+    (STSVINF,  "STSVINF",  "[1][The desktop could not|be saved.][ OK ]"),
+    (STRDINF,  "STRDINF",  "[1][There is no saved desktop|on this disk.]"
+                           "[ OK ]"),
 ]
 
 # ICONBLKs, in the order of the table; IG_* name them
@@ -182,8 +189,7 @@ INDICES = [
 # The items the desktop does not do yet: disabled at start (menu_ienable),
 # not in the file, so the file stays RCS-shaped.
 NOT_YET = (FORMITEM, TEXTITEM, NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM,
-           NSRTITEM, FITITEM, IICNITEM, IAPPITEM, PREFITEM, READITEM,
-           SAVEITEM)
+           NSRTITEM, FITITEM, IICNITEM, IAPPITEM, PREFITEM)
 
 # The menu, box by box: (title, box x, box width, items); an item is a
 # string, "-" for a separator, and (string, state) for a state.

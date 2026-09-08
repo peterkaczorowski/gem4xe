@@ -70,8 +70,9 @@ from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
 from rsc import R_TREE, R_ICONBLK, R_STRING, ICONBLK_SIZE  # noqa: E402
 from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA, ADFINFO,  # noqa: E402
                      DESKMENU, FILEMENU, ABOUITEM,
-                     OPENITEM, SHOWITEM, NFOLITEM, DELTITEM, CLOSITEM,
-                     CLSWITEM, QUITITEM, DEVERSN, DEOK,
+                     OPTNMENU, OPENITEM, SHOWITEM, NFOLITEM, DELTITEM,
+                     CLOSITEM, CLSWITEM, QUITITEM, READITEM, SAVEITEM,
+                     DEVERSN, DEOK,
                      MKNAME, MKOK, CDTITLE, CDFILES, CDFOLDS, CDOK,
                      FITITLE, FINAME, FISIZE, FIDATE, FIFILES, FIFOLDS,
                      FIRDWR, FIRONLY, FIOK,
@@ -79,7 +80,7 @@ from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA, ADFINFO,  # noqa: E402
                      STDELFIL, STDELDIR, STFOFAIL, STFO8DEE, STDEEPPA,
                      STCPYFIL, STDISKFU, STNOTHIN, STSAMEPL,
                      STDELTTL, STCPYTTL, STMOVTTL,
-                     STFIINFO, STFOINFO, STRENAME,
+                     STFIINFO, STFOINFO, STRENAME, STSVINF, STRDINF,
                      IB_HARD, IB_FLOPPY, IB_TRASH,
                      IB_FOLDER, IB_APPL, IB_DOCU, NOT_YET)
 
@@ -109,6 +110,7 @@ DISPATTR = FA_SUBDIR
 F_SELECTED = 0x0001
 SHW_EXEC, SHW_SHUTDOWN = 1, 4               # gem.h
 CPDATA_LEN, INF_REV_LEVEL, SH_TAILLEN = 128, 2, 128
+INF_NAME = "DESKTOP.INF"                    # desk.h
 AES_VERSION = 0x0140                        # abi.c: global[0]
 SCREENINFO_SIZE = ICONBLK_SIZE + LABEL_LEN
 OBJ_SIZE = aesref.OBJ_SIZE
@@ -1034,11 +1036,50 @@ class Desktop:
             ws.path = ""
         self.inf_write()
 
-    def app_start(self):
-        self.call(SHEL_GET, (SIZE_SHELBUF,), tree=self.shelbuf)
+    def inf_name(self):
+        """The file the layout lives in, on the drive the desktop was
+        started from (deskwin.c inf_name)."""
+        io, _ = self.call(DGETDRV)
+        return f"{chr(ord('A') + io[0])}:\\{INF_NAME}"
+
+    def inf_load(self):
+        """The file into the shell buffer copy, FALSE when there is
+        none (deskwin.c inf_load)."""
+        self.a.mem[STACK_STRING] = Text(self.inf_name())
+        fd = self.gemdos_long(FOPEN, STACK_STRING, 0)
+        if fd < 0:
+            return False
+        room = SIZE_SHELBUF - CPDATA_LEN - 1
+        buf = self.shelbuf + CPDATA_LEN
+        got = self.gemdos(FREAD, (fd, room & 0xFFFF, room >> 16,
+                                  buf & 0xFFFF, buf >> 16))
+        self.gemdos(FCLOSE, (fd,))
+        if got < 0:
+            got = 0
+        # The model's GEMDOS keeps a file's LENGTH, not its bytes, so
+        # what a read gives back is what this desktop last wrote --
+        # which it still has, in the buffer it wrote from.
         raw = self.shelbuf_data.raw
-        if raw[CPDATA_LEN] != ord("#"):
-            self.build_inf()
+        raw[CPDATA_LEN + got] = 0
+        return raw[CPDATA_LEN] == ord("#")
+
+    def inf_store(self, n):
+        """...and the buffer out to it; `n` is inf_write's length, so
+        neither the NUL nor the bytes in front of the text go."""
+        self.a.mem[STACK_STRING] = Text(self.inf_name())
+        fd = self.gemdos_long(FCREATE, STACK_STRING, 0)
+        if fd < 0:
+            return False
+        length = n - CPDATA_LEN - 1
+        buf = self.shelbuf + CPDATA_LEN
+        put = self.gemdos(FWRITE, (fd, length & 0xFFFF, length >> 16,
+                                   buf & 0xFFFF, buf >> 16))
+        self.gemdos(FCLOSE, (fd,))
+        return put == length
+
+    def inf_parse(self):
+        """The slots from the "#W" lines of whatever is in the buffer."""
+        raw = self.shelbuf_data.raw
         n = raw.find(0, CPDATA_LEN)
         text = bytes(raw[CPDATA_LEN:n]).decode("latin-1")
         i, wincnt = 0, 0
@@ -1068,6 +1109,32 @@ class Desktop:
                     ws.path = text[i:min(k, i + LEN_ZPATH - 1)]
                     i = k if k - i < LEN_ZPATH - 1 else i + LEN_ZPATH - 1
                     wincnt += 1
+
+
+    def app_start(self):
+        """What the shell buffer holds, then the file, then the
+        built-in default (deskwin.c app_start)."""
+        self.call(SHEL_GET, (SIZE_SHELBUF,), tree=self.shelbuf)
+        if self.shelbuf_data.raw[CPDATA_LEN] != ord("#") and not self.inf_load():
+            self.build_inf()
+        self.inf_parse()
+
+    def inf_save(self):
+        """Options -> Save desktop."""
+        self.cnx_put()
+        return self.inf_store(self.inf_write())
+
+    def inf_read(self):
+        """Options -> Read .INF file: the file back, and the windows
+        with it -- what is open is closed first."""
+        if not self.inf_load():
+            return False
+        self.inf_parse()
+        for pw in self.wlist:
+            if pw.id > 0:
+                self.win_close(pw, True)
+        self.cnx_get()
+        return True
 
     def app_save(self):
         n = self.inf_write()
@@ -1797,12 +1864,24 @@ class Desktop:
             return True
         return False
 
+    def do_optnmenu(self, item):
+        """desktop.c do_optnmenu: the layout to the disk and back."""
+        if item == SAVEITEM:
+            if not self.inf_save():
+                self.fun_alert(1, STSVINF)
+        elif item == READITEM:
+            if not self.inf_read():
+                self.fun_alert(1, STRDINF)
+        return False
+
     def hndl_menu(self, title, item):
         done = False
         if title == DESKMENU:
             done = self.do_deskmenu(item)
         elif title == FILEMENU:
             done = self.do_filemenu(item)
+        elif title == OPTNMENU:
+            done = self.do_optnmenu(item)
         self.call(MENU_TNORMAL, (title, 1), tree=self.a_menu)
         return done
 

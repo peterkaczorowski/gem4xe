@@ -492,8 +492,13 @@ build/m3-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt b
 # at all and enhanced holds it with three sectors to spare, which left no
 # room for the DOS's own shell -- and a DOS with no shell to return to
 # dies when GEM hands the machine back.  720 sectors of 253 bytes hold
-# the system, DOS.SYS, DUP.SYS and 46 KB besides, which is what makes the
-# disk a place to keep applications rather than one program.  The program
+# the system, DOS.SYS, DUP.SYS and the rest for applications, which is
+# what makes the disk a place to keep them rather than one program.
+# M11.G4A -- the demonstration program -- is NOT on this one: 180 KB is
+# the tightest medium gem4xe ships on, and by the time the desktop could
+# save a layout (phase 25) the demo was the difference between having
+# room for somebody's own program and not.  The SpartaDOS floppy and the
+# CF card both carry it.  The program
 # is named AUTORUN.SYS because that is what the DOS runs at boot, and
 # --sweep takes everything but the DOS off the fixture, which was
 # somebody's magazine disk (docs/shipping.md, section 2).
@@ -506,8 +511,7 @@ build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
 	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
-	    --add build/m11_app.g4a M11.G4A --add build/lang.rsc LANG.RSC \
-	    --add build/816.com 816.COM
+	    --add build/lang.rsc LANG.RSC --add build/816.com 816.COM
 
 build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc build/lang.rsc build/816.com $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }

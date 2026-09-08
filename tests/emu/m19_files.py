@@ -15,7 +15,13 @@ keyboard through two operations that change what is on the disk:
   then the same on a FILE, whose extension is edited in place and
   whose OK renames it (Frename) -- the desktop's rename;
 
-  and then File -> Delete counts what it is about to do
+  Options -> Save desktop writes the window that is open, its place and
+  its path, to DESKTOP.INF, and Options -> Read .INF file reads it
+  straight back -- the windows closed and opened again from the file,
+  which is the half of remembering that a power cycle uses.  The gate
+  reads the file off the image as well;
+
+  and File -> Delete counts what it is about to do
   (the donor's OP_COUNT pass: the folders inside folders walked, a DTA
   per level), says so in ADDELDIA -- three files, two folders -- and on
   OK deletes them, the counts ticking down as they go, and the window
@@ -41,8 +47,9 @@ from a8test.launcher import launch          # noqa: E402
 import aesref, vdiref, vbxeref, symfile, atr    # noqa: E402
 import deskref                              # noqa: E402
 from deskref import Desktop, DROOT, GLOBES_SIZE, LEN_ZPATH  # noqa: E402
-from deskrsc import (FILEMENU, SHOWITEM, NFOLITEM, DELTITEM,  # noqa: E402
-                     QUITITEM, MKOK, CDOK, FIOK, FICNCL)
+from deskrsc import (FILEMENU, OPTNMENU, SHOWITEM, NFOLITEM,  # noqa: E402
+                     DELTITEM, QUITITEM, SAVEITEM, READITEM,
+                     MKOK, CDOK, FIOK, FICNCL)
 from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE,  # noqa: E402
                      F, B, K, M, RETURN, BACKSPACE, DCLICK, drive, compare)
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
@@ -68,6 +75,7 @@ DISK = os.path.abspath(os.path.join(ROOT, "build", "m19-run.atr"))
 CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME",
                                          os.path.expanduser("~/.config")),
                           "altirra")
+INF_NAME = "DESKTOP.INF"                    # what Save desktop writes
 NEWDIR = "NEWDIR"                           # the folder the gate makes
 KILLDIR = "SUB"                             # ...and the tree it deletes
 # What Show info renames, and to what.  A FILE: renaming a folder is
@@ -85,7 +93,7 @@ RENAME_FROM, RENAME_TO = "OUT.TXT", "OUT.DAT"
 STOPS = ["desktop", "window-a", "new-folder", "made", "exists",
          "picked", "copy-dialog", "copied", "fulled",
          "folder-info", "file-info", "renamed", "selected",
-         "delete", "deleted"]
+         "delete", "deleted", "saved", "reread"]
 
 
 
@@ -225,13 +233,32 @@ def inputs(memo):
                 B(1), F(14), B(0)]
 
     def deleted(d):
-        return [F(3), probe(d), SHOT, *menu(d, FILEMENU, QUITITEM, False)[1:]]
+        # the tree is gone.  Options -> Save desktop: the window that is
+        # open, its place and its path, onto the disk as DESKTOP.INF --
+        # which is what makes a desktop remember across a power cycle
+        # rather than only across a program (deskwin.c inf_save)
+        return [F(3), probe(d), SHOT, *menu(d, OPTNMENU, SAVEITEM, False)[1:]]
+
+    def saved(d):
+        # the button is still down from the Save item, as it is after
+        # every menu choice: let go before anything else.  Then Options
+        # -> Read .INF file, which reads back what was just written,
+        # closes what is open and opens what the file says -- the other
+        # half of remembering, and the half a power cycle uses
+        return [F(3), B(0), F(2), probe(d), SHOT,
+                *menu(d, OPTNMENU, READITEM, False)[1:]]
+
+    def reread(d):
+        # the window is back, in the place and on the path the file
+        # carried
+        return [F(3), B(0), F(2), probe(d), SHOT,
+                *menu(d, FILEMENU, QUITITEM, False)[1:]]
 
     return [desktop, window_a, new_folder, made, again, exists,
             picked, dragged, copy_dialog,
             copied, fulled, folder_menu, folder_info,
             file_pick, file_menu, file_info, renamed, chosen,
-            delete, deleted]
+            delete, deleted, saved, reread]
 
 
 def model(mark, brk, pointer, drvmap):
@@ -308,6 +335,20 @@ def check_disk(check, written):
     check(RENAME_TO in names and RENAME_FROM not in names,
           f"Show info did not rename {RENAME_FROM} to {RENAME_TO}: "
           f"the root has {sorted(names)}")
+    # Options -> Save desktop wrote the layout as a FILE, so the next
+    # boot of this disk comes up with the window that was open here.
+    check(INF_NAME in names, f"{INF_NAME} is not on the disk: the desktop "
+                             f"was not saved")
+    if INF_NAME in names:
+        text = fs.read(INF_NAME).decode("latin-1")
+        print(f"  {INF_NAME}: {len(text)} bytes, "
+              f"{text.count(chr(13))} lines")
+        check(text.startswith("#R 02"),
+              f"{INF_NAME} starts {text[:8]!r}, not with its revision")
+        check(text.count("#W") == 4,
+              f"{INF_NAME} has {text.count('#W')} window lines, not 4")
+        check("A:\\*.*@" in text,
+              f"{INF_NAME} does not name the window that was open: {text!r}")
     print(f"  the image afterwards: {sorted(names)}")
 
 
@@ -565,7 +606,8 @@ def main(argv):
         for p in shots:
             os.remove(p)
     print(f"gem4xe-m19: {'PASS' if not fails else 'FAIL'} -- New folder, "
-          f"Delete, Show info, {len(fails)} problem(s)")
+          f"Delete, Show info, the desktop saved and read back, "
+          f"{len(fails)} problem(s)")
     return 1 if fails else 0
 
 

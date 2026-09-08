@@ -47,6 +47,8 @@
                                          * donor keeps copy/paste data there,
                                          * and the INF text follows them */
 #define INF_REV_LEVEL 2                 /* "#R 02": the donor's DESKTOP.INF */
+#define INF_NAME    "DESKTOP.INF"       /* ...and what it is called on the
+                                         * boot drive, once it is a file */
 #define SH_TAILLEN  128                 /* a command tail, as shel_write copies it */
 #define LEN_ZFNAME  14                  /* "FILENAME.EXT" and its NUL */
 #define LEN_ZINFO   36                  /* " 1234567 bytes used in 12 items." */
@@ -189,6 +191,11 @@ FNODE __far *win_fnode(WNODE *pw, WORD obj);
 void hndl_wmsg(const WORD *msg);
 void app_start(void);
 void app_save(void);
+/* Options -> Save desktop, and Options -> Read .INF file: the same
+ * layout the shell buffer carries between programs, kept on the disk so
+ * that it survives the machine being switched off. */
+WORD inf_save(void);
+WORD inf_read(void);
 void cnx_get(void);
 void cnx_put(void);
 

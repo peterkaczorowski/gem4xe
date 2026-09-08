@@ -198,6 +198,27 @@ static WORD do_filemenu(WORD item)
     return FALSE;
 }
 
+/* Options -> Read .INF file / Save desktop: the layout the shell buffer
+ * carries between programs, kept on the boot drive so that it outlives
+ * the machine being switched off (deskwin.c).  Neither ends the
+ * desktop's loop -- only a program run from an icon does. */
+static WORD do_optnmenu(WORD item)
+{
+    switch (item) {
+    case SAVEITEM:
+        if (!inf_save())
+            fun_alert(1, STSVINF);
+        break;
+    case READITEM:
+        if (!inf_read())
+            fun_alert(1, STRDINF);
+        break;
+    default:
+        break;
+    }
+    return FALSE;
+}
+
 static WORD hndl_menu(WORD title, WORD item)
 {
     WORD done = FALSE;
@@ -208,6 +229,9 @@ static WORD hndl_menu(WORD title, WORD item)
         break;
     case FILEMENU:
         done = do_filemenu(item);
+        break;
+    case OPTNMENU:
+        done = do_optnmenu(item);
         break;
     default:
         break;

@@ -41,6 +41,7 @@ Read in order if you want the argument; jump if you want an answer.
 | [phase22.md](phase22.md) | What a tester is handed: `make dist`, and the fourteen bytes that were actually missing — a machine that can run gem4xe still cold-boots as a 6502, and until now only the test harness could switch it. The page is generated from the desktop's own menu and from the disk images, so the half that could go stale cannot. |
 | [phase23.md](phase23.md) | The loader switches the machine: a Rapidus always cold-boots as a 6502, so gem4xe used to refuse a machine that could have run it. Thirty-five bytes now probe the eight PBI slots for the card — measured, both registers — set `COLDST` and switch it, and `test-boot` does nothing to the machine after power. Bank $00 has twelve bytes left. |
 | [phase24.md](phase24.md) | The far allocator's bank boundary: thirty-five bytes of near code turned a gate red, dead padding did the same, and the fault was in far memory — `far_alloc` could hand out a block straddling a bank, and `__far` pointer arithmetic is 16 bits *within* one. The phase 6 corruption by another road, and master had been green by luck. |
+| [phase25.md](phase25.md) | The desktop remembers: `Save desktop` and `Read .INF file`, and the start-up order that makes a layout outlive the machine being switched off — the shell buffer, then the file, then the default. Most of it was already there; what was missing was a file. |
 
 ## Across the phases
 
