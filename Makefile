@@ -318,15 +318,20 @@ build/app_blob.o: build/app_blob.c
 # tree, the window nodes, the icon records, ~2 KB) and its stack, which
 # is the gate application's 256 bytes and more: the folder window's open
 # -- the button, do_open, do_dopen, do_wopen, a call to the AES on top --
-# ran 256 bytes out (phase 14, milestone 5).  It shares the pool with
+# ran 256 bytes out (phase 14, milestone 5).
+#
+# ⚠ 640 is not enough for the desktop of phase 26 and 896 is, measured
+# both ways and deterministic -- and the low-water mark at 896 says only
+# 302 bytes are ever used, which does not explain it.  The number is a
+# measurement, not an understanding: docs/phase26.md has what is known.  It shares the pool with
 # DESKTOP.RSC (6076 bytes) and with GEMDOS's work area (src/sys/gemdos.c),
 # which is why the desktop gates run a runner whose staging leaves the
 # pool the room GEM.COM leaves it (build/m3desk.xex, above).
 DESK_OBJS  = $(G4A_LIB) build/desk/desktop.o build/desk/deskobj.o build/desk/deskwin.o \
              build/desk/deskfun.o
-DESK_BSS   = 2944
+DESK_BSS   = 3200
 DESK_BITS  = 512
-DESK_STACK = 640
+DESK_STACK = 896
 DESK_H     = src/app/gem.h src/desk/desk.h build/deskrsc.h
 
 build/desk/%.o: src/desk/%.c $(DESK_H)

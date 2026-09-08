@@ -252,7 +252,10 @@ static WORD hndl_menu(WORD title, WORD item)
  * it started as.  Anywhere else the file layer takes over: another
  * window or a folder in one is a copy, a copy with SHIFT held is a
  * move, and the trash is a delete. */
-static void hndl_drag(WNODE *pw, WORD obj, WORD wh)
+/* TRUE when the press turned out to be a drag and was acted on; FALSE
+ * when the button had already come up, which makes it a click and the
+ * caller's business (hndl_button). */
+static WORD hndl_drag(WNODE *pw, WORD obj, WORD wh, WORD root)
 {
     OBJECT *pob = &G.g_screen[obj];
     WORD x, y, mstate, kstate, dwh, dobj, bx, by;
@@ -260,7 +263,13 @@ static void hndl_drag(WNODE *pw, WORD obj, WORD wh)
 
     graf_mkstate(&x, &y, &mstate, &kstate);
     if (!(mstate & 1))                          /* already let go: a click */
-        return;
+        return FALSE;
+    /* What is dragged is the SELECTION, and an item pressed on that was
+     * not part of it becomes the whole of it -- so dragging one of
+     * several carries all of them, and dragging one of none carries
+     * that one. */
+    if (!(G.g_screen[obj].ob_state & SELECTED))
+        act_select(wh, root, obj);
     objc_offset(G.g_screen, obj, &bx, &by);
     wind_get(0, WF_WORKXYWH, &d.g_x, &d.g_y, &d.g_w, &d.g_h);
     graf_dragbox(pob->ob_width, pob->ob_height, bx, by,
@@ -271,18 +280,19 @@ static void hndl_drag(WNODE *pw, WORD obj, WORD wh)
     if (dwh == DESKWH) {
         dobj = objc_find(G.g_screen, DROOT, MAX_DEPTH, x, y);
         if (dobj < WOBS_START)
-            return;                             /* the bare desk */
+            return TRUE;                        /* the bare desk */
     } else {
         WNODE *pd = win_find(dwh);
         if (!pd)
-            return;
+            return TRUE;
         dobj = objc_find(G.g_screen, pd->w_root, MAX_DEPTH, x, y);
         if (dobj < WOBS_START)
             dobj = 0;                           /* the window itself */
         if (dwh == wh && (dobj == 0 || dobj == obj))
-            return;                             /* where it already is */
+            return TRUE;                        /* where it already is */
     }
     fun_file2any(pw, dwh, dobj, kstate);
+    return TRUE;
 }
 
 /* A press on the desk or in a window's work area (the control manager
@@ -290,7 +300,36 @@ static void hndl_drag(WNODE *pw, WORD obj, WORD wh)
  * item under it and no other there; two clicks open it, and opening
  * a program is what ends the desktop's loop.  One click on an item in
  * a window, with the button still down, is a drag. */
-static WORD hndl_button(WORD clicks, WORD mx, WORD my)
+/* A press on a window's background, held: the AES draws the box while
+ * the button is down and says how big it got, and everything the box
+ * touches is the new selection.  It only grows right and down -- the
+ * anchor stays where the press was (src/aes/grlib.c gr_rubwind), which
+ * is the ST's behaviour and the donor's.
+ *
+ * FALSE when the button had already come up, which makes the press a
+ * click on nothing, and that clears the selection instead. */
+static WORD hndl_rubber(WORD wh, WORD root, WORD mx, WORD my)
+{
+    WORD x, y, mstate, kstate;
+    GRECT box;
+
+    graf_mkstate(&x, &y, &mstate, &kstate);
+    if (!(mstate & 1))
+        return FALSE;
+    graf_rubbox(mx, my, 1, 1, &box.g_w, &box.g_h);
+    box.g_x = mx;
+    box.g_y = my;
+    act_allselect(wh, root, &box);
+    return TRUE;
+}
+
+/* A press: a double-click opens what is under it, a press held and
+ * moved drags the selection, and anything else is a click, whose effect
+ * on the selection act_bsclick decides.  The order matters -- the drag
+ * has to be recognised before the click semantics are applied, because
+ * SHIFT means "move" to a drag and "add to the selection" to a click,
+ * and the same press cannot be both. */
+static WORD hndl_button(WORD clicks, WORD mx, WORD my, WORD kstate)
 {
     WORD wh, root, obj;
     WNODE *pw = 0;
@@ -307,11 +346,15 @@ static WORD hndl_button(WORD clicks, WORD mx, WORD my)
     obj = objc_find(G.g_screen, root, MAX_DEPTH, mx, my);
     if (obj < WOBS_START)
         obj = 0;
-    act_select(wh, root, obj);
-    if (obj && clicks == 2)
+    if (obj && clicks == 2) {
+        act_select(wh, root, obj);              /* just the one is opened */
         return do_open(wh, obj);
-    if (obj && pw)
-        hndl_drag(pw, obj, wh);
+    }
+    if (obj && pw && hndl_drag(pw, obj, wh, root))
+        return FALSE;
+    if (!obj && pw && hndl_rubber(wh, root, mx, my))
+        return FALSE;
+    act_bsclick(wh, root, obj, kstate);
     return FALSE;
 }
 
@@ -408,7 +451,7 @@ int main(void)
                               &mx, &my, &button, &kstate, &kret, &bret);
         wind_update(BEG_UPDATE);
         if (ev_which & MU_BUTTON)
-            if (hndl_button(bret, mx, my))
+            if (hndl_button(bret, mx, my, kstate))
                 done = TRUE;
         while ((ev_which & MU_MESAG) && !done) {
             if (hndl_msg())

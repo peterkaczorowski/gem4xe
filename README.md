@@ -152,6 +152,18 @@ bank-`$00` pool and the code in a far bank. The gate application makes
 eighteen VDI and AES calls and the harness checks what each returned,
 from the application's own memory, against the reference.
 
+**More than one thing at a time** (`docs/phase26.md`). Every file
+operation could already work on a set — the delete, the copy and the move
+all walk the window's entries and act on each one flagged — but a click
+chose exactly one. Now SHIFT-click adds and removes, and a press on a
+window's background draws a **rubber band** whose box is the new
+selection. A press is read in a new order: the drag is recognised
+*before* the click semantics, because SHIFT means "move" to a drag and
+"add to the selection" to a click and the same press cannot be both.
+The band is what `test-m19` drives, and not by preference: no harness
+here can hold SHIFT down through a mouse click, which is the same block
+that has kept the SHIFT-drag move ungated since phase 18.
+
 **The desktop remembers** (`docs/phase25.md`). `Save desktop` writes the
 window layout to `DESKTOP.INF` on the boot drive and `Read .INF file`
 reads it back, closing what is open first; at start-up the desktop looks

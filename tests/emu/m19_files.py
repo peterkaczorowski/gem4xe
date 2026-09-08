@@ -84,6 +84,9 @@ KILLDIR = "SUB"                             # ...and the tree it deletes
 # m15_gdos.py measures it), so the desktop shows a folder's name and
 # does not let it be edited.
 RENAME_FROM, RENAME_TO = "OUT.TXT", "OUT.DAT"
+# ...and the second thing the rubber band catches, deleted with the
+# folder to prove the selection really is more than one item
+ALSO_KILL = "TEST.RSC"
 # What it drags into NEWDIR: the SUB tree, so the walk copies a folder,
 # the files in it and the folder inside that.  It has to be an item on
 # the window's FIRST row -- the second row's cells hang below the work
@@ -95,6 +98,17 @@ STOPS = ["desktop", "window-a", "new-folder", "made", "exists",
          "folder-info", "file-info", "renamed", "selected",
          "delete", "deleted", "saved", "reread"]
 
+
+
+def cell(d, pw, name):
+    """The rectangle of the cell a window shows `name` in."""
+    for pf in pw.path.fnodes[:pw.path.count]:
+        if pf.name == name and pf.obid:
+            x, y = d.centre(d.g_screen_addr, pf.obid)
+            o = d.screen[pf.obid]
+            return (x - o.ob_width // 2, y - o.ob_height // 2,
+                    o.ob_width, o.ob_height)
+    raise KeyError(f"{name} is not shown in {pw.path.spec.s}")
 
 
 def inputs(memo):
@@ -214,13 +228,35 @@ def inputs(memo):
                 *path(d.pointer(), ok), F(4), B(1), F(14), B(0)]
 
     def renamed(d):
-        # the window listed again, the file under its new name: one
-        # click selects SUB for the delete
+        # the window listed again, the file under its new name.  Then a
+        # RUBBER BAND over two cells -- the folder and a file, one above
+        # the other -- because that is how several things are selected
+        # at once here: SHIFT does it too, and no harness on this
+        # machine can hold SHIFT down through a click (docs/phase26.md).
+        #
+        # The band grows right and down from where it is pressed
+        # (src/aes/grlib.c gr_rubwind), so it is anchored in the four
+        # pixels of gap to the LEFT of the cells it is to catch, inside
+        # the work area rather than above it -- a press on the frame
+        # belongs to the control manager and never reaches the desktop.
         pw = d.win_ontop()
         d.item(pw, RENAME_TO)                   # it is there, or KeyError
-        sub = d.item(pw, KILLDIR)
-        return [F(3), probe(d), SHOT, *path(d.pointer(), sub), F(4), B(1),
-                F(2), B(0), F(14)]
+        x0, y0, _w0, _h0 = cell(d, pw, KILLDIR)
+        x1, y1, w1, h1 = cell(d, pw, ALSO_KILL)
+        # The press is held through the double-click delay and a nudge
+        # of more than two pixels is what flushes the wait -- and the
+        # AES reports the pointer where it is THEN, so the nudge travels
+        # DOWN the gap rather than across it, or the band would be
+        # anchored on the cell it is meant to catch.
+        start = (x0 - 3, y0 + 9)
+        memo["band"] = (start, (x1 + w1 + 1, y1 + h1 + 1))
+        return [F(3), probe(d), SHOT, *path(d.pointer(), (x0 - 3, y0 + 1)),
+                F(4), B(1), F(2), M(*start)]
+
+    def banded(d):
+        # the box drawn out to past the second cell, and let go
+        start, end = memo["band"]
+        return [F(2), *path(start, end), F(2), B(0)]
 
     def chosen(d):
         # File -> Delete: the count pass runs before the dialog
@@ -257,7 +293,7 @@ def inputs(memo):
     return [desktop, window_a, new_folder, made, again, exists,
             picked, dragged, copy_dialog,
             copied, fulled, folder_menu, folder_info,
-            file_pick, file_menu, file_info, renamed, chosen,
+            file_pick, file_menu, file_info, renamed, banded, chosen,
             delete, deleted, saved, reread]
 
 
@@ -332,6 +368,9 @@ def check_disk(check, written):
                       f"the copy of DEEP holds {deep}")
     check(KILLDIR not in names,
           f"{KILLDIR} is still in the image's root after the delete")
+    check(ALSO_KILL not in names,
+          f"{ALSO_KILL} is still there: the rubber band selected one "
+          f"thing, not two")
     check(RENAME_TO in names and RENAME_FROM not in names,
           f"Show info did not rename {RENAME_FROM} to {RENAME_TO}: "
           f"the root has {sorted(names)}")

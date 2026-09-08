@@ -509,6 +509,63 @@ void act_select(WORD wh, WORD root, WORD obj)
         act_chg(wh, root, i, i == obj, TRUE);
 }
 
+/* What a CLICK does to the selection -- the donor's act_bsclick
+ * (deskact.c), reached only once a press has turned out not to be a
+ * drag (desktop.c hndl_button).
+ *
+ * SHIFT adds an item to the selection or takes it out again, which is
+ * the only modifier this machine can be asked about while the button is
+ * down (docs/phase18.md); without it the item clicked becomes the whole
+ * selection, and a click on nothing clears it.  An item that is already
+ * selected is left alone, so that clicking one of several and dragging
+ * carries all of them. */
+void act_bsclick(WORD wh, WORD root, WORD obj, WORD kstate)
+{
+    if (kstate & (MODE_LSHIFT | MODE_RSHIFT)) {
+        if (obj)
+            act_chg(wh, root, obj,
+                    (WORD)!(G.g_screen[obj].ob_state & SELECTED), TRUE);
+        return;
+    }
+    if (!obj || !(G.g_screen[obj].ob_state & SELECTED))
+        act_select(wh, root, obj);
+}
+
+/* Everything of a window's whose cell the rectangle touches, selected;
+ * everything it does not touch, deselected.  What a rubber band leaves
+ * behind (the donor's act_allselect, deskact.c) -- and on this machine
+ * the only way to select several things at once that a test harness can
+ * drive, because SHIFT cannot be held down through one (docs/phase26.md). */
+void act_allselect(WORD wh, WORD root, const GRECT *box)
+{
+    WORD i;
+
+    for (i = G.g_screen[root].ob_head; i >= WOBS_START; i = G.g_screen[i].ob_next) {
+        GRECT t;
+
+        objc_offset(G.g_screen, i, &t.g_x, &t.g_y);
+        t.g_w = G.g_screen[i].ob_width;
+        t.g_h = G.g_screen[i].ob_height;
+        act_chg(wh, root, i, rc_intersect(box, &t), TRUE);
+    }
+}
+
+/* How many of a window's items are selected, and the first of them
+ * (0 when none): what the File menu asks before it does anything. */
+WORD act_count(WORD root, WORD *pfirst)
+{
+    WORD i, n = 0;
+
+    *pfirst = 0;
+    for (i = G.g_screen[root].ob_head; i >= WOBS_START; i = G.g_screen[i].ob_next)
+        if (G.g_screen[i].ob_state & SELECTED) {
+            if (!n)
+                *pfirst = i;
+            n++;
+        }
+    return n;
+}
+
 /* The window, and the window handle, an item is in. */
 static WORD obj_parent(WORD obj)
 {

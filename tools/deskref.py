@@ -65,7 +65,7 @@ from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
                     SHEL_GET, SHEL_PUT, SIZE_SHELBUF,
                     DSETDRV, DGETDRV, DSETPATH, FSETDTA, MALLOC, FSFIRST,
                     FSNEXT, DCREATE, DDELETE, FDELETE, FA_SUBDIR,
-                    GRAF_MKSTATE, GRAF_DRAGBOX,
+                    GRAF_MKSTATE, GRAF_DRAGBOX, GRAF_RUBBOX,
                     FOPEN, FCREATE, FCLOSE, FREAD, FWRITE, GD_EACCDN)
 from rsc import R_TREE, R_ICONBLK, R_STRING, ICONBLK_SIZE  # noqa: E402
 from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA, ADFINFO,  # noqa: E402
@@ -830,6 +830,43 @@ class Desktop:
         if dodraw:
             io, _ = self.call(OBJC_OFFSET, (obj,), tree=self.g_screen_addr)
             self.do_wredraw(wh, Rect(io[0], io[1], pob.ob_width, pob.ob_height))
+
+    def act_bsclick(self, wh, root, obj, kstate):
+        """What a CLICK does to the selection (deskwin.c act_bsclick):
+        SHIFT toggles one item, a plain click makes one the selection,
+        and a click on nothing clears it."""
+        if kstate & (MODE_LSHIFT | MODE_RSHIFT):
+            if obj:
+                self.act_chg(wh, root, obj,
+                             not (self.screen[obj].ob_state & SELECTED), True)
+            return
+        if not obj or not (self.screen[obj].ob_state & SELECTED):
+            self.act_select(wh, root, obj)
+
+    def act_allselect(self, wh, root, box):
+        """Everything of a window's whose cell the rectangle touches,
+        selected; what it does not touch, deselected -- what a rubber
+        band leaves (deskwin.c act_allselect)."""
+        i = self.screen[root].ob_head
+        while i >= WOBS_START:
+            io, _ = self.call(OBJC_OFFSET, (i,), tree=self.g_screen_addr)
+            t = Rect(signed(io[0]), signed(io[1]),
+                     self.screen[i].ob_width, self.screen[i].ob_height)
+            self.act_chg(wh, root, i, bool(rc_intersect(box, t)), True)
+            i = self.screen[i].ob_next
+
+    def act_count(self, root):
+        """How many of a window's items are selected, and the first of
+        them (deskwin.c act_count)."""
+        n, first = 0, 0
+        i = self.screen[root].ob_head
+        while i >= WOBS_START:
+            if self.screen[i].ob_state & SELECTED:
+                if not n:
+                    first = i
+                n += 1
+            i = self.screen[i].ob_next
+        return n, first
 
     def act_select(self, wh, root, obj):
         i = self.screen[root].ob_head
@@ -1886,14 +1923,19 @@ class Desktop:
         return done
 
     # -- events --------------------------------------------------------------
-    def hndl_drag(self, pw, obj, wh):
+    def hndl_drag(self, pw, obj, wh, root):
         """desktop.c hndl_drag: the AES drags the outline, and where the
-        POINTER came up says where it went.  A drop in its own window on
-        nothing, or on itself, is the click it started as."""
+        POINTER came up says where it went.  True when it really was a
+        drag; False when the button had already come up, which makes it
+        a click and the caller's business."""
         io, _ = self.call(GRAF_MKSTATE)         # a sample, not a wait
         mstate, kstate = signed(io[3]), signed(io[4])
         if not (mstate & 1):                    # already let go: a click
-            return
+            return False
+        # what is dragged is the selection, and an item pressed on that
+        # was not part of it becomes the whole of it
+        if not (self.screen[obj].ob_state & SELECTED):
+            self.act_select(wh, root, obj)
         io, _ = self.call(OBJC_OFFSET, (obj,), tree=self.g_screen_addr)
         bx, by = signed(io[0]), signed(io[1])
         d = self.wind_get_rect(0, WF_WXYWH)     # WF_WORKXYWH: the desk
@@ -1911,21 +1953,35 @@ class Desktop:
                               tree=self.g_screen_addr)
             dobj = signed(io[0])
             if dobj < WOBS_START:
-                return
+                return True
         else:
             pd = self.win_find(dwh)
             if pd is None:
-                return
+                return True
             io, _ = self.call(OBJC_FIND, (pd.root, MAX_DEPTH), (x, y),
                               tree=self.g_screen_addr)
             dobj = signed(io[0])
             if dobj < WOBS_START:
                 dobj = 0
             if dwh == wh and (dobj == 0 or dobj == obj):
-                return
+                return True
         self.fun_file2any(pw, dwh, dobj, kstate)
+        return True
 
-    def hndl_button(self, clicks, mx, my):
+    def hndl_rubber(self, wh, root, mx, my):
+        """desktop.c hndl_rubber: the AES draws the box while the button
+        is down and says how big it got; everything it touches is the
+        new selection.  False when the button had already come up."""
+        io, _ = self.call(GRAF_MKSTATE)
+        if not (signed(io[3]) & 1):
+            return False
+        io, _ = self.call(GRAF_RUBBOX, (mx, my, 1, 1),
+                          steps=self.take_input("rubbox"))
+        box = Rect(mx, my, signed(io[1]), signed(io[2]))
+        self.act_allselect(wh, root, box)
+        return True
+
+    def hndl_button(self, clicks, mx, my, kstate):
         io, _ = self.call(WIND_FIND, (mx, my))
         wh = signed(io[0])
         pw = None
@@ -1941,11 +1997,14 @@ class Desktop:
         obj = signed(io[0])
         if obj < WOBS_START:
             obj = 0
-        self.act_select(wh, root, obj)
         if obj and clicks == 2:
+            self.act_select(wh, root, obj)      # just the one is opened
             return self.do_open(wh, obj)
-        if obj and pw is not None:
-            self.hndl_drag(pw, obj, wh)
+        if obj and pw is not None and self.hndl_drag(pw, obj, wh, root):
+            return False
+        if not obj and pw is not None and self.hndl_rubber(wh, root, mx, my):
+            return False
+        self.act_bsclick(wh, root, obj, kstate)
         return False
 
     def hndl_msg(self):
@@ -1996,7 +2055,7 @@ class Desktop:
                 MU_BUTTON | MU_MESAG | MU_KEYBD, 2, 1, 1, 0, True)
             self.call(WIND_UPDATE, (BEG_UPDATE,))
             if which & MU_BUTTON:
-                if self.hndl_button(bret, mx, my):
+                if self.hndl_button(bret, mx, my, kstate):
                     done = True
             while (which & MU_MESAG) and not done:
                 if self.hndl_msg():

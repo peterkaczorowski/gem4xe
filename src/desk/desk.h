@@ -183,6 +183,12 @@ void win_close(WNODE *pw, WORD close_window);
 void do_wredraw(WORD wh, const GRECT *pc);
 void act_chg(WORD wh, WORD root, WORD obj, WORD set, WORD dodraw);
 void act_select(WORD wh, WORD root, WORD obj);
+/* A click's effect on the selection: SHIFT toggles one item, a plain
+ * click makes one the selection, and a click on nothing clears it. */
+void act_bsclick(WORD wh, WORD root, WORD obj, WORD kstate);
+WORD act_count(WORD root, WORD *pfirst);
+/* ...and what a rubber band leaves: everything the box touches. */
+void act_allselect(WORD wh, WORD root, const GRECT *box);
 WORD do_open(WORD wh, WORD obj);
 WORD do_aopen(WNODE *pw, WORD curr, const char __far *name);
 void win_rebld(WNODE *pw);
