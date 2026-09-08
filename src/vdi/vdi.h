@@ -95,12 +95,19 @@ typedef struct {
     /* vst_effects: the effects actually APPLIED, which is what the call
      * answers with and not necessarily what it was asked for. */
     WORD text_effects;
-    /* What the two above resolve to: the 16-bit rows of the current fill
-     * pattern and the mask that turns a y coordinate into a row index
-     * (3 for the 4-row dithers, 7 for the OEM and coarse hatches, 15 for
-     * the fine hatches and the user pattern).  Bit 15 is the LEFTMOST
+    /* What the two above resolve to: WHERE the current fill pattern's
+     * rows are, as a source and a first row rather than as a pointer.
+     * The standard tables are far (`cfar`) and the user's is near --
+     * it is in this very struct -- so a pointer that could name either
+     * would have to be far, and then "is this the user's?" becomes a
+     * near-to-far comparison in the middle of the workstation switch.
+     * A source and an index have no such question; pat_bits() does the
+     * reading.  patmsk turns a y coordinate into a row: 3 for the
+     * 4-row dithers, 7 for the OEM patterns and coarse hatches, 15 for
+     * the fine hatches and the user pattern.  Bit 15 is the LEFTMOST
      * pixel of a 16-aligned screen word. */
-    const UWORD *patptr;
+    WORD  patsrc;           /* PAT_*: which table the rows come from */
+    WORD  patidx;           /* the pattern's first row in it */
     WORD  patmsk;
     UWORD ud_patrn[16];     /* vsf_udpat's pattern, FIS_USER */
     UWORD ud_ls;            /* vsl_udsty's line style, index 7 */
@@ -157,6 +164,17 @@ extern const UWORD __far vdi_sin_tbl[VDI_SIN_SIZE];
 #define FIS_PATTERN 2
 #define FIS_HATCH   3
 #define FIS_USER    4
+/* Where a fill pattern's rows come from (Vwk.patsrc).  SOLID and HOLLOW
+ * carry no rows at all: patmsk is 0 and the row is the constant, which
+ * is why the two one-word tables the pointer used to name are gone. */
+#define PAT_HOLLOW  0
+#define PAT_SOLID   1
+#define PAT_DITHER  2
+#define PAT_OEM     3
+#define PAT_HATCH0  4
+#define PAT_HATCH1  5
+#define PAT_USER    6
+
 /* vsf_style limits: 24 patterns (8 dithers + 16 OEM), 12 hatches; an index
  * out of range becomes 1, the way the donor's vsf_style does it. */
 #define MAX_FILL_PATTERN 24
@@ -164,10 +182,13 @@ extern const UWORD __far vdi_sin_tbl[VDI_SIN_SIZE];
 /* The standard tables, generated from the donor by tools/patconv.py into
  * src/vdi/fillpat.c: 8 dithers of 4 rows, 16 OEM patterns of 8, 6 coarse
  * hatches of 8, 6 fine hatches of 16. */
-extern const UWORD fill_dither[32];
-extern const UWORD fill_oem[128];
-extern const UWORD fill_hatch0[48];
-extern const UWORD fill_hatch1[96];
+/* __far, in `cfar` with the far code: 608 bytes of bank $00 is 23% of
+ * all the near memory the system has, and these are read a row at a
+ * time when a fill's pattern changes, not per pixel (docs/phase24.md). */
+extern const UWORD __far fill_dither[32];
+extern const UWORD __far fill_oem[128];
+extern const UWORD __far fill_hatch0[48];
+extern const UWORD __far fill_hatch1[96];
 
 /* The workstation a call names in contrl[6]: every VDI routine reads and
  * writes this one, and the dispatcher copies the right one in (vdi.c). */

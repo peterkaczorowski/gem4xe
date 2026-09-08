@@ -107,30 +107,46 @@ And **master was green by luck**.  Every far allocation this program
 has ever made could have straddled a bank; the ones that did happened
 to land on something nobody looked at.
 
-## The room is NOT made yet
+## The room, and the wrong way to make it
 
-The reason any of this came up was that bank $00 is full: with the
-loader's shim in it, `Near` has **four** bytes free in the runner's
-link and `LoRAM` seven.  That is the tripwire this phase disarmed --
-growing the image no longer corrupts anything -- but it is still no
-room to work in.
+The reason any of this came up was that bank $00 was full: with the
+loader's shim in it, `Near` had **four** bytes free and `LoRAM` seven.
+Disarming the tripwire does not help with that; the memory is still
+gone.
 
-The obvious 608 bytes are the fill patterns, and moving them to `cfar`
-does free exactly that.  It is on the branch `near-room`, and it is
-**not merged**, because it fails `test-m17`: the desktop crashes before
-its first wait.  The fault is in the change and not in the layout --
-the guard and the shim without it pass everything -- and it is legible
-in the source:
+The obvious 608 bytes are the fill patterns, which are 23% of all the
+near memory gem4xe has and are read a row at a time when a pattern
+changes rather than per pixel.  `cfar`, with the far code, is where
+they belong.
 
-    if (vwk.patptr == vwk.ud_patrn)     vdi.c:1460, 1553
+**The first attempt was wrong, and instructively so.**  Moving the
+tables makes the pointer that names them far, so `Vwk.patptr` became
+`const UWORD __far *` -- and `ud_patrn`, the user's own pattern, is a
+near array inside that very struct.  Two lines then compare the two:
 
-`patptr` becomes a far pointer when the tables move, `ud_patrn` stays a
-near array in the workstation, and those two comparisons are on the
-virtual-workstation path an application takes.  `test-m3` passes 86/86
-because the physical workstation never goes through them, which is
-worth remembering about that gate.
+    if (vwk.patptr == vwk.ud_patrn)     vdi.c, vwk_select and vwk_to_phys
 
-The shape that avoids the question altogether: keep the pattern in the
-workstation as a **source and an index** rather than a pointer.  There
-is then no near/far comparison anywhere, the two lines above become
-`patsrc == FIS_USER`, and the struct gets smaller rather than bigger.
+Those are on the workstation switch, which only an application reaches.
+`test-m3` passed 86/86 and the desktop crashed before its first wait --
+a reminder that the conformance suite drives the PHYSICAL workstation
+and never goes near that code.
+
+**The right shape has no pointer at all.**  The workstation holds a
+*source* and a *first row*:
+
+    WORD patsrc;    /* PAT_DITHER, PAT_OEM, PAT_HATCH0/1, PAT_USER,
+                     * PAT_SOLID, PAT_HOLLOW */
+    WORD patidx;    /* where that pattern starts in its table */
+
+and `pat_bits(y)` switches on the source to read either a far table or
+the near `ud_patrn`.  There is no near/far question anywhere, the two
+comparisons above become `patsrc == PAT_USER`, and the two one-word
+tables the pointer used to name for solid and hollow are gone -- their
+rows are constants in the switch.  The expansion cache keys on the
+source and the index instead of the pointer.
+
+    before   LoRAM  7 free   Near   4 free
+    after    LoRAM 259       Near 360
+
+The boundary moved from $3580 to $3680 as well, so that both sides of
+bank $00 have a few hundred bytes rather than a few.

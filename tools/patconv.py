@@ -54,7 +54,10 @@ def emit(tables, out):
         for donor, ours, rows, count in TABLES:
             words = tables[ours]
             f.write(f"/* {donor}: {count} patterns of {rows} rows */\n")
-            f.write(f"const UWORD {ours}[{rows * count}] = {{\n")
+            # __far: the tables are 608 bytes and bank $00 has none to
+            # spare, so they live in `cfar` with the far code and are read
+            # long (src/gem4xe.scm, and docs/phase24.md for what filled it)
+            f.write(f"const UWORD __far {ours}[{rows * count}] = {{\n")
             for i in range(0, len(words), rows):
                 chunk = words[i:i + rows]
                 for j in range(0, len(chunk), 8):

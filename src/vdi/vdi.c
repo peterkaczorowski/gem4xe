@@ -207,31 +207,57 @@ static void paint_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen)
 /* A hollow fill is a pattern with no bits and a solid one all bits; the
  * writing mode then decides what a clear bit means.  Replace writes pen 0
  * there -- which is why a hollow box in replace mode comes out WHITE, not
- * untouched, and why the AES can draw an opaque dialog with hollow boxes. */
-static const UWORD pat_hollow = 0x0000;
-static const UWORD pat_solid  = 0xFFFF;
-
-/* st_fl_ptr: resolve the interior and index to the pattern's rows and the
- * mask that turns y into a row number.  The donor's name and the donor's
- * table split: dithers then OEM patterns, coarse then fine hatches. */
+ * untouched, and why the AES can draw an opaque dialog with hollow boxes.
+ * Neither carries a table: patmsk is 0, so every row is the constant
+ * pat_bits() returns for it.
+ *
+ * st_fl_ptr: resolve the interior and index to WHICH pattern rows are the
+ * current ones -- the donor's name, and the donor's table split: dithers
+ * then OEM patterns, coarse then fine hatches. */
 static void st_fl_ptr(void)
 {
     WORD fi = vwk.fill_index;
+
+    vwk.patidx = 0;
     switch (vwk.fill_style) {
     case FIS_SOLID:
-        vwk.patptr = &pat_solid;                 vwk.patmsk = 0;   break;
+        vwk.patsrc = PAT_SOLID;                  vwk.patmsk = 0;   break;
     case FIS_PATTERN:
-        if (fi < 8) { vwk.patptr = &fill_dither[fi * 4];        vwk.patmsk = 3; }
-        else        { vwk.patptr = &fill_oem[(fi - 8) * 8];     vwk.patmsk = 7; }
+        if (fi < 8) { vwk.patsrc = PAT_DITHER; vwk.patidx = (WORD)(fi * 4);
+                      vwk.patmsk = 3; }
+        else        { vwk.patsrc = PAT_OEM;    vwk.patidx = (WORD)((fi - 8) * 8);
+                      vwk.patmsk = 7; }
         break;
     case FIS_HATCH:
-        if (fi < 6) { vwk.patptr = &fill_hatch0[fi * 8];        vwk.patmsk = 7; }
-        else        { vwk.patptr = &fill_hatch1[(fi - 6) * 16]; vwk.patmsk = 15; }
+        if (fi < 6) { vwk.patsrc = PAT_HATCH0; vwk.patidx = (WORD)(fi * 8);
+                      vwk.patmsk = 7; }
+        else        { vwk.patsrc = PAT_HATCH1; vwk.patidx = (WORD)((fi - 6) * 16);
+                      vwk.patmsk = 15; }
         break;
-    case FIS_USER:
-        vwk.patptr = vwk.ud_patrn;               vwk.patmsk = 15;  break;
+    case FIS_USER:                              /* the caller's own, near */
+        vwk.patsrc = PAT_USER;                   vwk.patmsk = 15;  break;
     default:
-        vwk.patptr = &pat_hollow;                vwk.patmsk = 0;   break;
+        vwk.patsrc = PAT_HOLLOW;                 vwk.patmsk = 0;   break;
+    }
+}
+
+/* One row of the current fill pattern.  `r` is a y coordinate; patmsk
+ * turns it into a row within the pattern, and patidx says where that
+ * pattern begins in its table.  The standard tables are far and the
+ * user's is in the workstation, which is the whole reason the source is
+ * a number rather than a pointer. */
+static UWORD pat_bits(WORD r)
+{
+    WORD i = (WORD)(r & vwk.patmsk);
+
+    switch (vwk.patsrc) {
+    case PAT_SOLID:  return 0xFFFF;
+    case PAT_DITHER: return fill_dither[vwk.patidx + i];
+    case PAT_OEM:    return fill_oem[vwk.patidx + i];
+    case PAT_HATCH0: return fill_hatch0[vwk.patidx + i];
+    case PAT_HATCH1: return fill_hatch1[vwk.patidx + i];
+    case PAT_USER:   return vwk.ud_patrn[i];
+    default:         return 0x0000;             /* hollow */
     }
 }
 
@@ -242,8 +268,7 @@ static void st_fl_ptr(void)
  * pattern counter sends it back to that byte.  Expanding costs 256 writes
  * through the MEMAC window, so what is there is remembered and reused until
  * the pattern or the nibbles change. */
-static const UWORD *pe_ptr;
-static WORD    pe_msk;
+static WORD    pe_src, pe_idx, pe_msk;
 static uint8_t pe_set, pe_clr, pe_valid;
 
 /* One 16-pixel repeat as eight nibble-pair bytes, written twice over. */
@@ -264,15 +289,15 @@ static void patt_expand(uint8_t set, uint8_t clr)
     volatile uint8_t *w;
     WORD r;
 
-    if (pe_valid && pe_ptr == vwk.patptr && pe_msk == vwk.patmsk &&
-        pe_set == set && pe_clr == clr)
+    if (pe_valid && pe_src == vwk.patsrc && pe_idx == vwk.patidx &&
+        pe_msk == vwk.patmsk && pe_set == set && pe_clr == clr)
         return;
     w = vram_win(VR_PATT);
     for (r = 0; r < VR_PATT_ROWS; r++) {
-        patt_row(w, vwk.patptr[r & vwk.patmsk], set, clr);
+        patt_row(w, pat_bits(r), set, clr);
         w += VR_PATT_STRIDE;
     }
-    pe_ptr = vwk.patptr;  pe_msk = vwk.patmsk;
+    pe_src = vwk.patsrc;  pe_idx = vwk.patidx;  pe_msk = vwk.patmsk;
     pe_set = set;         pe_clr = clr;
     pe_valid = 1;
 }
@@ -502,11 +527,11 @@ static void style_line(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask)
  * other two modes nothing at all. */
 static void fill_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen)
 {
-    if (vwk.patptr == &pat_solid) {
+    if (vwk.patsrc == PAT_SOLID) {
         paint_rect(x1, y1, x2, y2, pen);
         return;
     }
-    if (vwk.patptr == &pat_hollow) {
+    if (vwk.patsrc == PAT_HOLLOW) {
         switch (vwk.wrt_mode + 1) {
         case MD_REPLACE: fill_rect_dev(x1, y1, x2, y2, HW(0));    break;
         case MD_ERASE:   fill_rect_dev(x1, y1, x2, y2, HW(pen));  break;
@@ -1452,10 +1477,11 @@ static WORD vwk_select(WORD h)
         vwk_tab[vwk_cur] = vwk;
         vwk = vwk_tab[i];
         vwk_cur = i;
-        /* A user pattern lives in the Vwk, so its pointer is the same
-         * for every workstation that has one, and the expansion cache
-         * keys on that pointer: what it holds may be the other's. */
-        if (vwk.patptr == vwk.ud_patrn)
+        /* A user pattern lives in the Vwk, so PAT_USER names a
+         * different sixteen rows in every workstation that has one, and
+         * the cache cannot tell them apart: what it holds may be the
+         * other's. */
+        if (vwk.patsrc == PAT_USER)
             pe_valid = 0;
     }
     return 1;
@@ -1548,7 +1574,7 @@ static void vwk_to_phys(void)
 {
     vwk_cur = 0;
     vwk = vwk_tab[0];
-    if (vwk.patptr == vwk.ud_patrn)
+    if (vwk.patsrc == PAT_USER)
         pe_valid = 0;
 }
 

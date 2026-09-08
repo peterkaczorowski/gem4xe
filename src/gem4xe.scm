@@ -135,10 +135,16 @@
     ;; The stack and the data.  The linker will not mix sections that carry
     ;; bits with BSS in one memory, so bank $00 is two memories with a
     ;; boundary that has to be moved by hand when one side outgrows it --
-    ;; a link that does fails, loudly.  Both are tight: 7.9 KB is all of
-    ;; bank $00 that gem4xe's own data and near code get, and everything an
-    ;; interrupt handler touches has to be in it (the banked window above).
-    (memory LoRAM      (address (#x2100 . #x357f))
+    ;; a link that does fails, loudly.  7.9 KB is all of bank $00 that
+    ;; gem4xe's own data and near code get, and everything an interrupt
+    ;; handler touches has to be in it (the banked window above).
+    ;;
+    ;; The boundary was $3580 and both sides ran at 99%, which is how a
+    ;; thirty-five byte addition to the loader turned test-m14x red
+    ;; (docs/phase24.md).  Moving the fill patterns to `cfar` freed 608
+    ;; bytes of near memory and the boundary shares what that bought:
+    ;; each side has a few hundred bytes now rather than a few.
+    (memory LoRAM      (address (#x2100 . #x367f))
             (section stack data zdata heap))
 
     ;; Near code: the entry stub, farload, the C startup, the CIO
@@ -146,7 +152,7 @@
     ;; it cannot be far) and every library routine that is not compiled
     ;; far -- plus all constant data.  There is no overflow memory: a link
     ;; that outgrows this memory fails rather than spilling somewhere slow.
-    (memory Near       (address (#x3580 . #x3ffd))
+    (memory Near       (address (#x3680 . #x3ffd))
             (section code libcode cdata idata data_init_table))
 
     ;; The library cstartup always emits a `reset` section -- a word pointing

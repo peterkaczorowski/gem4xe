@@ -178,11 +178,18 @@ image. It is the phase 6 corruption by another road, the file selector's
 900-byte name list was the block, and **master was green by luck**.
 Eight lines start the next bank rather than straddle, and
 `tests/host/test_farmem.py` asks the allocator for the blocks that used
-to break it. Bank `$00` is still full — four bytes free in the runner's
-link — but growing it no longer corrupts anything; the 608 bytes of fill
-patterns that would fix that are on the branch `near-room`, unmerged,
-because moving them makes `patptr` a far pointer and two comparisons in
-the workstation code compare it against a near array.
+to break it.
+
+**And then the room** (same notebook). Bank `$00` had four bytes free
+and seven; the 608 bytes of fill patterns — 23% of all the near memory
+there is — went to `cfar` with the far code, and the boundary moved to
+share what that bought: **360 and 259 bytes free** now. The workstation
+holds the pattern as a *source and a first row* rather than a pointer,
+because a pointer that could name either a far table or the user's own
+near array has to be far, and then "is this the user's?" is a near-to-far
+comparison on the workstation switch. That version passed `test-m3`
+86/86 and crashed the desktop — the conformance suite drives the
+physical workstation and never reaches that code.
 
 **`make dist` is what a tester is handed** (`docs/phase22.md`): the
 bootable disks, the system's files loose for a disk of their own, the
