@@ -181,6 +181,18 @@ WORD dev_pen_value(WORD pen);
 void dev_read_row(WORD y, uint8_t *px);
 WORD dev_row_pixel(const uint8_t *px, WORD x);
 
+/* How many colours the device can show at once.  v_opnwk reports it, so
+ * it is what the AES and every application lay themselves out for -- and
+ * it is why this is a device question and not a constant: a two-colour
+ * workstation also has to say it cannot do colour at all, the way the
+ * ST's monochrome one does. */
+WORD dev_colours(void);
+
+/* ...and how many PLANES that is.  The AES reads it out of vq_extnd and
+ * sizes its menu save buffer from it, so a device that lies here wastes
+ * memory or loses part of a menu. */
+WORD dev_planes(void);
+
 /* The palette: sixteen VDI pens' worth of 8-bit RGB, or one of them.
  * The device permutes into whatever order its hardware wants -- and a
  * device with two colours takes what it can of it. */

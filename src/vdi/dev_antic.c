@@ -428,3 +428,13 @@ void dev_palette_one(WORD pen, const uint8_t *rgb)
     if (pen == 0 || pen == 1)
         antic_recolour(pen, an_lum(rgb));
 }
+
+WORD dev_colours(void)
+{
+    return 2;                           /* mode F is one bit */
+}
+
+WORD dev_planes(void)
+{
+    return 1;
+}

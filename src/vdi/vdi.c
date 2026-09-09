@@ -419,7 +419,7 @@ static void fill_workout(void)
     intout[10] = 1;                 /* faces */
     intout[11] = 24;                /* patterns */
     intout[12] = 12;                /* hatches */
-    intout[13] = 16;                /* colours available at once */
+    intout[13] = dev_colours();     /* colours available at once */
     /* The ten GDPs, and for each of them the attribute it draws with:
      * 3 = fill area, 2 = text, 0 = polyline.  A program reads these
      * rather than assuming, which is the whole point of the table. */
@@ -428,11 +428,11 @@ static void fill_workout(void)
         intout[15 + i] = (WORD)(i + 1);
         intout[25 + i] = gdp_attr[i];
     }
-    intout[35] = 1;                 /* can do colour */
+    intout[35] = (WORD)(dev_colours() > 2);  /* can do colour */
     intout[36] = 0;                 /* no text rotation */
     intout[37] = 1;                 /* can do fill area */
     intout[38] = 0;                 /* no cell array */
-    intout[39] = 16;                /* palette: >2 means colour */
+    intout[39] = dev_colours();     /* palette: >2 means colour */
     intout[40] = 1;                 /* locators */
     intout[41] = 1;                 /* valuators */
     intout[42] = 1;                 /* choice devices */
@@ -683,10 +683,14 @@ static void vdi_vq_extnd(void)
     for (i = 0; i < 12; i++)
         ptsout[i] = 0;
     intout[0] = 0;                  /* screen type: not a separate buffer */
-    intout[1] = 16;                 /* background colours */
+    intout[1] = dev_colours();      /* background colours */
     intout[2] = TXT_DONE;           /* the text effects really applied */
     intout[3] = 0;                  /* scaling: raster, not scalable */
-    intout[4] = 4;                  /* PLANES -- the AES reads this one */
+    intout[4] = dev_planes();       /* PLANES -- the AES reads this one:
+                                     * its menu save buffer is sized from
+                                     * it (gsx_malloc), so a device that
+                                     * lies here wastes memory or loses a
+                                     * menu */
     intout[5] = 1;                  /* lookup table present */
     intout[6] = 1;                  /* performance: rough */
     intout[9]  = 4;                 /* writing modes */

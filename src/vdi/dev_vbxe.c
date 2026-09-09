@@ -1279,3 +1279,13 @@ void dev_palette_one(WORD pen, const uint8_t *rgb)
 {
     vbxe_palette(1, (uint8_t)HW(pen), rgb, 1);
 }
+
+WORD dev_colours(void)
+{
+    return 16;                          /* HR is 4bpp */
+}
+
+WORD dev_planes(void)
+{
+    return 4;
+}

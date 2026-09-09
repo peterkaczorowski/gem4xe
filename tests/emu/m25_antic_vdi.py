@@ -88,6 +88,38 @@ def main(argv):
         print(f"  the VDI opened a workstation on the ANTIC device, {cpu}, "
               f"no VBXE in the machine")
 
+        # -- what the AES made of the device -------------------------
+        # gsx_start asks the VDI for the extent, the depth and the system
+        # font's cell, and everything it lays out afterwards comes off
+        # those.  The gate does the same arithmetic the AES does (graf.c
+        # gsx_start) rather than checking numbers someone wrote down: the
+        # claim is that a GEM ADAPTS to a second screen, and a constant
+        # would not be evidence of it.
+        g = [b.peek16(0x0610 + i * 2) for i in range(10)]
+        (width, height, planes, wchar, hchar, wbox, hbox,
+         menu_w, menu_h, full_h) = g
+        check((width, height) == (AN_W, AN_H),
+              f"the AES thinks the screen is {width}x{height}, not "
+              f"{AN_W}x{AN_H}")
+        check(planes == 1,
+              f"the AES thinks the device has {planes} planes, not 1 -- it "
+              f"sizes its menu save buffer from that")
+        check((wchar, hchar) == (8, 8),
+              f"the system font's cell came back {wchar}x{hchar}")
+        check(hbox == hchar + 3,
+              f"a box is {hbox} tall, not the cell plus three ({hchar + 3})")
+        check(wbox == max(hbox * 372 // 372, wchar + 4),
+              f"a box is {wbox} wide; the pixels are square here so it is "
+              f"the taller of hbox and wchar+4")
+        check((menu_w, menu_h) == (width, hbox),
+              f"the menu bar is {menu_w}x{menu_h}, not the screen's width "
+              f"by a box's height")
+        check(full_h == height - hbox,
+              f"the desk under the menu is {full_h} tall, not {height - hbox}")
+        print(f"  the AES laid out on {width}x{height}, {planes} plane: "
+              f"cell {wchar}x{hchar}, box {wbox}x{hbox}, menu bar {menu_h} "
+              f"tall, desk {full_h}")
+
         b.frames(20)
         b.screenshot(SHOT)
         from PIL import Image

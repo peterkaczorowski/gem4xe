@@ -11,6 +11,7 @@
  * attributes on top of a device they were not written for.
  */
 #include "vdi/vdi.h"
+#include "aes/aes.h"
 
 #define STATUS ((volatile unsigned char *) 0x0600)
 
@@ -67,6 +68,23 @@ __task void main(void)
         ptsin[0] = 20;
         ptsin[1] = 80;
         call(V_GTEXT, 1, (WORD)i);
+    }
+
+    /* -- and the AES on top of it ------------------------------------
+     * gsx_start is where the AES learns what device it is on: it asks
+     * the VDI for the extent, the depth and the system font's cell, and
+     * everything it lays out afterwards -- the menu bar's height, the
+     * middle of the screen, a dialog's box -- comes off those numbers.
+     * It is the whole reason a GEM ports to a second screen at all, so
+     * the gate reads them back rather than trusting them. */
+    gsx_start();
+    {
+        volatile WORD *g = (volatile WORD *)0x0610;
+        g[0] = gl_width;      g[1] = gl_height;
+        g[2] = gl_nplanes;    g[3] = gl_wchar;
+        g[4] = gl_hchar;      g[5] = gl_wbox;
+        g[6] = gl_hbox;       g[7] = gl_rmenu.g_w;
+        g[8] = gl_rmenu.g_h;  g[9] = gl_rfull.g_h;
     }
 
     STATUS[2] = 'K';
