@@ -7,6 +7,7 @@
  * through the MEMAC window would be roughly twenty times slower.
  */
 #include "vdi.h"
+#include "vdidev.h"
 #include "pointer.h"
 #include "font.h"
 #include "sys/zwin.h"
@@ -36,7 +37,7 @@ static const UWORD line_styles[7] = {
  * the VDI keeps GEM's pen numbers at its interface and stores every pixel
  * through this map -- the same permutation the ST's VDI applies -- with the
  * palette loaded in hardware order to match.  black -> 15, white -> 0. */
-static const uint8_t map_col[16] = {
+const uint8_t map_col[16] = {
     0, 15, 1, 2, 4, 6, 3, 5, 7, 8, 9, 10, 12, 14, 11, 13
 };
 
@@ -127,77 +128,16 @@ static WORD clip_rect(WORD *x1, WORD *y1, WORD *x2, WORD *y2)
  * so tests/emu/m3_vdi.py deliberately exercises odd x1, odd x2, and rectangles
  * one pixel wide inside a single byte.
  */
-static void fill_rect_dev(WORD x1, WORD y1, WORD x2, WORD y2, WORD hwpen)
-{
-    uint32_t base = VR_SCREEN0 + (uint32_t)y1 * SCR_STRIDE;
-    uint16_t rows = (uint16_t)(y2 - y1 + 1);
-    uint8_t  c    = (uint8_t)(((hwpen & 0x0F) << 4) | (hwpen & 0x0F));
-    WORD bl = (WORD)(x1 >> 1), br = (WORD)(x2 >> 1);
-
-    if (bl == br) {
-        if ((x1 & 1) == 0 && (x2 & 1) == 1) {           /* whole byte */
-            blit_fill(base + bl, SCR_STRIDE, 1, rows, c);
-        } else if (x1 & 1) {                            /* low nibble only */
-            blit_and(base + bl, SCR_STRIDE, 1, rows, 0xF0);
-            blit_or(base + bl, SCR_STRIDE, 1, rows, (uint8_t)(c & 0x0F));
-        } else {                                        /* high nibble only */
-            blit_and(base + bl, SCR_STRIDE, 1, rows, 0x0F);
-            blit_or(base + bl, SCR_STRIDE, 1, rows, (uint8_t)(c & 0xF0));
-        }
-        return;
-    }
-    if (x1 & 1) {                                       /* partial left */
-        blit_and(base + bl, SCR_STRIDE, 1, rows, 0xF0);
-        blit_or(base + bl, SCR_STRIDE, 1, rows, (uint8_t)(c & 0x0F));
-        bl++;
-    }
-    if ((x2 & 1) == 0) {                                /* partial right */
-        blit_and(base + br, SCR_STRIDE, 1, rows, 0x0F);
-        blit_or(base + br, SCR_STRIDE, 1, rows, (uint8_t)(c & 0xF0));
-        br--;
-    }
-    if (br >= bl)
-        blit_fill(base + bl, SCR_STRIDE, (uint16_t)(br - bl + 1), rows, c);
-}
-
-/* XOR a device rectangle: complement every pixel, which is what XOR mode
- * means in the VDI -- the pen is not consulted.  Same edge handling as the
- * fill, with the blitter's XOR mode doing the read-modify-write. */
-static void xor_rect_dev(WORD x1, WORD y1, WORD x2, WORD y2)
-{
-    uint32_t base = VR_SCREEN0 + (uint32_t)y1 * SCR_STRIDE;
-    uint16_t rows = (uint16_t)(y2 - y1 + 1);
-    WORD bl = (WORD)(x1 >> 1), br = (WORD)(x2 >> 1);
-
-    if (bl == br) {
-        uint8_t m = 0xFF;
-        if (x1 & 1)            m = 0x0F;        /* low nibble only  */
-        else if ((x2 & 1) == 0) m = 0xF0;       /* high nibble only */
-        blit_xor(base + bl, SCR_STRIDE, 1, rows, m);
-        return;
-    }
-    if (x1 & 1) {
-        blit_xor(base + bl, SCR_STRIDE, 1, rows, 0x0F);
-        bl++;
-    }
-    if ((x2 & 1) == 0) {
-        blit_xor(base + br, SCR_STRIDE, 1, rows, 0xF0);
-        br--;
-    }
-    if (br >= bl)
-        blit_xor(base + bl, SCR_STRIDE, (uint16_t)(br - bl + 1), rows, 0xFF);
-}
-
 /* The same for a solid rectangle -- every pattern bit set -- which lets the
  * blitter do it.  Clipping is the caller's job. */
 static void paint_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen)
 {
     switch (vwk.wrt_mode + 1) {
-    case MD_XOR:    xor_rect_dev(x1, y1, x2, y2);              break;
+    case MD_XOR:    dev_xor_rect(x1, y1, x2, y2);              break;
     case MD_ERASE:  return;                 /* nothing is clear: no-op */
-    default:        fill_rect_dev(x1, y1, x2, y2, HW(pen));    break;
+    default:        dev_fill_rect(x1, y1, x2, y2, pen);        break;
     }
-    blit_run();
+    dev_flush();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -315,7 +255,7 @@ static void patt_expand(uint8_t set, uint8_t clr)
  * it is applied a nibble at a time with the other nibble's mask forced to
  * F through the XOR mask.  Replace at an edge must leave the other pixel
  * alone, which a copy cannot: there it is an AND to clear the nibble and
- * an OR of the pattern into it, the pair fill_rect_dev uses. */
+ * an OR of the pattern into it, the pair dev_fill_rect uses. */
 enum { PT_COPY, PT_HR, PT_AND, PT_XOR };
 
 static void patt_span(WORD how, uint32_t src, uint16_t sstride, uint32_t dst,
@@ -533,11 +473,11 @@ static void fill_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen)
     }
     if (vwk.patsrc == PAT_HOLLOW) {
         switch (vwk.wrt_mode + 1) {
-        case MD_REPLACE: fill_rect_dev(x1, y1, x2, y2, HW(0));    break;
-        case MD_ERASE:   fill_rect_dev(x1, y1, x2, y2, HW(pen));  break;
+        case MD_REPLACE: dev_fill_rect(x1, y1, x2, y2, 0);    break;
+        case MD_ERASE:   dev_fill_rect(x1, y1, x2, y2, pen);  break;
         default:         return;
         }
-        blit_run();
+        dev_flush();
         return;
     }
     patt_rect_dev(x1, y1, x2, y2, pen);
@@ -1258,8 +1198,8 @@ static void draw_char(WORD ch, WORD cx, WORD cy)
                 cy + FONT_H - 1 <= vwk.ymx_clip);
     if (fits && blittable) {
         if (mode == MD_REPLACE)
-            fill_rect_dev(cx, cy, (WORD)(cx + FONT_W - 1),
-                          (WORD)(cy + FONT_H - 1), HW(0));
+            dev_fill_rect(cx, cy, (WORD)(cx + FONT_W - 1),
+                          (WORD)(cy + FONT_H - 1), 0);
         draw_glyph(ch, cx, cy, HW(vwk.text_color),
                    (WORD)(mode == MD_REPLACE));
         blit_run();

@@ -53,7 +53,7 @@ HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
 M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
 # The ANTIC surface milestone: no VBXE object at all, which is the point
 M24_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m24_antic.o build/antic.o build/font8x8.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/dev_vbxe.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
 
 # GEM.COM, the product (src/gem.c): the runner's objects with the runner
 # itself and its compiled-in test application taken out, linked on the
@@ -86,6 +86,14 @@ build/%.o: src/%.s
 build/%.o: src/%.c
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/dev_vbxe.o: src/vdi/dev_vbxe.c src/vdi/vdidev.h src/vdi/vdi.h src/vbxe/vbxe.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -I src/vdi -o $@ $<
+
+build/dev_antic.o: src/vdi/dev_antic.c src/vdi/vdidev.h src/vdi/vdi.h src/antic/antic.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -I src/vdi -o $@ $<
 
 build/vbxe.o: src/vbxe/vbxe.c src/vbxe/vbxe.h
 	@mkdir -p build

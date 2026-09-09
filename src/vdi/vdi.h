@@ -194,6 +194,10 @@ extern const UWORD __far fill_hatch1[96];
  * writes this one, and the dispatcher copies the right one in (vdi.c). */
 extern Vwk vwk;
 
+/* The VDI's pen order into the hardware's.  Device code maps through it
+ * (src/vdi/dev_vbxe.c); the palette is loaded through it here. */
+extern const uint8_t map_col[16];
+
 /* writing modes, as vswr_mode takes them (1-based) */
 #define MD_REPLACE 1
 #define MD_TRANS   2
