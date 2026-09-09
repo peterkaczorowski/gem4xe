@@ -203,3 +203,66 @@ void dev_raster_1bpp(const uint8_t *bits, uint16_t stride,
         }
     }
 }
+
+/* ---- the diagonal ------------------------------------------------------
+ * The same Bresenham the VBXE device runs, and the same order of
+ * operations, because the pixel SET a line covers is the VDI's
+ * specification (tools/vdiref.py) and not a device's choice: the style
+ * rotates before each pixel and keeps rotating over pixels that are
+ * clipped away or off the screen, the major axis steps every time so
+ * the count is known in advance, and both ends are drawn.
+ *
+ * What differs is only what a pixel costs.  There it is a page map and a
+ * read-modify-write through the MEMAC window; here it is a byte in RAM.
+ */
+void dev_line_diag(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask)
+{
+    WORD mode = (WORD)(vwk.wrt_mode + 1);
+    uint8_t pen = (uint8_t)(vwk.line_color ? 1 : 0);
+    WORD dx, dy, sx, sy, err, x = x1, y = y1;
+    UWORD n, m = mask;
+
+    dx = (WORD)(x2 - x1); if (dx < 0) dx = (WORD)-dx;
+    dy = (WORD)(y2 - y1); if (dy < 0) dy = (WORD)-dy;
+    sx = (WORD)(x1 < x2 ? 1 : -1);
+    sy = (WORD)(y1 < y2 ? 1 : -1);
+    err = (WORD)(dx - dy);
+    n = (UWORD)((dx > dy ? dx : dy) + 1);
+
+    for (;;) {
+        WORD e2;
+        WORD bit;
+
+        if (m != 0xFFFF)                /* a solid style rotates into itself */
+            m = (UWORD)((m << 1) | (m >> 15));
+        bit = (WORD)(m & 1);
+
+        if (x >= 0 && y >= 0 && x < AN_W && y < AN_H &&
+            (!vwk.clip || (x >= vwk.xmn_clip && x <= vwk.xmx_clip &&
+                           y >= vwk.ymn_clip && y <= vwk.ymx_clip))) {
+            switch (mode) {
+            case MD_TRANS:
+                if (bit)
+                    antic_plot((int16_t)x, (int16_t)y, pen);
+                break;
+            case MD_XOR:
+                if (bit)
+                    antic_plot((int16_t)x, (int16_t)y,
+                               (uint8_t)!antic_get_pixel((int16_t)x, (int16_t)y));
+                break;
+            case MD_ERASE:
+                if (!bit)
+                    antic_plot((int16_t)x, (int16_t)y, pen);
+                break;
+            default:                    /* replace: the pen, or pen 0 */
+                antic_plot((int16_t)x, (int16_t)y, (uint8_t)(bit ? pen : 0));
+                break;
+            }
+        }
+        if (--n == 0)
+            break;
+        e2 = (WORD)(err << 1);
+        if (e2 > (WORD)-dy) { err = (WORD)(err - dy); x = (WORD)(x + sx); }
+        if (e2 < dx)        { err = (WORD)(err + dx); y = (WORD)(y + sy); }
+    }
+}

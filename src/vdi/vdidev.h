@@ -99,6 +99,20 @@ void dev_cursor_hide(void);
  * where restoring would stamp stale pixels onto a cleared screen. */
 void dev_cursor_discard(void);
 
+/* A DIAGONAL line, styled the same way.  It is separate from
+ * dev_style_line because on one device the two could not be less alike:
+ * a horizontal run is a single patterned blit and a diagonal is the one
+ * primitive the blitter cannot accelerate at all, so it goes pixel by
+ * pixel through the MEMAC window.  The VDI decides which it is -- that
+ * is geometry, and the same either way -- and the device decides what
+ * that costs.
+ *
+ * The AES never draws one: every box and frame it makes is axis-aligned
+ * (it calls neither the GDPs nor v_fillarea), so this is an
+ * application's path, and it is slow on both devices for different
+ * reasons. */
+void dev_line_diag(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask);
+
 /* Whatever the device precomputed about the current pattern or pen is
  * stale.  The VDI calls this when a workstation is selected or reset or
  * when the user pattern is replaced: it cannot know WHETHER a device
