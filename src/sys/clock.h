@@ -1,10 +1,16 @@
 /* clock.h -- the machine's clock, for GEMDOS's Tgetdate and Tgettime.
  *
- * The Atari has no clock of its own.  The one this machine has is on the
- * Ultimate 1MB: a DS1305, bit-banged through a single register at $D3E2
- * (docs/phase15.md).  A machine without one says so and GEMDOS answers
+ * The Atari has no clock of its own.  Two of the cards this machine may
+ * have do: the Ultimate 1MB at $D3E2 and the SIDE / SIDE 2 at $D5E2, the
+ * same DS1305 wired the same way, bit-banged through that one register
+ * (docs/phase15.md).  A machine with neither says so and GEMDOS answers
  * the ST's epoch, 1 January 1980, which is what a TOS with a dead clock
  * answers as well.
+ *
+ * Which register -- if either -- is settled ONCE, by a READ-ONLY test,
+ * before anything is written to it.  The reason is in clock.c and it is
+ * not a small one: $D3E2 on a machine without a U1MB is the PIA
+ * mirrored, and writing to it stops the mouse.
  */
 #ifndef GEM4XE_CLOCK_H
 #define GEM4XE_CLOCK_H

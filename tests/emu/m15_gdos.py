@@ -334,6 +334,23 @@ def cases(g, r, check, fs, kind, b, clock=False):
               f"with no clock Tgetdate/Tgettime say {date:#06x}/{time:#06x}, "
               f"not the epoch {DATE0:#06x}/0")
 
+    # ...AND THE PIA IS STILL THE PIA.  $D3E2 is the U1MB's RTC, but on a
+    # machine without one it is the PIA mirrored -- $D3E2 & 3 == 2 is
+    # PACTL -- and bit 2 of PACTL is what makes $D300 the joystick port
+    # rather than its direction register.  Bit-banging the clock through
+    # an address that is really PACTL leaves it at 0, and then the mouse's
+    # quadrature reads a flat 0 and the pointer never moves again.  It did
+    # exactly that until the probe went read-only (docs/phase30.md).  So
+    # the two calls above are followed by the question no gate asked: is
+    # the joystick port still there?
+    pactl = b.ok("EVAL db($d302)").get("value")
+    check(pactl & 0x04,
+          f"after Tgetdate/Tgettime PACTL is ${pactl:02X}: bit 2 is clear, so "
+          f"$D300 now reads DDRA and not the joystick port -- the clock was "
+          f"driven through the PIA")
+    print(f"  PACTL after the clock: ${pactl:02X} "
+          f"({'the joystick port' if pactl & 4 else 'DDRA -- BROKEN'})")
+
     ret, _ = g.call("Fclose", W(h))
     check(ret == 0, f"Fclose {ret}")
     ret, _ = g.call("Fseek", L(0), W(h), W(0))
