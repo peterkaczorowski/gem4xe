@@ -41,6 +41,25 @@ void dev_fill_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen);
 /* ...and the same rectangle inverted, which is MD_XOR. */
 void dev_xor_rect(WORD x1, WORD y1, WORD x2, WORD y2);
 
+/* A rectangle in the current fill pattern and writing mode, corners
+ * inclusive and already clipped.  The pattern's ROWS come from the VDI
+ * (pat_bits) because which table they are in is the workstation's
+ * business; how they reach the screen is the device's. */
+void dev_patt_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen);
+
+/* A horizontal or vertical line in the current pen and mode, styled by
+ * `mask` -- already anchored to the screen's grid by style_anchor, so
+ * both devices draw a dash in the same place.  The device clips it. */
+void dev_style_line(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask);
+
+/* Whatever the device precomputed about the current pattern or pen is
+ * stale.  The VDI calls this when a workstation is selected or reset or
+ * when the user pattern is replaced: it cannot know WHETHER a device
+ * caches anything, only that the ground has moved.  VBXE keeps the
+ * pattern expanded to 4bpp in VRAM with a line's strip beside it and
+ * throws both away; ANTIC caches nothing and this is empty. */
+void dev_invalidate(void);
+
 /* Whatever the device has queued, done and on the screen.  A blit list
  * started and waited for on VBXE; nothing at all on ANTIC, where the
  * write WAS the drawing. */

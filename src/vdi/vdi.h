@@ -198,6 +198,28 @@ extern Vwk vwk;
  * (src/vdi/dev_vbxe.c); the palette is loaded through it here. */
 extern const uint8_t map_col[16];
 
+/* ---- what a device may call back into the VDI for ---------------------
+ * These three are device-INdependent and both devices need them, so they
+ * live here rather than being copied into each. */
+
+/* The two of them in order, smallest first. */
+void order(WORD *a, WORD *b);
+
+/* The current clip rectangle applied to a rectangle; FALSE when nothing
+ * is left of it. */
+WORD clip_rect(WORD *x1, WORD *y1, WORD *x2, WORD *y2);
+
+/* Row r of the current fill pattern: sixteen bits, bit 15 the leftmost
+ * pixel of a 16-ALIGNED screen word.  Which table it comes from is the
+ * workstation's business and so stays here. */
+UWORD pat_bits(WORD r);
+
+/* A line style rotated so that it too is anchored to the screen's
+ * 16-pixel grid -- bit 15 at pixel 0 of every aligned word, the way a
+ * fill pattern is -- which is what lets a styled line be drawn as a
+ * patterned span and what keeps the two devices in the same phase. */
+UWORD style_anchor(UWORD mask, WORD from, WORD dir);
+
 /* writing modes, as vswr_mode takes them (1-based) */
 #define MD_REPLACE 1
 #define MD_TRANS   2
