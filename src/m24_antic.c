@@ -63,6 +63,36 @@ __task void main(void)
         antic_hline((int16_t)(200 + 16 * i), (int16_t)(200 + 16 * i + i),
                     (int16_t)(20 + i), 1);
 
+    /* -- the writing modes, over a band -------------------------------
+     * A solid source makes REPLACE and TRANS the same thing and ERASE
+     * nothing at all, which is worth showing: it is what the VBXE
+     * driver's paint_rect decides for itself, and the two drivers have
+     * to agree about it. */
+    antic_rect_mode(20, 32, 299, 44, 1, 1);         /* the band        */
+    antic_rect_mode(30, 34, 60, 42, 1, 0);          /* REPLACE pen 0   */
+    antic_rect_mode(70, 34, 100, 42, 3, 1);         /* XOR: inverted   */
+    antic_rect_mode(110, 34, 140, 42, 4, 0);        /* ERASE: nothing  */
+    antic_rect_mode(150, 34, 180, 42, 2, 0);        /* TRANS pen 0     */
+
+    /* -- text, at every one of the eight shifts ------------------------ */
+    for (i = 0; i < 8; i++)                         /* REPLACE on clear */
+        antic_glyph((uint16_t)('A' + i), (int16_t)(20 + i * 9), 50, 1, 1);
+    antic_rect_mode(20, 60, 200, 67, 1, 1);         /* a set ground     */
+    for (i = 0; i < 8; i++)                         /* TRANS pen 0      */
+        antic_glyph((uint16_t)('a' + i), (int16_t)(20 + i * 9), 60, 2, 0);
+    for (i = 0; i < 8; i++)                         /* XOR on clear     */
+        antic_glyph((uint16_t)('0' + i), (int16_t)(20 + i * 9), 70, 3, 1);
+
+    /* -- v_get_pixel, which no picture can check ----------------------- */
+    STATUS[4] = antic_get_pixel(0, 0);              /* border: set      */
+    STATUS[5] = antic_get_pixel(5, 5);              /* on the diagonal  */
+    STATUS[6] = antic_get_pixel(50, 100);           /* inside the bar   */
+    STATUS[7] = antic_get_pixel(150, 100);          /* inside its hole  */
+    STATUS[8] = antic_get_pixel(120, 38);           /* the ERASE rect   */
+    STATUS[9] = antic_get_pixel(80, 38);            /* the XOR rect     */
+    STATUS[10] = antic_get_pixel(-1, 5);            /* off the left     */
+    STATUS[11] = antic_get_pixel(5, AN_H);          /* off the bottom   */
+
     STATUS[2] = 'K';                    /* drawn */
     for (;;)
         ;

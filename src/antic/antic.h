@@ -46,6 +46,8 @@
 #define AN_BYTES    ((uint16_t)AN_STRIDE * AN_H)
 #define AN_SPLIT    96                  /* the line the 4 KB crossing
                                          * falls in front of            */
+#define AN_GLYPH_W  8                   /* the system font's cell       */
+#define AN_GLYPH_H  8
 
 /* ANTIC and GTIA, the registers this file drives. */
 #define AN_DMACTL   0xD400U
@@ -78,5 +80,30 @@ void antic_hline(int16_t x1, int16_t x2, int16_t y, uint8_t set);
 
 /* A filled rectangle, corners inclusive. */
 void antic_rect(int16_t x1, int16_t y1, int16_t x2, int16_t y2, uint8_t set);
+
+/* ---- what the VDI asks a surface for --------------------------------
+ * The four GEM writing modes (vdi.h MD_REPLACE..MD_ERASE) over a source,
+ * a pen and a destination.  On a one-bit device the pen is 0 or 1 and
+ * the modes come out as:
+ *
+ *   REPLACE   the whole cell is written: dst = pen ? src : ~src
+ *   TRANS     the pen goes where the source is set, the rest is left
+ *   XOR       dst ^= src, and the pen means nothing
+ *   ERASE     the pen goes where the source is CLEAR, the rest is left
+ *
+ * A solid run is a source of all ones, which is why REPLACE and TRANS
+ * come to the same thing for one and ERASE to nothing at all -- exactly
+ * what the VBXE driver's paint_rect already decides for itself. */
+void antic_span(int16_t x1, int16_t x2, int16_t y, int16_t mode, uint8_t pen);
+void antic_rect_mode(int16_t x1, int16_t y1, int16_t x2, int16_t y2,
+                     int16_t mode, uint8_t pen);
+
+/* One 8x8 glyph of the system font at (x, y), which is the cell's top
+ * left.  1bpp into 1bpp with a shift, where the VBXE driver has to keep
+ * the same glyph expanded to 4bpp masks in VRAM at both parities. */
+void antic_glyph(uint16_t ch, int16_t x, int16_t y, int16_t mode, uint8_t pen);
+
+/* v_get_pixel: 0 or 1, and 0 for anything off the screen. */
+uint8_t antic_get_pixel(int16_t x, int16_t y);
 
 #endif /* GEM4XE_ANTIC_H */

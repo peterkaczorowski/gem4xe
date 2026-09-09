@@ -86,6 +86,14 @@ def main(argv):
         px = im.load()
 
         want = anticref.pattern()
+
+        # v_get_pixel, which no picture can check: the eight answers the
+        # program stored, against the same eight from the model.
+        got_px = list(b.memdump(STATUS + 4, 8))
+        exp_px = anticref.pixels(want)
+        check(got_px == exp_px,
+              f"v_get_pixel answered {got_px}, the model says {exp_px}")
+        print(f"  v_get_pixel: {got_px} as the model has them")
         seen = {px[SHOT_X0 + x, SHOT_Y0 + y]
                 for y in range(AN_H) for x in range(AN_W)}
         check(len(seen) == 2,

@@ -99,11 +99,53 @@ Both were found by the gate in one run each, from 9,515 wrong pixels to
 235 to none.  A rule that is written down is not the same as a rule that
 is followed, and the second-best time to find that out is a gate.
 
-## Next
+## The device layer: writing modes, text, v_get_pixel
 
-The VDI's second driver: the same 37 opcodes, rasterised into these 6,720
-bytes instead of compiled into blit lists.  `v_opnwk` already answers a
-device capability array and the AES already lays out to whatever it says
--- that is what the mechanism is for -- so the AES above it needs nothing
-new.  `Set preferences` and a resolution picker come after that, because
-then there is a second resolution to pick.
+The seam the VDI needs is not the opcodes -- those are device-independent
+and already written -- but the handful of things underneath them.
+`paint_rect` in the VBXE driver is the shape of it: a device-INdependent
+decision (XOR goes one way, ERASE is a no-op, everything else fills) over
+device-DEPENDENT primitives called `*_dev`.  That is where the cut goes,
+and the ANTIC side of it now has:
+
+  * **the four GEM writing modes** over a source, a pen and a
+    destination.  On a one-bit device REPLACE writes `pen ? src : ~src`,
+    TRANS puts the pen where the source is set, XOR ignores the pen
+    entirely and ERASE puts the pen where the source is CLEAR;
+  * **spans and rectangles** in all four, with the edge masks;
+  * **text**, which is where this driver is SIMPLER than the other one.
+    The system font is a 1bpp strip already, so a glyph goes into a 1bpp
+    framebuffer as itself, shifted across at most two bytes -- no
+    expansion, and none of the second pre-shifted copy the VBXE driver
+    keeps in VRAM so that it can blit the same glyph at an odd x;
+  * **v_get_pixel**.
+
+A solid source makes REPLACE and TRANS the same thing and ERASE nothing
+at all, and the gate shows all three: the band has two holes punched in
+it and one rectangle that left no mark.  That is not a curiosity -- it is
+what the VBXE driver's `paint_rect` decides for itself, and the two
+drivers have to agree about it.
+
+The gate draws glyphs at **every one of the eight shifts** (x = 20 + 9i
+walks all of them), in REPLACE on a clear ground, TRANS with pen 0 on a
+set one, and XOR.  And it checks `v_get_pixel` as a RETURNED VALUE, from
+eight positions the program stores into page 6, because a picture cannot
+check it -- the same reason the VDI conformance suite compares returned
+values and not only pixels.
+
+It passed first time, which is what the ccbug rules are for.
+
+## Still to come
+
+Lines, the fill patterns, `vro_cpyfm` and the mouse cursor, and then
+wiring the dispatcher so that `screen()` reaches these instead of the
+blitter.  `v_opnwk` already answers a device capability array and the AES
+already lays out to whatever it says -- that is what the mechanism is for
+-- so nothing above the VDI needs to change.
+
+The selection is a BUILD choice for now, not a runtime one: the geometry
+constants are compile-time and making them variables would touch every
+clip and every stride in a 3,676-line file that 49 conformance cases
+stand on.  One binary that finds no VBXE and falls back is the better
+product and it is the obvious next step after the driver is complete; it
+is deliberately not being done first.

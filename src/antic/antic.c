@@ -8,6 +8,15 @@
  * is plain motherboard RAM the accelerator reaches at full speed.
  */
 #include "antic.h"
+#include "../vdi/vdi.h"                 /* the system font, which this
+                                         * driver blits as it stands */
+
+/* Character N's row r of the 8x8 face: the strip is 1bpp already and
+ * bit 7 is the leftmost pixel, which is what this device wants too. */
+static uint8_t an_font_row(uint16_t ch, uint16_t row)
+{
+    return font8x8[row * FONT_STRIDE + (ch & 0xFF)];
+}
 
 #define REG8(a)  (*(volatile uint8_t *)(a))
 #define SCREEN   ((volatile uint8_t *)AN_SCREEN)
@@ -197,4 +206,158 @@ void antic_rect(int16_t x1, int16_t y1, int16_t x2, int16_t y2, uint8_t set)
         y2 = AN_H - 1;
     for (y = y1; y <= y2; y++)
         antic_hline(x1, x2, y, set);
+}
+
+/* ---- the writing modes ------------------------------------------------ */
+
+/* One destination byte: the source applied through mask `m` in `mode`,
+ * everything outside the mask left alone.  The VDI's modes are numbered
+ * from 1 (src/vdi/vdi.h), which is what the caller passes. */
+#define AN_MD_REPLACE 1
+#define AN_MD_TRANS   2
+#define AN_MD_XOR     3
+#define AN_MD_ERASE   4
+
+static uint8_t an_apply(uint8_t dst, uint8_t src, uint8_t m,
+                        int16_t mode, uint8_t pen)
+{
+    uint8_t ink = pen ? 0xFF : 0x00;
+    uint8_t out;
+
+    switch (mode) {
+    case AN_MD_TRANS:
+        out = (uint8_t)((dst & (uint8_t)~src) | (ink & src));
+        break;
+    case AN_MD_XOR:
+        out = (uint8_t)(dst ^ src);
+        break;
+    case AN_MD_ERASE:
+        out = (uint8_t)((dst & src) | (ink & (uint8_t)~src));
+        break;
+    default:                                /* AN_MD_REPLACE */
+        out = pen ? src : (uint8_t)~src;
+        break;
+    }
+    return (uint8_t)((dst & (uint8_t)~m) | (out & m));
+}
+
+/* A solid run: the source is all ones, so REPLACE and TRANS write the
+ * pen, XOR inverts and ERASE does nothing. */
+void antic_span(int16_t x1, int16_t x2, int16_t y, int16_t mode, uint8_t pen)
+{
+    volatile uint8_t *p;
+    uint8_t lm, rm, mid, v;
+    int16_t b1, b2, b;
+
+    if (y < 0 || y >= AN_H)
+        return;
+    if (x1 > x2) {
+        int16_t t = x1; x1 = x2; x2 = t;
+    }
+    if (x2 < 0 || x1 >= AN_W)
+        return;
+    if (x1 < 0)
+        x1 = 0;
+    if (x2 >= AN_W)
+        x2 = AN_W - 1;
+
+    b1 = (int16_t)((uint16_t)x1 >> 3);
+    b2 = (int16_t)((uint16_t)x2 >> 3);
+    lm = an_left[x1 & 7];
+    rm = an_right[x2 & 7];
+    mid = an_apply(0, 0xFF, 0xFF, mode, pen);   /* a whole byte of it */
+    p = SCREEN + (uint16_t)y * AN_STRIDE + (uint16_t)b1;
+
+    if (b1 == b2) {
+        v = *p;
+        v = an_apply(v, 0xFF, (uint8_t)(lm & rm), mode, pen);
+        *p = v;
+        return;
+    }
+    v = *p;
+    v = an_apply(v, 0xFF, lm, mode, pen);
+    *p = v;
+    for (b = (int16_t)(b1 + 1); b < b2; b++) {
+        p++;
+        if (mode == AN_MD_XOR) {            /* XOR still reads the byte */
+            v = *p;
+            v = (uint8_t)(v ^ 0xFF);
+            *p = v;
+        } else if (mode != AN_MD_ERASE) {
+            *p = mid;
+        }
+    }
+    p++;
+    v = *p;
+    v = an_apply(v, 0xFF, rm, mode, pen);
+    *p = v;
+}
+
+void antic_rect_mode(int16_t x1, int16_t y1, int16_t x2, int16_t y2,
+                     int16_t mode, uint8_t pen)
+{
+    int16_t y;
+
+    if (y1 > y2) {
+        y = y1; y1 = y2; y2 = y;
+    }
+    if (y1 < 0)
+        y1 = 0;
+    if (y2 >= AN_H)
+        y2 = AN_H - 1;
+    for (y = y1; y <= y2; y++)
+        antic_span(x1, x2, y, mode, pen);
+}
+
+/* ---- text -------------------------------------------------------------
+ * The font is a 1bpp strip already (src/vdi/vdi.h): character N's row r
+ * is font8x8[r * FONT_STRIDE + N], bit 7 leftmost.  So a glyph goes into
+ * a 1bpp framebuffer as itself, shifted into place across at most two
+ * bytes -- no expansion, no second pre-shifted copy, none of what the
+ * VBXE driver keeps in VRAM to blit the same glyph at an odd x.
+ *
+ * A cell that runs off an edge is dropped whole rather than clipped:
+ * the VDI clips text by the cell, and a partial glyph is not something
+ * GEM asks for. */
+void antic_glyph(uint16_t ch, int16_t x, int16_t y, int16_t mode, uint8_t pen)
+{
+    volatile uint8_t *p;
+    uint16_t row;
+    uint8_t shift, g, v;
+
+    if (x < 0 || y < 0 || x + AN_GLYPH_W > AN_W || y + AN_GLYPH_H > AN_H)
+        return;
+    shift = (uint8_t)(x & 7);
+    p = SCREEN + (uint16_t)y * AN_STRIDE + ((uint16_t)x >> 3);
+
+    for (row = 0; row < AN_GLYPH_H; row++) {
+        g = an_font_row(ch, row);
+        if (shift == 0) {
+            v = *p;
+            v = an_apply(v, g, 0xFF, mode, pen);
+            *p = v;
+        } else {
+            uint8_t hi = (uint8_t)(g >> shift);
+            uint8_t lo = (uint8_t)(g << (8 - shift));
+            uint8_t mh = (uint8_t)(0xFF >> shift);
+            uint8_t ml = (uint8_t)(0xFF << (8 - shift));
+            v = *p;
+            v = an_apply(v, hi, mh, mode, pen);
+            *p = v;
+            v = p[1];
+            v = an_apply(v, lo, ml, mode, pen);
+            p[1] = v;
+        }
+        p += AN_STRIDE;
+    }
+}
+
+uint8_t antic_get_pixel(int16_t x, int16_t y)
+{
+    volatile uint8_t *p;
+
+    if (x < 0 || y < 0 || x >= AN_W || y >= AN_H)
+        return 0;
+    p = an_at(x, y);
+    return (uint8_t)((*p >> (7 - (x & 7))) & 1);
 }
