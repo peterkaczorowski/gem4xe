@@ -51,16 +51,17 @@ from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
                     DNARROW, VSLIDE, LFARROW, RTARROW, HSLIDE,
                     WF_NAME, WF_INFO, WF_WXYWH, WF_CXYWH, WF_PXYWH, WF_FXYWH,
                     WF_VSLIDE, WF_TOP, WF_FIRSTXYWH, WF_NEXTXYWH, WF_NEWDESK,
-                    WF_HSLSIZ, WF_VSLSIZ,
+                    WF_HSLSIZ, WF_VSLSIZ, WF_HSLIDE, WC_WORK,
                     WM_REDRAW, WM_TOPPED, WM_CLOSED, WM_FULLED, WM_ARROWED,
-                    WM_VSLID, WM_SIZED, WM_MOVED, WM_NEWTOP,
-                    WA_UPPAGE, WA_DNPAGE, WA_UPLINE, WA_DNLINE, MN_SELECTED,
+                    WM_VSLID, WM_HSLID, WM_SIZED, WM_MOVED, WM_NEWTOP,
+                    WA_UPPAGE, WA_DNPAGE, WA_UPLINE, WA_DNLINE,
+                    WA_LFPAGE, WA_RTPAGE, WA_LFLINE, WA_RTLINE, MN_SELECTED,
                     APPL_INIT, APPL_EXIT, EVNT_MULTI, MENU_BAR,
                     MENU_ICHECK, MENU_IENABLE, MENU_TNORMAL,
                     OBJC_DRAW, OBJC_FIND,
                     OBJC_OFFSET, FORM_DO, FORM_DIAL, FORM_CENTER, FORM_ALERT,
                     GRAF_HANDLE, GRAF_GROWBOX, GRAF_SHRINKBOX,
-                    WIND_CREATE, WIND_OPEN, WIND_CLOSE, WIND_DELETE,
+                    WIND_CREATE, WIND_OPEN, WIND_CLOSE, WIND_DELETE, WIND_CALC,
                     WIND_GET, WIND_SET, WIND_FIND, WIND_UPDATE,
                     RSRC_LOAD, RSRC_FREE, RSRC_GADDR, SHEL_WRITE,
                     SHEL_GET, SHEL_PUT, SIZE_SHELBUF,
@@ -83,7 +84,7 @@ from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA, ADFINFO,  # noqa: E402
                      STDELTTL, STCPYTTL, STMOVTTL,
                      STFIINFO, STFOINFO, STRENAME, STSVINF, STRDINF,
                      STFLINE, STFMARK, VIEWMENU, ICONITEM, TEXTITEM,
-                     NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM, NSRTITEM,
+                     NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM, NSRTITEM, FITITEM,
                      IB_HARD, IB_FLOPPY, IB_TRASH,
                      IB_FOLDER, IB_APPL, IB_DOCU, NOT_YET)
 
@@ -121,15 +122,16 @@ S_NAME, S_TYPE, S_SIZE, S_DATE, S_NSRT = 0, 1, 2, 3, 4
 INF_E1_VIEWTEXT = 0x80
 INF_E1_SORTMASK = 0x60
 INF_E5_NOSORT = 0x80
+INF_E5_NOSIZE = 0x10
 SCREENINFO_SIZE = LEN_FNODE             # the union: ICONBLK + label is 47
 OBJ_SIZE = aesref.OBJ_SIZE
 RESULT_INTOUT = vdiref.RESULT_INTOUT
 # the structs deskwin.c keeps, sized as cc65816 lays them out (no padding)
 DTA_SIZE, FNODE_SIZE = 44, 30
 PNODE_SIZE = 2 + 4 + LEN_ZPATH + 4
-WNODE_SIZE = 12 + PNODE_SIZE + LEN_WNAME + LEN_ZINFO
+WNODE_SIZE = 16 + PNODE_SIZE + LEN_WNAME + LEN_ZINFO
 # where a WNODE's in-place strings are
-WN_SPEC, WN_NAME, WN_INFO = 12 + 6, 12 + PNODE_SIZE, 12 + PNODE_SIZE + LEN_WNAME
+WN_SPEC, WN_NAME, WN_INFO = 16 + 6, 16 + PNODE_SIZE, 16 + PNODE_SIZE + LEN_WNAME
 WSAVE_SIZE = 6 * 2 + LEN_ZPATH
 CSAVE_SIZE = NUM_WNODES * WSAVE_SIZE
 
@@ -157,10 +159,11 @@ GLOBES = [("a_menu", 2), ("a_info", 2), ("a_mkdir", 2), ("a_delete", 2),
           ("a_finfo", 2), ("a_iblist", 2), ("g_handle", 2),
           ("g_wchar", 2), ("g_hchar", 2), ("g_wbox", 2), ("g_hbox", 2),
           ("g_desk", 8), ("g_wicon", 2), ("g_hicon", 2),
-          ("g_iview", 2), ("g_isort", 2), ("g_iwext", 2), ("g_ihext", 2), ("g_iwint", 2),
+          ("g_iview", 2), ("g_isort", 2), ("g_ifit", 2),
+          ("g_iwext", 2), ("g_ihext", 2), ("g_iwint", 2),
           ("g_ihint", 2), ("g_fline", 2), ("g_fmark", 2),
           ("g_icw", 2),
-          ("g_ich", 2), ("g_screenfree", 2), ("g_rmsg", 16),
+          ("g_ich", 2), ("g_icols", 2), ("g_screenfree", 2), ("g_rmsg", 16),
           ("g_wcnt", 2), ("g_nfiles", 4), ("g_ndirs", 4), ("g_opsize", 4),
           ("g_dta", 4), ("g_opdta", 4), ("g_cnxsave", 4), ("g_shelbuf", 4),
           ("g_copybuf", 4),
@@ -273,14 +276,17 @@ class Wnode:
     def __init__(self, addr):
         self.addr = addr
         self.id = self.root = 0
-        self.cvrow = self.pncol = self.pnrow = self.vnrow = 0
+        self.cvrow = self.cvcol = 0
+        self.pncol = self.pnrow = self.vnrow = self.vncol = 0
         self.path = Pnode(addr + WN_SPEC)
         self.name = CharArray(LEN_WNAME)
         self.info = CharArray(LEN_ZINFO)
 
     def pack(self):
-        return (b"".join(w(x) for x in (self.id, self.root, self.cvrow,
-                                        self.pncol, self.pnrow, self.vnrow))
+        return (b"".join(w(x) for x in (self.id, self.root,
+                                        self.cvrow, self.cvcol,
+                                        self.pncol, self.pnrow,
+                                        self.vnrow, self.vncol))
                 + self.path.pack() + self.name.pack() + self.info.pack())
 
 
@@ -325,6 +331,8 @@ class Desktop:
         self.wicon = self.hicon = self.icw = self.ich = 0
         self.iview = V_ICON
         self.isort = S_NAME
+        self.ifit = 1                   # desktop.c: the donor's win_start
+        self.icols = 0
         self.iwext = self.ihext = self.iwint = self.ihint = 0
         self.fline = self.fmark = 0
         self.screenfree = 0
@@ -704,10 +712,10 @@ class Desktop:
         self.wcnt += 1
         pw = self.wlist[wob - (DROOT + 1)]
         pw.root = wob
-        pw.cvrow = 0
+        pw.cvrow = pw.cvcol = 0
         pw.pncol = (r.w - self.wchar) // (self.wicon + MIN_WINT)
         pw.pnrow = (r.h - self.hchar) // (self.hicon + MIN_HINT)
-        pw.vnrow = 0
+        pw.vnrow = pw.vncol = 0
         d = self.desk
         io, _ = self.call(WIND_CREATE, (WINDOW_STYLE, d.x, d.y, d.w, d.h))
         pw.id = signed(io[0])
@@ -808,6 +816,11 @@ class Desktop:
         else:
             self.iwext, self.ihext = self.wicon, self.hicon
             self.iwint, self.ihint = MIN_WINT, MIN_HINT
+        # ...and the grid a window that does NOT size to fit is laid on:
+        # the columns the widest window this screen can show would hold
+        d = self.desk
+        io, _ = self.call(WIND_CALC, (WC_WORK, WINDOW_STYLE, d.x, d.y, d.w, d.h))
+        self.icols = max(1, io[3] // (self.iwext + self.iwint))
 
     def win_line(self, k, pf):
         """One line of the text view into item slot k, from the template
@@ -861,19 +874,33 @@ class Desktop:
         hfit = max(r.h // ihspc, 1)
         for pf in pn.fnodes[:pn.count]:
             pf.obid = 0
-        pw.vnrow = max((pn.count + wfit - 1) // wfit, 1)
+        # the grid the LISTING is laid on: the window's columns with size
+        # to fit, the screen's without (deskwin.c win_bldview)
+        if self.ifit:
+            pw.vncol = wfit
+            pw.vnrow = (pn.count + wfit - 1) // wfit
+        else:
+            pw.vncol = min(pn.count, self.icols)
+            pw.vnrow = (pn.count + self.icols - 1) // self.icols
+        pw.vncol = max(pw.vncol, 1)
+        pw.vnrow = max(pw.vnrow, 1)
         pw.pncol = wfit
         pw.pnrow = min(hfit, pw.vnrow)
+        while pw.vncol - pw.cvcol < min(wfit, pw.vncol):
+            pw.cvcol -= 1
         while pw.vnrow - pw.cvrow < pw.pnrow:
             pw.cvrow -= 1
-        first = pw.cvrow * pw.pncol
-        n = pn.count - first
         hfit = min(pw.vnrow - pw.cvrow, pw.pnrow + 1)     # a row may show in part
-        i = row = 0
-        while row < hfit and i < n:
-            col = 0
-            while col < pw.pncol and i < n:
-                pf = pn.fnodes[first + i]
+        row = 0
+        while row < hfit:
+            for col in range(pw.pncol):
+                vcol = pw.cvcol + col
+                if vcol >= pw.vncol:
+                    break
+                i = (pw.cvrow + row) * pw.vncol + vcol
+                if i >= pn.count:
+                    break
+                pf = pn.fnodes[i]
                 if self.iview == V_TEXT:
                     obid = self.obj_text(pw.root, col * iwspc + self.iwint,
                                          row * ihspc + self.ihint,
@@ -891,10 +918,13 @@ class Desktop:
                 o = self.screen[obid]
                 o.ob_state = WHITEBAK | (SELECTED if pf.flags & F_SELECTED else 0)
                 o.ob_flags = NONE
-                col += 1
-                i += 1
             row += 1
-        self.wind_set(pw.id, WF_HSLSIZ, 1000)
+        self.wind_set(pw.id, WF_HSLSIZ,
+                      mul_div(pw.pncol, 1000, pw.vncol)
+                      if pw.vncol > pw.pncol else 1000)
+        self.wind_set(pw.id, WF_HSLIDE,
+                      mul_div(pw.cvcol, 1000, pw.vncol - pw.pncol)
+                      if pw.vncol > pw.pncol else 0)
         self.wind_set(pw.id, WF_VSLSIZ, mul_div(pw.pnrow, 1000, pw.vnrow))
         self.wind_set(pw.id, WF_VSLIDE,
                       mul_div(pw.cvrow, 1000, pw.vnrow - pw.pnrow)
@@ -930,6 +960,15 @@ class Desktop:
         self.win_bldview(pw, t)
         self.do_wredraw(pw.id, t)
 
+    def win_hscroll(self, pw, newcv):
+        newcv = max(min(newcv, pw.vncol - pw.pncol), 0)
+        if newcv == pw.cvcol:
+            return
+        pw.cvcol = newcv
+        t = self.wind_get_rect(pw.id, WF_WXYWH)
+        self.win_bldview(pw, t)
+        self.do_wredraw(pw.id, t)
+
     def win_arrow(self, pw, arrow):
         if arrow == WA_UPPAGE:
             self.win_scroll(pw, pw.cvrow - pw.pnrow)
@@ -939,9 +978,20 @@ class Desktop:
             self.win_scroll(pw, pw.cvrow - 1)
         elif arrow == WA_DNLINE:
             self.win_scroll(pw, pw.cvrow + 1)
+        elif arrow == WA_LFPAGE:
+            self.win_hscroll(pw, pw.cvcol - pw.pncol)
+        elif arrow == WA_RTPAGE:
+            self.win_hscroll(pw, pw.cvcol + pw.pncol)
+        elif arrow == WA_LFLINE:
+            self.win_hscroll(pw, pw.cvcol - 1)
+        elif arrow == WA_RTLINE:
+            self.win_hscroll(pw, pw.cvcol + 1)
 
     def win_slide(self, pw, permille):
         self.win_scroll(pw, mul_div(permille, pw.vnrow - pw.pnrow, 1000))
+
+    def win_hslide(self, pw, permille):
+        self.win_hscroll(pw, mul_div(permille, pw.vncol - pw.pncol, 1000))
 
     # -- selection -----------------------------------------------------------
     def act_chg(self, wh, root, obj, set_, dodraw):
@@ -1216,7 +1266,8 @@ class Desktop:
                  + hex2((INF_E1_VIEWTEXT if self.iview == V_TEXT else 0)
                         | ((0 if self.isort == S_NSRT else self.isort) << 5))
                  + hex2(0) + hex2(0) + hex2(0)
-                 + hex2(INF_E5_NOSORT if self.isort == S_NSRT else 0)
+                 + hex2((INF_E5_NOSORT if self.isort == S_NSRT else 0)
+                        | (0 if self.ifit else INF_E5_NOSIZE))
                  + "\r\n")
         for ws in self.wsave:
             text += ("#W" + hex2(ws.hsl) + hex2(ws.vsl)
@@ -1297,6 +1348,7 @@ class Desktop:
                 self.desk_view(V_TEXT if e1 & INF_E1_VIEWTEXT else V_ICON)
                 self.desk_sort(S_NSRT if e5 & INF_E5_NOSORT
                                else (e1 & INF_E1_SORTMASK) >> 5)
+                self.desk_fit(not (e5 & INF_E5_NOSIZE))
             elif text[i] == "W":
                 i += 1
                 if wincnt < NUM_WNODES:
@@ -1426,6 +1478,9 @@ class Desktop:
         elif kind == WM_VSLID:
             if pw:
                 self.win_slide(pw, msg[4])
+        elif kind == WM_HSLID:
+            if pw:
+                self.win_hslide(pw, msg[4])
         elif kind in (WM_SIZED, WM_MOVED):
             if not pw:
                 return
@@ -2087,6 +2142,11 @@ class Desktop:
             self.call(MENU_ICHECK, (NAMEITEM + sort, 1), tree=self.a_menu)
             self.isort = sort
 
+    def desk_fit(self, fit):
+        """Size to fit, or not (desktop.c desk_fit)."""
+        self.ifit = 1 if fit else 0
+        self.call(MENU_ICHECK, (FITITEM, self.ifit), tree=self.a_menu)
+
     def do_viewmenu(self, item):
         sorted_, viewed = False, False
         if item in (ICONITEM, TEXTITEM):
@@ -2097,6 +2157,9 @@ class Desktop:
             if item - NAMEITEM != self.isort:
                 self.desk_sort(item - NAMEITEM)
                 sorted_ = True
+        elif item == FITITEM:
+            self.desk_fit(not self.ifit)
+            viewed = True                       # the same rebuild
         if sorted_ or viewed:
             self.busy(True)
             if sorted_:
@@ -2295,9 +2358,9 @@ class Desktop:
             self.a_finfo, self.a_iblist, self.handle,
             self.wchar, self.hchar, self.wbox, self.hbox,
             d.x, d.y, d.w, d.h, self.wicon, self.hicon,
-            self.iview, self.isort, self.iwext, self.ihext,
+            self.iview, self.isort, self.ifit, self.iwext, self.ihext,
             self.iwint, self.ihint,
-            self.fline, self.fmark, self.icw, self.ich,
+            self.fline, self.fmark, self.icw, self.ich, self.icols,
             self.screenfree)) + b"".join(w(x) for x in self.rmsg)
         out += (w(self.wcnt) + dw(self.nfiles) + dw(self.ndirs)
                 + dw(self.opsize)

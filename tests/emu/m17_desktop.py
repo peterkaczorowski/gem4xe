@@ -52,9 +52,9 @@ from a8test.launcher import launch          # noqa: E402
 import aesref, vdiref, vbxeref, symfile, atr    # noqa: E402
 import deskref                              # noqa: E402
 from deskref import Desktop, DROOT, GLOBES_SIZE  # noqa: E402
-from aesref import (W_CLOSER, W_FULLER, W_DNARROW,  # noqa: E402
+from aesref import (W_CLOSER, W_FULLER, W_DNARROW, W_RTARROW,  # noqa: E402
                     FA_RDONLY, FA_HIDDEN, FA_SUBDIR, FA_ARCHIVE)
-from deskrsc import (DESKMENU, FILEMENU, VIEWMENU, ABOUITEM, CLOSITEM,  # noqa: E402
+from deskrsc import (DESKMENU, FILEMENU, VIEWMENU, ABOUITEM, CLOSITEM, FITITEM,  # noqa: E402
                      QUITITEM, ICONITEM, TEXTITEM, SIZEITEM, NAMEITEM, DEOK)
 from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE,  # noqa: E402
                      F, B, M, DCLICK, drive, compare, storm_check)
@@ -78,7 +78,8 @@ DRVBYT = 0x070A                             # DOS 2's drive map (gemdos.c)
 DATE0 = 0x0021                              # gemdos.c GD_DATE0
 # the stops, in the order the plans take them
 STOPS = ["desktop", "desk-menu", "about-item", "about", "window-a", "sub",
-         "closed-folder", "full", "text-view", "by-size", "unfull",
+         "closed-folder", "full", "text-view", "by-size", "with-fit",
+         "no-fit", "scrolled-right", "unfull",
          "scrolled", "closed", "file-menu", "quit-item"]
 
 
@@ -228,6 +229,33 @@ def inputs(memo):
     def sorted_back(d):
         return [F(3), B(0), F(2), *menu(d, VIEWMENU, ICONITEM, False)[1:]]
 
+    def with_fit(d):
+        # the icons back, and the window is NOT full -- which is the only
+        # state in which size to fit shows, because it is what makes the
+        # window narrower than the screen's own grid.  View -> Size to
+        # fit turns it OFF.
+        return [F(3), B(0), F(2), probe(d), SHOT,
+                *menu(d, VIEWMENU, FITITEM, False)[1:]]
+
+    def no_fit(d):
+        # the same listing laid out for the WIDEST window this screen
+        # could show (G.g_icols) instead of for this one, so it runs off
+        # the right-hand edge and the horizontal slider has somewhere to
+        # go for the first time.  The right arrow: WA_RTLINE.
+        # ...held, not clicked: an arrow gadget sends its WM_ARROWED at
+        # the PRESS once the double-click time has passed, so the wait
+        # ends with the button still down and the next step releases it
+        # (as unfull does below).
+        g = d.gadget(memo["wh"], W_RTARROW)
+        return [F(3), B(0), F(2), probe(d), SHOT, *path(d.pointer(), g), F(2),
+                B(1), F(14)]
+
+    def scrolled_right(d):
+        # a column further along, and then size to fit back on -- which
+        # puts the columns back under the window and w_cvcol back to 0
+        return [F(3), B(0), F(2), probe(d), SHOT,
+                *menu(d, VIEWMENU, FITITEM, False)[1:]]
+
     def unfull(d):
         # the down arrow: WM_ARROWED WA_DNLINE at the press (once the
         # double-click time has passed), the listing scrolls a row
@@ -251,6 +279,7 @@ def inputs(memo):
 
     return [icon_click, desk_about, about_ok, open_a, window_a, sub,
             closed_folder, full, as_text, text_view, by_size, sorted_back,
+            with_fit, no_fit, scrolled_right,
             unfull, scrolled, closed]
 
 

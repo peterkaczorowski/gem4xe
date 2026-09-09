@@ -228,6 +228,17 @@ void desk_sort(WORD sort)
     }
 }
 
+/* Size to fit, or not: the columns follow the window, or the screen.
+ * Like the view and the sort, the INF's environment line sets it too. */
+void desk_fit(WORD fit)
+{
+    G.g_ifit = fit ? TRUE : FALSE;
+    menu_icheck(G.a_menu, FITITEM, G.g_ifit);
+    /* ...and nothing else: g_icols follows the VIEW, which has not
+     * changed, so win_view has nothing to say here.  The donor's
+     * FITITEM does the same two things and no more. */
+}
+
 /* View: which of the two views the windows are in, and which order
  * their listings are in.  A change sorts every open window, then
  * builds every one of them, and only then draws any -- the donor's
@@ -253,6 +264,10 @@ static WORD do_viewmenu(WORD item)
             break;
         desk_sort((WORD)(item - NAMEITEM));
         sorted = TRUE;
+        break;
+    case FITITEM:
+        desk_fit(!G.g_ifit);
+        viewed = TRUE;              /* the same rebuild a view change wants */
         break;
     default:
         break;
@@ -498,6 +513,7 @@ int main(void)
 
     obj_init();
     desk_build();
+    G.g_ifit = TRUE;                            /* the donor's win_start */
     win_view();                                 /* V_ICON, until the INF */
     if (!win_start()) {
         desk_busy(FALSE);

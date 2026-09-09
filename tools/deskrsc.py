@@ -230,7 +230,7 @@ INDICES = [
 
 # The items the desktop does not do yet: disabled at start (menu_ienable),
 # not in the file, so the file stays RCS-shaped.
-NOT_YET = (FORMITEM, FITITEM, IICNITEM, IAPPITEM, PREFITEM)
+NOT_YET = (FORMITEM, IICNITEM, IAPPITEM, PREFITEM)
 
 # The menu, box by box: (title, box x, box width, items); an item is a
 # string, "-" for a separator, and (string, state) for a state.
@@ -242,7 +242,7 @@ MENU = [
     (" View ", 14, 17, [("  Show as icons", CHECKED), "  Show as text", "-",
                         ("  Sort by name", CHECKED), "  Sort by type",
                         "  Sort by size", "  Sort by date", "  No sort",
-                        "-", "  Size to fit"]),
+                        "-", ("  Size to fit", CHECKED)]),
     (" Options ", 20, 25, ["  Install icon...", "  Install application...",
                            "-", "  Set preferences...", "-",
                            "  Read .INF file...", "  Save desktop..."]),

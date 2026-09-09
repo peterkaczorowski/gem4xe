@@ -52,7 +52,8 @@
 #define INF_E1_VIEWTEXT 0x80            /* the INF's environment bytes, the */
 #define INF_E1_SORTMASK 0x60            /* donor's bits (deskapp.c): the    */
 #define INF_E5_NOSORT   0x80            /* fifth carries "no sort", which   */
-                                        /* will not fit in the first's two  */
+                                        /* will not fit in the first's two, */
+#define INF_E5_NOSIZE   0x10            /* and "do not size to fit"         */
 
 #define DESK_SPEC   0x00001143L         /* the desk: green, pattern 4 (the AES's own) */
 #define WINDOW_SPEC 0x00001100L         /* a window's box: white, no pattern */
@@ -120,9 +121,14 @@ typedef struct {
 typedef struct {
     WORD  w_id;                         /* the AES's handle; 0 = free */
     WORD  w_root;                       /* its box in g_screen */
-    WORD  w_cvrow;                      /* the first row of items shown */
+    WORD  w_cvrow, w_cvcol;             /* the first row and column shown */
     WORD  w_pncol, w_pnrow;             /* the grid the window shows */
-    WORD  w_vnrow;                      /* the rows the listing needs */
+    WORD  w_vnrow, w_vncol;             /* the grid the listing is laid on:
+                                         * with size to fit the columns are
+                                         * the window's, so w_vncol == w_pncol
+                                         * and w_cvcol is 0; without it they
+                                         * are g_icols and the window scrolls
+                                         * sideways over them */
     PNODE w_path;
     char  w_name[LEN_ZPATH + 2];        /* " A:\SUB\*.* " */
     char  w_info[LEN_ZINFO];
@@ -170,6 +176,8 @@ typedef struct {
     WORD     g_wicon, g_hicon;          /* an icon's cell: image plus label */
     WORD     g_iview;                   /* V_ICON or V_TEXT */
     WORD     g_isort;                   /* S_NAME .. S_NSRT */
+    WORD     g_ifit;                    /* size to fit: the columns follow
+                                         * the window rather than the screen */
     WORD     g_iwext, g_ihext;          /* what an item of that view fills, */
     WORD     g_iwint, g_ihint;          /* and the space in front of it */
     const char *g_fline;                /* the text view's template, and the */
@@ -178,6 +186,10 @@ typedef struct {
                                          * once: a fetch per item would be
                                          * sixteen AES calls a redraw */
     WORD     g_icw, g_ich;              /* the grid the cells snap to */
+    WORD     g_icols;                   /* the columns the WIDEST window this
+                                         * screen can show would hold, which
+                                         * is the grid a window that does not
+                                         * size to fit is laid out on */
     WORD     g_screenfree;              /* the free chain's head */
     WORD     g_rmsg[8];                 /* evnt_multi's message */
     WORD     g_wcnt;                    /* windows open */
@@ -218,6 +230,7 @@ void desk_busy(WORD on);
 /* deskwin.c: folder windows */
 void desk_view(WORD view);
 void desk_sort(WORD sort);
+void desk_fit(WORD fit);
 void win_view(void);
 void win_srtall(void);
 void win_bdall(void);

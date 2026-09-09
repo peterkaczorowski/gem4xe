@@ -194,10 +194,10 @@ static WNODE *win_alloc(void)
     G.g_wcnt++;
     pw = &G.g_wlist[wob - (DROOT + 1)];
     pw->w_root = wob;
-    pw->w_cvrow = 0;
+    pw->w_cvrow = pw->w_cvcol = 0;
     pw->w_pncol = (WORD)((r.g_w - G.g_wchar) / (G.g_wicon + MIN_WINT));
     pw->w_pnrow = (WORD)((r.g_h - G.g_hchar) / (G.g_hicon + MIN_HINT));
-    pw->w_vnrow = 0;
+    pw->w_vnrow = pw->w_vncol = 0;
     pw->w_id = wind_create(WINDOW_STYLE, G.g_desk.g_x, G.g_desk.g_y,
                            G.g_desk.g_w, G.g_desk.g_h);
     if (pw->w_id != -1)
@@ -434,6 +434,8 @@ static WORD win_which(const FNODE __far *pf)
  * margin is even. */
 void win_view(void)
 {
+    GRECT t;
+
     if (G.g_iview == V_TEXT) {
         G.g_iwext = (WORD)(LEN_FNODE * G.g_wchar);
         G.g_ihext = G.g_hchar;
@@ -445,6 +447,16 @@ void win_view(void)
         G.g_iwint = MIN_WINT;
         G.g_ihint = MIN_HINT;
     }
+    /* ...and the grid a window that does NOT size to fit is laid out on:
+     * the columns the widest window this screen can show would hold.  It
+     * belongs here because it is a property of the view and the screen
+     * and of nothing else, so it is settled once per view change rather
+     * than per window (the donor's win_view). */
+    wind_calc(WC_WORK, WINDOW_STYLE, G.g_desk.g_x, G.g_desk.g_y,
+              G.g_desk.g_w, G.g_desk.g_h, &t.g_x, &t.g_y, &t.g_w, &t.g_h);
+    G.g_icols = (WORD)(t.g_w / (G.g_iwext + G.g_iwint));
+    if (G.g_icols < 1)
+        G.g_icols = 1;
 }
 
 /* A number into n places, right-aligned, padded with `pad`; the places
@@ -559,22 +571,46 @@ static void win_bldview(WNODE *pw, const GRECT *r)
     pf = pw->w_path.p_flist;
     for (i = 0; i < pw->w_path.p_count; i++, pf++)
         pf->f_obid = 0;
-    pw->w_vnrow = (WORD)((pw->w_path.p_count + wfit - 1) / wfit);
+    /* THE GRID THE LISTING IS LAID ON.  With size to fit the columns are
+     * the window's own, so the items reflow as it is resized and nothing
+     * ever scrolls sideways; without it they are laid out for the widest
+     * window this screen can show (g_icols) and the window scrolls over
+     * that, which is what keeps an item under the same finger while the
+     * window is resized.  The donor's win_ocalc. */
+    if (G.g_ifit) {
+        pw->w_vncol = wfit;
+        pw->w_vnrow = (WORD)((pw->w_path.p_count + wfit - 1) / wfit);
+    } else {
+        WORD cols = G.g_icols;
+        pw->w_vncol = pw->w_path.p_count < cols ? pw->w_path.p_count : cols;
+        pw->w_vnrow = (WORD)((pw->w_path.p_count + cols - 1) / cols);
+    }
+    if (pw->w_vncol < 1)
+        pw->w_vncol = 1;
     if (pw->w_vnrow < 1)
         pw->w_vnrow = 1;
     pw->w_pncol = wfit;
     pw->w_pnrow = hfit < pw->w_vnrow ? hfit : pw->w_vnrow;
+    /* a window that grew shows earlier rows and columns rather than blank */
+    n = wfit < pw->w_vncol ? wfit : pw->w_vncol;
+    while (pw->w_vncol - pw->w_cvcol < n)
+        pw->w_cvcol--;
     while (pw->w_vnrow - pw->w_cvrow < pw->w_pnrow)
         pw->w_cvrow--;
 
-    i = (WORD)(pw->w_cvrow * pw->w_pncol);
-    n = (WORD)(pw->w_path.p_count - i);
-    pf = pw->w_path.p_flist + i;
     hfit = (WORD)(pw->w_vnrow - pw->w_cvrow);
     if (hfit > pw->w_pnrow + 1)
         hfit = (WORD)(pw->w_pnrow + 1);         /* a row may show in part */
-    for (row = 0, i = 0; row < hfit && i < n; row++) {
-        for (col = 0; col < pw->w_pncol && i < n; col++, i++, pf++) {
+    for (row = 0; row < hfit; row++) {
+        for (col = 0; col < pw->w_pncol; col++) {
+            WORD vcol = (WORD)(pw->w_cvcol + col);
+
+            if (vcol >= pw->w_vncol)
+                break;                          /* past the last column */
+            i = (WORD)((pw->w_cvrow + row) * pw->w_vncol + vcol);
+            if (i >= pw->w_path.p_count)
+                break;                          /* past the last entry */
+            pf = pw->w_path.p_flist + i;
             if (G.g_iview == V_TEXT) {
                 obid = obj_text(pw->w_root, (WORD)(col * iwspc + G.g_iwint),
                                 (WORD)(row * ihspc + G.g_ihint),
@@ -598,7 +634,13 @@ static void win_bldview(WNODE *pw, const GRECT *r)
         }
     }
 
-    wind_set(pw->w_id, WF_HSLSIZ, 1000, 0, 0, 0);
+    wind_set(pw->w_id, WF_HSLSIZ,
+             pw->w_vncol > pw->w_pncol
+                 ? mul_div(pw->w_pncol, 1000, pw->w_vncol) : 1000, 0, 0, 0);
+    wind_set(pw->w_id, WF_HSLIDE,
+             pw->w_vncol > pw->w_pncol
+                 ? mul_div(pw->w_cvcol, 1000, (WORD)(pw->w_vncol - pw->w_pncol))
+                 : 0, 0, 0, 0);
     wind_set(pw->w_id, WF_VSLSIZ, mul_div(pw->w_pnrow, 1000, pw->w_vnrow), 0, 0, 0);
     wind_set(pw->w_id, WF_VSLIDE,
              pw->w_vnrow > pw->w_pnrow
@@ -658,6 +700,24 @@ static void win_scroll(WNODE *pw, WORD newcv)
     do_wredraw(pw->w_id, &t);
 }
 
+/* Sideways, the same way: only a window that is not sizing to fit has
+ * anywhere to go, because with size to fit w_vncol IS w_pncol. */
+static void win_hscroll(WNODE *pw, WORD newcv)
+{
+    GRECT t;
+
+    if (newcv > pw->w_vncol - pw->w_pncol)
+        newcv = (WORD)(pw->w_vncol - pw->w_pncol);
+    if (newcv < 0)
+        newcv = 0;
+    if (newcv == pw->w_cvcol)
+        return;
+    pw->w_cvcol = newcv;
+    wind_get_grect(pw->w_id, WF_WORKXYWH, &t);
+    win_bldview(pw, &t);
+    do_wredraw(pw->w_id, &t);
+}
+
 static void win_arrow(WNODE *pw, WORD arrow)
 {
     switch (arrow) {
@@ -673,7 +733,19 @@ static void win_arrow(WNODE *pw, WORD arrow)
     case WA_DNLINE:
         win_scroll(pw, (WORD)(pw->w_cvrow + 1));
         break;
-    default:                                    /* nothing scrolls sideways */
+    case WA_LFPAGE:
+        win_hscroll(pw, (WORD)(pw->w_cvcol - pw->w_pncol));
+        break;
+    case WA_RTPAGE:
+        win_hscroll(pw, (WORD)(pw->w_cvcol + pw->w_pncol));
+        break;
+    case WA_LFLINE:
+        win_hscroll(pw, (WORD)(pw->w_cvcol - 1));
+        break;
+    case WA_RTLINE:
+        win_hscroll(pw, (WORD)(pw->w_cvcol + 1));
+        break;
+    default:
         break;
     }
 }
@@ -681,6 +753,11 @@ static void win_arrow(WNODE *pw, WORD arrow)
 static void win_slide(WNODE *pw, WORD permille)
 {
     win_scroll(pw, mul_div(permille, (WORD)(pw->w_vnrow - pw->w_pnrow), 1000));
+}
+
+static void win_hslide(WNODE *pw, WORD permille)
+{
+    win_hscroll(pw, mul_div(permille, (WORD)(pw->w_vncol - pw->w_pncol), 1000));
 }
 
 /* -- selection --------------------------------------------------------- */
@@ -1167,7 +1244,8 @@ static WORD inf_write(void)
     p = put_hex2(p, 0);
     p = put_hex2(p, 0);
     p = put_hex2(p, 0);
-    p = put_hex2(p, (WORD)(G.g_isort == S_NSRT ? INF_E5_NOSORT : 0));
+    p = put_hex2(p, (WORD)((G.g_isort == S_NSRT ? INF_E5_NOSORT : 0)
+                           | (G.g_ifit ? 0 : INF_E5_NOSIZE)));
     p = put_far(p, "\r\n");
     for (i = 0; i < NUM_WNODES; i++, pws++) {
         p = put_far(p, "#W");
@@ -1275,6 +1353,7 @@ static void inf_parse(const char __far *pcurr)
             desk_view((WORD)((e1 & INF_E1_VIEWTEXT) ? V_TEXT : V_ICON));
             desk_sort((WORD)((e5 & INF_E5_NOSORT) ? S_NSRT
                              : (e1 & INF_E1_SORTMASK) >> 5));
+            desk_fit(!(e5 & INF_E5_NOSIZE));
             break;
         }
         case 'W':
@@ -1461,6 +1540,10 @@ void hndl_wmsg(const WORD *msg)
     case WM_VSLID:
         if (pw)
             win_slide(pw, msg[4]);
+        break;
+    case WM_HSLID:
+        if (pw)
+            win_hslide(pw, msg[4]);
         break;
     case WM_SIZED:
     case WM_MOVED:
