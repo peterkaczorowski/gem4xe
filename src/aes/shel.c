@@ -32,6 +32,7 @@
 #include "sys/app.h"
 #include "sys/cio.h"
 #include "sys/dos.h"
+#include "sys/gemdos.h"
 #include "sys/farmem.h"
 #include "lang_rsc.h"
 
@@ -154,7 +155,13 @@ void sh_envrn(const char **ppath, const char *psrch)
  * `cio` holds CIO_NAME_MAX + 1. */
 void sh_cioname(const char *gem, char *cio)
 {
-    dos_cioname(gem, cio);
+    /* Through GEMDOS, not straight to the DOS: a resource named without
+     * a path belongs to the directory Dsetpath last named, which is the
+     * application's own -- the desktop changes into it before it runs
+     * one (src/desk/deskwin.c do_aopen).  Before this, an application in
+     * a folder could not find its own resource: it opened in whatever
+     * directory the boot batch had left the DOS in. */
+    gd_cioname(gem, cio);
 }
 
 /* Does the file exist where the name says, or on the default drive (the
@@ -253,6 +260,17 @@ WORD sh_main(void)
         wm_init();
         mn_init();
         ratinit();                          /* the pointer on, as the donor */
+        /* ...and the ARROW, which the donor does not do here because it
+         * does not have to: a form belongs to a PROCESS there, and
+         * set_mown gives the mouse's new owner its own form back
+         * (geminput.c).  gem4xe runs one process, so the form is one
+         * global and the shell is the only thing between two programs
+         * that can put it right.  Without this the desktop's hourglass
+         * -- desk_busy(TRUE), set just before shel_write and deliberately
+         * never cleared, because the donor's desktop is about to stop
+         * owning the mouse -- stays over the program it started, for as
+         * long as that program runs. */
+        gr_mouse(ARROW, 0);
         gsx_sclip(&gl_rscreen);
         ob_draw(gl_wtree, ROOT, 0);         /* the desk, edge to edge */
         if (rc)

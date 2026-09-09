@@ -51,7 +51,7 @@ from deskrsc import (FILEMENU, OPTNMENU, SHOWITEM, NFOLITEM,  # noqa: E402
                      DELTITEM, QUITITEM, SAVEITEM, READITEM,
                      MKOK, CDOK, FIOK, FICNCL)
 from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE,  # noqa: E402
-                     F, B, K, M, RETURN, BACKSPACE, DCLICK, drive, compare)
+                     F, B, K, M, RETURN, BACKSPACE, DCLICK, drive, compare, storm_check)
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
 from m12_file import Runner                 # noqa: E402
 from m13_alert import ALLOC                 # noqa: E402
@@ -305,6 +305,7 @@ def model(mark, brk, pointer, drvmap):
     a.wm_init()
     a.mn_init()
     a.ratinit()
+    a.gr_mouse(aesref.ARROW)   # the form is one global here (shel.c)
     a.tree = a.W_TREE
     a.draw(0, 0, (0, 0, a.gl_width, a.gl_height))
     link_near, near_size, far_banks = header(DESKTOP)
@@ -536,6 +537,9 @@ def main(argv):
         err = drive(b, None, ptr, plan, read=read)
         check(not err, f"driving the desktop: {err}")
         if err:
+            storm = storm_check(b)
+            if storm:
+                print(f"  {storm}")
             # where it stuck: the screen, what the delete had counted,
             # which call the target is inside, the path the operation
             # was working on, and the last few frames of history (the
@@ -584,6 +588,9 @@ def main(argv):
                 continue
             bad, shown = vbxeref.compare_to_shot(rgb, p)
             check(not bad, f"{name}: {bad} px differ from the model; first {shown[:3]}")
+            if bad:                         # the model's own, to look at beside it
+                print("    model: " + vbxeref.save_rgb(
+                    rgb, os.path.join(SHOTDIR, f"m19-{name}-model.png")))
             print(f"  {name:<58s} {'ok' if not bad else 'FAIL'}")
 
         for _ in range(300):

@@ -126,6 +126,9 @@ void gemdos_call(uint32_t pb);
 /* The application has exited: its handles closed, its searches freed,
  * the DTA back to the default. */
 void gemdos_release(void);
+/* A name the AES opens, resolved through GEMDOS's current
+ * directory when there is one (src/sys/gemdos.c). */
+void gd_cioname(const char *name, char *cio);
 
 extern uint16_t gemdos_calls;   /* calls made */
 extern uint16_t gemdos_bad;     /* of which EINVFN */

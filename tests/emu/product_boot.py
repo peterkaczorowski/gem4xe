@@ -75,7 +75,8 @@ BUILD = os.path.join(ROOT, "build")
 SYMS = os.path.join(BUILD, "gem.sym")
 ELF = os.path.join(BUILD, "gem.elf")
 BOOT_FILES = ("STARTUP.BAT", "AUTOEXEC.BAT")
-BOOT_LINE = b"GEM\x9b"
+# two lines now: the system lives in \GEM\ on the install disk
+BOOT_LINE = b"CD >GEM\x9bGEM\x9b"
 COLDST = 0x0244                 # the OS: non-zero at RESET means come up cold
 DRVBYT = 0x070A                 # DOS 2's drive map (src/sys/gemdos.c)
 DOS_2 = 0                       # src/sys/dos.h
@@ -104,6 +105,7 @@ def desk_model(mark, brk, pointer, drvmap, dirs):
     a.wm_init()
     a.mn_init()
     a.ratinit()
+    a.gr_mouse(aesref.ARROW)   # the form is one global here (shel.c)
     a.tree = a.W_TREE
     a.draw(0, 0, (0, 0, a.gl_width, a.gl_height))
     link_near, near_size, far_banks = header(DESKTOP)
@@ -163,12 +165,29 @@ def one(name, progname, how, keep, check):
     img = atr.ATRImage.load(disk)
     fs = atr.open_fs(img)
     sdfs = isinstance(fs, atr.Sdfs)
-    listed = ({e.filename.upper(): e.size for e in fs.entries("")} if sdfs else
+    # The SpartaDOS product is an INSTALL disk: \GEM\ and \APPS\, the
+    # same layout as the card, so that copying it onto an APT hard drive
+    # is a directory copy.  What is listed here is therefore every file
+    # in every directory, by the name it would be copied under.
+    def walk(path=""):
+        out = {}
+        for e in fs.entries(path):
+            here = (path + ">" if path else "") + e.filename.upper()
+            if e.is_dir:
+                out.update(walk(here))
+            else:
+                out[here] = e.size
+        return out
+
+    listed = (walk() if sdfs else
               {e.filename.upper(): None for e in fs.entries() if e.in_use})
     print(f"{name}: {img!r}, {how}")
     print(f"  {', '.join(sorted(listed))}")
-    want = {progname: "gem.xex", "DESKTOP.G4A": "desktop.g4a",
-            "DESKTOP.RSC": "desktop.rsc"}
+    want = ({"GEM>GEM.COM": "gem.xex", "GEM>DESKTOP.G4A": "desktop.g4a",
+             "GEM>DESKTOP.RSC": "desktop.rsc", "APPS>CALC.G4A": "calc.g4a",
+             "APPS>CLOCK.G4A": "clock.g4a"} if sdfs else
+            {progname: "gem.xex", "DESKTOP.G4A": "desktop.g4a",
+             "DESKTOP.RSC": "desktop.rsc"})
     for fname, built in want.items():
         check(fname in listed, f"{name}: {fname} is not on the disk")
         if sdfs and fname in listed:

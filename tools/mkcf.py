@@ -37,7 +37,11 @@ SYSTEM = [("build/gem.xex", "GEM>GEM.COM"),
           ("build/desktop.g4a", "GEM>DESKTOP.G4A"),
           ("build/desktop.rsc", "GEM>DESKTOP.RSC"),
           ("build/lang.rsc", "GEM>LANG.RSC"),
-          ("build/m11_app.g4a", "APPS>M11.G4A")]
+          ("build/m11_app.g4a", "APPS>M11.G4A"),
+          ("build/calc.g4a", "APPS>CALC.G4A"),
+          ("build/calc.rsc", "APPS>CALC.RSC"),
+          ("build/clock.g4a", "APPS>CLOCK.G4A"),
+          ("build/clock.rsc", "APPS>CLOCK.RSC")]
 DIRS = ["GEM", "APPS"]
 BOOT = ["CD >GEM", "GEM"]
 

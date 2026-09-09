@@ -74,6 +74,37 @@ DOS 2 disk's binary-load option.  It makes the same three writes by
 hand.  **If you have to do that, it is worth reporting**, because the
 loader should have.
 
+## On real storage
+
+The card image is for an **APT** interface -- Ultimate 1MB or Incognito,
+SIDE/SIDE2/SIDE3, IDE Plus 2.0, MyIDE-II.  They all read the same table,
+because the driver that reads it lives in your machine's flash or
+cartridge rather than on the card, so there is no per-interface build
+and no driver file to copy.
+
+`gem-cf.img` is a whole-card image: writing it **replaces everything on
+the card**, and only its first 16 MB are in the partition table.  Give
+it a card of its own.
+
+    dd if=disks/gem-cf.img of=/dev/sdX bs=1M conv=fsync    # sdX, not sdX1
+
+**If you already have an APT drive**, do not write the card image over
+it.  `gem-sp.atr` is an install disk: it holds the same `\GEM\` and
+`\APPS\` the card does, so putting gem4xe on your own drive is a
+directory copy --
+
+    COPY D1:>GEM>*.* D2:>GEM>*.*
+    COPY D1:>APPS>*.* D2:>APPS>*.*
+
+-- plus an `AUTOEXEC.BAT` holding the two lines the floppy's holds,
+`CD >GEM` and `GEM`.
+
+If what you have is a **loader that reads FAT** -- a SIDE3, an AVGCART
+-- or an SDrive-MAX, a FujiNet or a real drive, then the floppies are
+what you want: copy `gem-sp.atr` onto the card you already have and
+load it like anything else.  `docs/media.md` in the source tree has the
+whole matrix and the reasoning.
+
 ## What is on the disks
 
 {disks}

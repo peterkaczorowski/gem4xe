@@ -47,7 +47,9 @@ DISKS = [
     ("gem-boot.atr", "disks/gem-boot.atr", "dos2",
      "A double-density DOS 2 floppy, 180 KB.  GEM is AUTORUN.SYS, which "
      "this DOS runs at boot; DUP.SYS is still on it, so there is a DOS to "
-     "come back to."),
+     "come back to.  The system and nothing else: the calculator and the "
+     "clock are on the other two, because 21 KB is what this disk has "
+     "left and it is better spent on a program of yours."),
     ("gem-cf.img", "disks/gem-cf.img", None,
      "A 16 MB CF card: an APT partition table and two SDFS partitions, "
      "with the system in `\\GEM\\` and an application in `\\APPS\\`. "
@@ -64,6 +66,10 @@ SYSTEM = [
     ("lang.rsc", "LANG.RSC"),
     ("816.com", "816.COM"),
     ("m11_app.g4a", "M11.G4A"),
+    ("calc.g4a", "CALC.G4A"),
+    ("calc.rsc", "CALC.RSC"),
+    ("clock.g4a", "CLOCK.G4A"),
+    ("clock.rsc", "CLOCK.RSC"),
 ]
 
 WHAT_IT_IS = {
@@ -74,6 +80,14 @@ WHAT_IT_IS = {
     "816.COM": "puts a Rapidus into 65C816 mode by hand, if the loader "
                "somehow does not",
     "M11.G4A": "a small program, to have something to double-click",
+    "CALC.G4A": "a calculator: whole numbers, and a division that "
+                "truncates rather than pretending otherwise",
+    "CALC.RSC": "its panel -- every key of it, and every word",
+    "CLOCK.G4A": "a clock.  With an Ultimate 1MB it shows the time; "
+                 "without one it counts up from midnight, which is what "
+                 "the machine knows",
+    "CLOCK.RSC": "its panel, and the templates that decide how a time "
+                 "and a date are written",
 }
 
 

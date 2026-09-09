@@ -54,9 +54,10 @@ import deskref                              # noqa: E402
 from deskref import Desktop, DROOT, GLOBES_SIZE  # noqa: E402
 from aesref import (W_CLOSER, W_FULLER, W_DNARROW,  # noqa: E402
                     FA_RDONLY, FA_HIDDEN, FA_SUBDIR, FA_ARCHIVE)
-from deskrsc import (DESKMENU, FILEMENU, ABOUITEM, CLOSITEM, QUITITEM, DEOK)  # noqa: E402
+from deskrsc import (DESKMENU, FILEMENU, VIEWMENU, ABOUITEM, CLOSITEM,  # noqa: E402
+                     QUITITEM, ICONITEM, TEXTITEM, SIZEITEM, NAMEITEM, DEOK)
 from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE,  # noqa: E402
-                     F, B, M, DCLICK, drive, compare)
+                     F, B, M, DCLICK, drive, compare, storm_check)
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
 from m12_file import Runner                 # noqa: E402
 from m13_alert import ALLOC                 # noqa: E402
@@ -77,8 +78,8 @@ DRVBYT = 0x070A                             # DOS 2's drive map (gemdos.c)
 DATE0 = 0x0021                              # gemdos.c GD_DATE0
 # the stops, in the order the plans take them
 STOPS = ["desktop", "desk-menu", "about-item", "about", "window-a", "sub",
-         "closed-folder", "full", "unfull", "scrolled", "closed",
-         "file-menu", "quit-item"]
+         "closed-folder", "full", "text-view", "by-size", "unfull",
+         "scrolled", "closed", "file-menu", "quit-item"]
 
 
 def GCLICK(xy):
@@ -202,12 +203,38 @@ def inputs(memo):
         g = d.gadget(memo["wh"], W_FULLER)
         return [F(3), probe(d), SHOT, *path(d.pointer(), g), F(2), *GCLICK(g)]
 
+    def as_text(d):
+        # View -> Show as text.  The item is checked, every open window
+        # is built again and then drawn, and the listing that was a grid
+        # of icons is a column of lines.
+        return [F(3), *menu(d, VIEWMENU, TEXTITEM, False)[1:]]
+
+    def text_view(d):
+        # what the lines say: the mark, the name and extension in their
+        # columns, the size right-aligned, the stamp -- all of it placed
+        # by the resource's template (tools/deskrsc.py STFLINE).  Then
+        # View -> Sort by size, which is the order that shows in a text
+        # view whether it worked.
+        return [F(3), B(0), F(2), probe(d), SHOT,
+                *menu(d, VIEWMENU, SIZEITEM, False)[1:]]
+
+    def by_size(d):
+        # biggest first -- and the folder still at the top, because
+        # folders come first in every order but No sort (deskwin.c
+        # pn_comp).  Then back to by name, and to icons.
+        return [F(3), B(0), F(2), probe(d), SHOT,
+                *menu(d, VIEWMENU, NAMEITEM, False)[1:]]
+
+    def sorted_back(d):
+        return [F(3), B(0), F(2), *menu(d, VIEWMENU, ICONITEM, False)[1:]]
+
     def unfull(d):
         # the down arrow: WM_ARROWED WA_DNLINE at the press (once the
         # double-click time has passed), the listing scrolls a row
+        # the button is still down from the Show as icons item
         g = d.gadget(memo["wh"], W_DNARROW)
-        return [F(3), probe(d), SHOT, *path(d.pointer(), g), F(2), B(1),
-                F(14)]
+        return [F(3), B(0), F(2), probe(d), SHOT, *path(d.pointer(), g), F(2),
+                B(1), F(14)]
 
     def scrolled(d):
         # The arrow is released first thing: the control manager sends
@@ -223,7 +250,8 @@ def inputs(memo):
         return [F(3), probe(d), SHOT, *menu(d, FILEMENU, QUITITEM, True)[1:]]
 
     return [icon_click, desk_about, about_ok, open_a, window_a, sub,
-            closed_folder, full, unfull, scrolled, closed]
+            closed_folder, full, as_text, text_view, by_size, sorted_back,
+            unfull, scrolled, closed]
 
 
 def model(mark, brk, pointer, drvmap):
@@ -238,6 +266,7 @@ def model(mark, brk, pointer, drvmap):
     a.wm_init()
     a.mn_init()
     a.ratinit()
+    a.gr_mouse(aesref.ARROW)   # the form is one global here (shel.c)
     a.tree = a.W_TREE
     a.draw(0, 0, (0, 0, a.gl_width, a.gl_height))
     link_near, near_size, far_banks = header(DESKTOP)
@@ -408,6 +437,9 @@ def main(argv):
         err = drive(b, None, ptr, plan, read=read)
         check(not err, f"driving the desktop: {err}")
         if err:
+            storm = storm_check(b)
+            if storm:
+                print(f"  {storm}")
             # where it stuck: the screen, the CPU, and the last few frames
             # of history (the patched bridge; --shot keeps the picture)
             print(f"  screen at the stall: {shot(b, 'stall')}")

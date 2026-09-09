@@ -46,7 +46,7 @@ APP_E_FILE = -6                             # src/sys/app.h
 DESKTOP = os.path.join(ROOT, "build", "m16_desk.g4a")
 # what the desktop draws (src/m16_desk.c), and what the shell says
 # when a program cannot be found (src/aes/shel.c)
-HELP = "gem4xe desktop  --  R runs M11.G4A, X a missing one, Q quits"
+HELP = "gem4xe desktop -- R M11.G4A, C CALC, K CLOCK, X a missing one, Q quits"
 NOT_FOUND = "[1][This application|cannot be found.][ OK ]"
 STR_OFF = 0                                 # the model's copy of it, in scratch
 
@@ -151,6 +151,7 @@ def main(argv):
             ref_a.wm_init()
             ref_a.mn_init()
             ref_a.ratinit()
+            ref_a.gr_mouse(aesref.ARROW)   # the form is one global here (shel.c)
             ref_a.tree = ref_a.W_TREE
             ref_a.draw(0, 0, (0, 0, ref_a.gl_width, ref_a.gl_height))
 

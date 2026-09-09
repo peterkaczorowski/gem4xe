@@ -42,7 +42,7 @@ import aesref                               # noqa: E402
 import vdiref                               # noqa: E402
 import deskrsc                              # noqa: E402
 from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
-                    G_BOX, G_IBOX, G_ICON, NONE, NORMAL, SELECTED, WHITEBAK,
+                    G_BOX, G_IBOX, G_ICON, G_STRING, NONE, NORMAL, SELECTED, WHITEBAK,
                     NIL, ROOT, MAX_DEPTH, ARROW, HOURGLASS, M_OFF, M_ON,
                     DISABLED, EDITABLE, FA_RDONLY, FRENAME, FATTRIB,
                     BEG_UPDATE, END_UPDATE, MU_KEYBD, MU_BUTTON, MU_MESAG,
@@ -56,7 +56,8 @@ from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
                     WM_VSLID, WM_SIZED, WM_MOVED, WM_NEWTOP,
                     WA_UPPAGE, WA_DNPAGE, WA_UPLINE, WA_DNLINE, MN_SELECTED,
                     APPL_INIT, APPL_EXIT, EVNT_MULTI, MENU_BAR,
-                    MENU_IENABLE, MENU_TNORMAL, OBJC_DRAW, OBJC_FIND,
+                    MENU_ICHECK, MENU_IENABLE, MENU_TNORMAL,
+                    OBJC_DRAW, OBJC_FIND,
                     OBJC_OFFSET, FORM_DO, FORM_DIAL, FORM_CENTER, FORM_ALERT,
                     GRAF_HANDLE, GRAF_GROWBOX, GRAF_SHRINKBOX,
                     WIND_CREATE, WIND_OPEN, WIND_CLOSE, WIND_DELETE,
@@ -81,6 +82,8 @@ from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA, ADFINFO,  # noqa: E402
                      STCPYFIL, STDISKFU, STNOTHIN, STSAMEPL,
                      STDELTTL, STCPYTTL, STMOVTTL,
                      STFIINFO, STFOINFO, STRENAME, STSVINF, STRDINF,
+                     STFLINE, STFMARK, VIEWMENU, ICONITEM, TEXTITEM,
+                     NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM, NSRTITEM,
                      IB_HARD, IB_FLOPPY, IB_TRASH,
                      IB_FOLDER, IB_APPL, IB_DOCU, NOT_YET)
 
@@ -112,11 +115,17 @@ SHW_EXEC, SHW_SHUTDOWN = 1, 4               # gem.h
 CPDATA_LEN, INF_REV_LEVEL, SH_TAILLEN = 128, 2, 128
 INF_NAME = "DESKTOP.INF"                    # desk.h
 AES_VERSION = 0x0140                        # abi.c: global[0]
-SCREENINFO_SIZE = ICONBLK_SIZE + LABEL_LEN
+LEN_FNODE = 48                          # a text line's places, and the
+V_ICON, V_TEXT = 0, 1                   # width its highlight covers
+S_NAME, S_TYPE, S_SIZE, S_DATE, S_NSRT = 0, 1, 2, 3, 4
+INF_E1_VIEWTEXT = 0x80
+INF_E1_SORTMASK = 0x60
+INF_E5_NOSORT = 0x80
+SCREENINFO_SIZE = LEN_FNODE             # the union: ICONBLK + label is 47
 OBJ_SIZE = aesref.OBJ_SIZE
 RESULT_INTOUT = vdiref.RESULT_INTOUT
 # the structs deskwin.c keeps, sized as cc65816 lays them out (no padding)
-DTA_SIZE, FNODE_SIZE = 44, 28
+DTA_SIZE, FNODE_SIZE = 44, 30
 PNODE_SIZE = 2 + 4 + LEN_ZPATH + 4
 WNODE_SIZE = 12 + PNODE_SIZE + LEN_WNAME + LEN_ZINFO
 # where a WNODE's in-place strings are
@@ -147,7 +156,10 @@ WIN_YCELL = (6, 8, 10, 13)
 GLOBES = [("a_menu", 2), ("a_info", 2), ("a_mkdir", 2), ("a_delete", 2),
           ("a_finfo", 2), ("a_iblist", 2), ("g_handle", 2),
           ("g_wchar", 2), ("g_hchar", 2), ("g_wbox", 2), ("g_hbox", 2),
-          ("g_desk", 8), ("g_wicon", 2), ("g_hicon", 2), ("g_icw", 2),
+          ("g_desk", 8), ("g_wicon", 2), ("g_hicon", 2),
+          ("g_iview", 2), ("g_isort", 2), ("g_iwext", 2), ("g_ihext", 2), ("g_iwint", 2),
+          ("g_ihint", 2), ("g_fline", 2), ("g_fmark", 2),
+          ("g_icw", 2),
           ("g_ich", 2), ("g_screenfree", 2), ("g_rmsg", 16),
           ("g_wcnt", 2), ("g_nfiles", 4), ("g_ndirs", 4), ("g_opsize", 4),
           ("g_dta", 4), ("g_opdta", 4), ("g_cnxsave", 4), ("g_shelbuf", 4),
@@ -235,10 +247,11 @@ class CharArray:
 
 class Fnode:
     """A directory entry in a window's listing (far memory: not in G)."""
-    __slots__ = ("obid", "flags", "attr", "time", "date", "size", "name")
+    __slots__ = ("obid", "flags", "seq", "attr", "time", "date", "size",
+                 "name")
 
     def __init__(self, attr, time, date, size, name):
-        self.obid = self.flags = 0
+        self.obid = self.flags = self.seq = 0
         self.attr, self.time, self.date, self.size, self.name = (
             attr, time, date, size, name)
 
@@ -310,6 +323,10 @@ class Desktop:
         self.handle = self.wchar = self.hchar = self.wbox = self.hbox = 0
         self.desk = Rect()
         self.wicon = self.hicon = self.icw = self.ich = 0
+        self.iview = V_ICON
+        self.isort = S_NAME
+        self.iwext = self.ihext = self.iwint = self.ihint = 0
+        self.fline = self.fmark = 0
         self.screenfree = 0
         self.rmsg = [0] * 8
         self.wcnt, self.dta, self.opdta = 0, 0, 0
@@ -331,6 +348,8 @@ class Desktop:
         # used; it keeps its last one after) and the label, in place
         self.info = [None] * NUM_ITEMS
         self.labels = [CharArray(LABEL_LEN) for _ in range(NUM_ITEMS)]
+        self.lines = [CharArray(LEN_FNODE) for _ in range(NUM_ITEMS)]
+        self.istext = [False] * NUM_ITEMS       # which half of the union
         for i, label in enumerate(self.labels):
             a.mem[self.info_addr(WOBS_START + i) + ICONBLK_SIZE] = label
         self.rsc = None
@@ -524,10 +543,21 @@ class Desktop:
     def obj_info(self, obj):
         return self.info[obj - WOBS_START]
 
+    def obj_clear(self, obid):
+        """The item's store emptied before it is written (deskobj.c
+        obj_clear): the union's two halves are different lengths and a
+        slot is reused in both views, so what is past the text has to be
+        nothing rather than what the last item left."""
+        k = obid - WOBS_START
+        self.labels[k].raw[:] = bytes(LABEL_LEN)
+        self.lines[k].raw[:] = bytes(LEN_FNODE)
+
     def obj_icon(self, wparent, x, y, which, label, letter):
         obid = self.obj_ialloc(wparent, x, y, self.wicon, self.hicon)
         if not obid:
             return 0
+        self.obj_clear(obid)
+        self.istext[obid - WOBS_START] = False
         o = self.screen[obid]
         o.ob_state, o.ob_flags, o.ob_type = NORMAL, NONE, G_ICON
         src = self.a.mem[self.a_iblist + which * ICONBLK_SIZE]
@@ -545,6 +575,21 @@ class Desktop:
         ib.ptext = addr + ICONBLK_SIZE
         self.info[obid - WOBS_START] = ib
         self.a.mem[addr] = ib
+        return obid
+
+    def obj_text(self, wparent, x, y, w_, h):
+        """An item object for the text view: a G_STRING over the line,
+        which the caller fills in place (deskobj.c obj_text)."""
+        obid = self.obj_ialloc(wparent, x, y, w_, h)
+        if not obid:
+            return 0
+        self.obj_clear(obid)
+        self.istext[obid - WOBS_START] = True
+        o = self.screen[obid]
+        o.ob_state, o.ob_flags, o.ob_type = NORMAL, NONE, G_STRING
+        o.ob_spec = self.info_addr(obid)
+        self.info[obid - WOBS_START] = None
+        self.a.mem[o.ob_spec] = self.lines[obid - WOBS_START]
         return obid
 
     # -- the desk (desktop.c) ------------------------------------------------
@@ -679,11 +724,30 @@ class Desktop:
                 return pf
         return None
 
-    @staticmethod
-    def pn_comp(a, b):
-        if (a.attr ^ b.attr) & FA_SUBDIR:
-            return -1 if a.attr & FA_SUBDIR else 1
+    def pn_fcomp(self, a, b):
+        """The field the current order compares (deskwin.c pn_fcomp):
+        date and size run the other way round, and every order falls
+        back to the name."""
+        chk = 0
+        if self.isort == S_DATE:
+            chk = b.date - a.date or b.time - a.time
+        elif self.isort == S_SIZE:
+            chk = b.size - a.size
+        elif self.isort == S_TYPE:
+            def ext(n):
+                k = n.find(".")
+                return n[k:] if k >= 0 else ""
+            chk = far_strcmp(ext(a.name), ext(b.name))
+        elif self.isort == S_NSRT:
+            chk = a.seq - b.seq
+        if chk:
+            return -1 if chk < 0 else 1
         return far_strcmp(a.name, b.name)
+
+    def pn_comp(self, a, b):
+        if self.isort != S_NSRT and (a.attr ^ b.attr) & FA_SUBDIR:
+            return -1 if a.attr & FA_SUBDIR else 1
+        return self.pn_fcomp(a, b)
 
     @staticmethod
     def pn_open(pn, spec):
@@ -704,6 +768,7 @@ class Desktop:
             name, attr, time, date, size = self.a.dos_dta_data
             if name[:1] != ".":
                 fn = Fnode(attr & 0xFF, time, date, size, name[:LEN_ZFNAME - 1])
+                fn.seq = count              # where the directory had it
                 i = count                   # insertion: slide the ones after it up
                 while i > 0 and self.pn_comp(fn, pn.fnodes[i - 1]) < 0:
                     i -= 1
@@ -732,8 +797,64 @@ class Desktop:
             return IB_APPL
         return IB_DOCU
 
+    def win_view(self):
+        """What an item of the current view fills, and the space in front
+        of it (deskwin.c win_view).  The text line's left margin is EVEN
+        here, where the donor makes it odd for the ST's fast text: at
+        4bpp an odd x is the slow path, not the fast one."""
+        if self.iview == V_TEXT:
+            self.iwext, self.ihext = LEN_FNODE * self.wchar, self.hchar
+            self.iwint, self.ihint = 2 * self.wchar, 2
+        else:
+            self.iwext, self.ihext = self.wicon, self.hicon
+            self.iwint, self.ihint = MIN_WINT, MIN_HINT
+
+    def win_line(self, k, pf):
+        """One line of the text view into item slot k, from the template
+        the resource carries (deskwin.c win_line): each run of a
+        placeholder letter takes one field, in the template's order and
+        width."""
+        def num(n, value, pad):
+            d = str(value)[-n:] if value else "0"
+            return d.rjust(n, pad)[-n:]
+
+        t = self.a.mem[self.fline].s
+        mark = self.a.mem[self.fmark].s
+        out, i = "", 0
+        while i < len(t) and len(out) < LEN_FNODE - 1:
+            c = t[i]
+            n = 1
+            while i + n < len(t) and t[i + n] == c:
+                n += 1
+            n = min(n, LEN_FNODE - 1 - len(out))
+            if c == "f":
+                out += mark[0 if pf.attr & FA_SUBDIR else
+                            1 if pf.attr & FA_RDONLY else 2] * n
+            elif c in "ne":
+                name = pf.name
+                k2 = name.find(".")
+                part = (name[:k2] if k2 >= 0 else name) if c == "n" else (
+                    name[k2 + 1:] if k2 >= 0 else "")
+                out += part[:n].ljust(n)
+            elif c == "s":
+                out += " " * n if pf.attr & FA_SUBDIR else num(n, pf.size, " ")
+            elif c == "d":
+                out += num(n, pf.date & 0x1F, "0")
+            elif c == "m":
+                out += num(n, (pf.date >> 5) & 0x0F, "0")
+            elif c == "y":
+                out += num(n, ((pf.date >> 9) + 80) % 100, "0")
+            elif c == "H":
+                out += num(n, (pf.time >> 11) & 0x1F, "0")
+            elif c == "M":
+                out += num(n, (pf.time >> 5) & 0x3F, "0")
+            else:
+                out += c * n
+            i += n
+        self.lines[k].put(out)
+
     def win_bldview(self, pw, r):
-        iwspc, ihspc = self.wicon + MIN_WINT, self.hicon + MIN_HINT
+        iwspc, ihspc = self.iwext + self.iwint, self.ihext + self.ihint
         pn = pw.path
         self.obj_wfree(pw.root, r.x, r.y, r.w, r.h)
         wfit = max(r.w // iwspc, 1)
@@ -753,9 +874,16 @@ class Desktop:
             col = 0
             while col < pw.pncol and i < n:
                 pf = pn.fnodes[first + i]
-                obid = self.obj_icon(pw.root, col * iwspc + MIN_WINT,
-                                     row * ihspc + MIN_HINT, self.win_which(pf),
-                                     pf.name, 0)
+                if self.iview == V_TEXT:
+                    obid = self.obj_text(pw.root, col * iwspc + self.iwint,
+                                         row * ihspc + self.ihint,
+                                         self.iwext, self.ihext)
+                    if obid:
+                        self.win_line(obid - WOBS_START, pf)
+                else:
+                    obid = self.obj_icon(pw.root, col * iwspc + self.iwint,
+                                         row * ihspc + self.ihint,
+                                         self.win_which(pf), pf.name, 0)
                 if not obid:
                     row = hfit                  # no items left: stop
                     break
@@ -931,6 +1059,33 @@ class Desktop:
         self.busy(False)
         return True
 
+    def pn_sort(self, pn):
+        """The listing put into the current order where it stands, by the
+        same insertion sort pn_active runs as it reads (deskwin.c
+        pn_sort)."""
+        for i in range(1, pn.count):
+            fn = pn.fnodes[i]
+            j = i
+            while j > 0 and self.pn_comp(fn, pn.fnodes[j - 1]) < 0:
+                j -= 1
+            if j != i:
+                pn.fnodes.insert(j, pn.fnodes.pop(i))
+
+    def win_srtall(self):
+        for pw in self.wlist:
+            if pw.id:
+                self.pn_sort(pw.path)
+
+    def win_bdall(self):
+        for pw in self.wlist:
+            if pw.id:
+                self.desk_verify(pw.id)
+
+    def win_shwall(self):
+        for pw in self.wlist:
+            if pw.id:
+                self.do_wredraw(pw.id, self.wind_get_rect(pw.id, WF_WXYWH))
+
     def win_rebld(self, pw):
         """deskwin.c win_rebld: the listing read again after the disk
         changed under it, the same place and the same view."""
@@ -1057,6 +1212,12 @@ class Desktop:
             return f" {v & 0xFF:02X}"
 
         text = f"#R{hex2(INF_REV_LEVEL)}\r\n"
+        text += ("#E"
+                 + hex2((INF_E1_VIEWTEXT if self.iview == V_TEXT else 0)
+                        | ((0 if self.isort == S_NSRT else self.isort) << 5))
+                 + hex2(0) + hex2(0) + hex2(0)
+                 + hex2(INF_E5_NOSORT if self.isort == S_NSRT else 0)
+                 + "\r\n")
         for ws in self.wsave:
             text += ("#W" + hex2(ws.hsl) + hex2(ws.vsl)
                      + hex2(ws.x // self.wchar) + hex2(ws.y // self.hchar)
@@ -1127,6 +1288,15 @@ class Desktop:
                 continue
             if text[i] == "R":
                 _, i = self.scan_2(text, i + 1)
+            elif text[i] == "E":
+                e1, i = self.scan_2(text, i + 1)
+                _, i = self.scan_2(text, i)     # the donor's date and clock
+                _, i = self.scan_2(text, i)     # formats, and its video
+                _, i = self.scan_2(text, i)     # words: the resource's here
+                e5, i = self.scan_2(text, i)
+                self.desk_view(V_TEXT if e1 & INF_E1_VIEWTEXT else V_ICON)
+                self.desk_sort(S_NSRT if e5 & INF_E5_NOSORT
+                               else (e1 & INF_E1_SORTMASK) >> 5)
             elif text[i] == "W":
                 i += 1
                 if wincnt < NUM_WNODES:
@@ -1901,6 +2071,41 @@ class Desktop:
             return True
         return False
 
+    def desk_view(self, view):
+        """The view the desktop is in: the checkmark moves with it and
+        the item metrics are worked out again (desktop.c desk_view)."""
+        if view != self.iview:
+            self.call(MENU_ICHECK, (ICONITEM + self.iview, 0), tree=self.a_menu)
+            self.call(MENU_ICHECK, (ICONITEM + view, 1), tree=self.a_menu)
+            self.iview = view
+        self.win_view()
+
+    def desk_sort(self, sort):
+        """The order the listings are in (desktop.c desk_sort)."""
+        if sort != self.isort:
+            self.call(MENU_ICHECK, (NAMEITEM + self.isort, 0), tree=self.a_menu)
+            self.call(MENU_ICHECK, (NAMEITEM + sort, 1), tree=self.a_menu)
+            self.isort = sort
+
+    def do_viewmenu(self, item):
+        sorted_, viewed = False, False
+        if item in (ICONITEM, TEXTITEM):
+            if item - ICONITEM != self.iview:
+                self.desk_view(item - ICONITEM)
+                viewed = True
+        elif item in (NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM, NSRTITEM):
+            if item - NAMEITEM != self.isort:
+                self.desk_sort(item - NAMEITEM)
+                sorted_ = True
+        if sorted_ or viewed:
+            self.busy(True)
+            if sorted_:
+                self.win_srtall()
+            self.win_bdall()
+            self.win_shwall()
+            self.busy(False)
+        return False
+
     def do_optnmenu(self, item):
         """desktop.c do_optnmenu: the layout to the disk and back."""
         if item == SAVEITEM:
@@ -1917,6 +2122,8 @@ class Desktop:
             done = self.do_deskmenu(item)
         elif title == FILEMENU:
             done = self.do_filemenu(item)
+        elif title == VIEWMENU:
+            done = self.do_viewmenu(item)
         elif title == OPTNMENU:
             done = self.do_optnmenu(item)
         self.call(MENU_TNORMAL, (title, 1), tree=self.a_menu)
@@ -2028,11 +2235,14 @@ class Desktop:
         self.a_delete = self.rsrc_gaddr(R_TREE, ADDELDIA)
         self.a_finfo = self.rsrc_gaddr(R_TREE, ADFINFO)
         self.a_iblist = self.rsrc_gaddr(R_ICONBLK, 0)
+        self.fline = self.rsrc_gaddr(R_STRING, STFLINE)
+        self.fmark = self.rsrc_gaddr(R_STRING, STFMARK)
         self.set_version()
         for item in NOT_YET:
             self.call(MENU_IENABLE, (item, 0), tree=self.a_menu)
         self.obj_init()
         self.desk_build()
+        self.win_view()                             # V_ICON, until the INF
         if not self.win_start():
             self.busy(False)
             self.fun_alert(1, STNOMEM)
@@ -2084,7 +2294,10 @@ class Desktop:
             self.a_menu, self.a_info, self.a_mkdir, self.a_delete,
             self.a_finfo, self.a_iblist, self.handle,
             self.wchar, self.hchar, self.wbox, self.hbox,
-            d.x, d.y, d.w, d.h, self.wicon, self.hicon, self.icw, self.ich,
+            d.x, d.y, d.w, d.h, self.wicon, self.hicon,
+            self.iview, self.isort, self.iwext, self.ihext,
+            self.iwint, self.ihint,
+            self.fline, self.fmark, self.icw, self.ich,
             self.screenfree)) + b"".join(w(x) for x in self.rmsg)
         out += (w(self.wcnt) + dw(self.nfiles) + dw(self.ndirs)
                 + dw(self.opsize)
@@ -2093,8 +2306,13 @@ class Desktop:
         out += b"".join(pw.pack() for pw in self.wlist)
         assert len(out) == g_offset("g_screen"), len(out)
         out += b"".join(o.pack() for o in self.screen)
-        for ib, label in zip(self.info, self.labels):
-            out += (ib.pack() if ib else bytes(ICONBLK_SIZE)) + label.pack()
+        for i, (ib, label) in enumerate(zip(self.info, self.labels)):
+            if self.istext[i]:
+                out += self.lines[i].pack()
+            else:
+                out += ((ib.pack() if ib else bytes(ICONBLK_SIZE))
+                        + label.pack()
+                        + bytes(SCREENINFO_SIZE - ICONBLK_SIZE - LABEL_LEN))
         assert len(out) == GLOBES_SIZE, len(out)
         return out
 

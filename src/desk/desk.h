@@ -33,6 +33,26 @@
 #define MAX_DRIVES  8                   /* D1: to D8: */
 #define MAX_ICONTEXT_WIDTH 12           /* an icon's label, in characters */
 #define LABEL_LEN   (MAX_ICONTEXT_WIDTH + 1)
+/* A text view's line: the places it may fill, and so the width the
+ * highlight of a selected one covers (the donor's LEN_FNODE, 48).  The
+ * resource's template is shorter than this, which is the room a
+ * translation has to grow into (tools/deskrsc.py, STFLINE). */
+#define LEN_FNODE   48
+#define V_ICON      0                   /* the two views, in the donor's */
+#define V_TEXT      1                   /* order (G.g_iview) */
+/* The five orders a listing can be in, the donor's values: the View
+ * menu's items less NAMEITEM, so the item and the order are the same
+ * number (deskfpd.h).  NAME is by name alone; TYPE, SIZE and DATE each
+ * fall back to the name; NSRT is the order the directory gave. */
+#define S_NAME      0
+#define S_TYPE      1
+#define S_SIZE      2
+#define S_DATE      3
+#define S_NSRT      4
+#define INF_E1_VIEWTEXT 0x80            /* the INF's environment bytes, the */
+#define INF_E1_SORTMASK 0x60            /* donor's bits (deskapp.c): the    */
+#define INF_E5_NOSORT   0x80            /* fifth carries "no sort", which   */
+                                        /* will not fit in the first's two  */
 
 #define DESK_SPEC   0x00001143L         /* the desk: green, pattern 4 (the AES's own) */
 #define WINDOW_SPEC 0x00001100L         /* a window's box: white, no pattern */
@@ -77,6 +97,8 @@
 typedef struct {
     WORD  f_obid;                       /* 0: not in view */
     WORD  f_flags;                      /* F_SELECTED */
+    WORD  f_seq;                        /* where the directory had it, which
+                                         * is the order "No sort" restores */
     WORD  f_attr;                       /* FA_* */
     UWORD f_time, f_date;
     LONG  f_size;
@@ -120,11 +142,19 @@ typedef struct {
     WSAVE cs_wnode[NUM_WNODES];
 } CSAVE;
 
-/* What an item object's ob_spec points at: its own ICONBLK, a copy of
- * the resource's with the label and the letter filled in. */
-typedef struct {
-    ICONBLK icon;
-    char    label[LABEL_LEN];
+/* What an item object's ob_spec points at.  An icon's is its own
+ * ICONBLK, a copy of the resource's with the label and the letter
+ * filled in; a text view's is the line itself, a G_STRING.  The two
+ * share the store because an item is one or the other and never both,
+ * and because ob_spec is a NEAR pointer (src/aes/objc.c SPEC_PTR) --
+ * the line cannot live out in far memory beside the FNODE it is made
+ * from.  Both halves are 47 bytes; the union is 48. */
+typedef union {
+    struct {
+        ICONBLK blk;
+        char    label[LABEL_LEN];
+    } i;
+    char line[LEN_FNODE];
 } SCREENINFO;
 
 typedef struct {
@@ -138,6 +168,15 @@ typedef struct {
     WORD     g_wchar, g_hchar, g_wbox, g_hbox;
     GRECT    g_desk;                    /* the desk under the menu bar */
     WORD     g_wicon, g_hicon;          /* an icon's cell: image plus label */
+    WORD     g_iview;                   /* V_ICON or V_TEXT */
+    WORD     g_isort;                   /* S_NAME .. S_NSRT */
+    WORD     g_iwext, g_ihext;          /* what an item of that view fills, */
+    WORD     g_iwint, g_ihint;          /* and the space in front of it */
+    const char *g_fline;                /* the text view's template, and the */
+    const char *g_fmark;                /* three marks its first column takes,
+                                         * both of the resource and fetched
+                                         * once: a fetch per item would be
+                                         * sixteen AES calls a redraw */
     WORD     g_icw, g_ich;              /* the grid the cells snap to */
     WORD     g_screenfree;              /* the free chain's head */
     WORD     g_rmsg[8];                 /* evnt_multi's message */
@@ -169,6 +208,7 @@ void obj_wfree(WORD obj, WORD x, WORD y, WORD w, WORD h);
 WORD obj_ialloc(WORD wparent, WORD x, WORD y, WORD w, WORD h);
 WORD obj_get_obid(WORD drive);
 SCREENINFO *obj_info(WORD obj);
+WORD obj_text(WORD wparent, WORD x, WORD y, WORD w, WORD h);
 WORD obj_icon(WORD wparent, WORD x, WORD y, WORD which,
               const char __far *label, WORD letter);
 
@@ -176,6 +216,12 @@ WORD obj_icon(WORD wparent, WORD x, WORD y, WORD which,
 void desk_busy(WORD on);
 
 /* deskwin.c: folder windows */
+void desk_view(WORD view);
+void desk_sort(WORD sort);
+void win_view(void);
+void win_srtall(void);
+void win_bdall(void);
+void win_shwall(void);
 WORD win_start(void);
 WNODE *win_find(WORD wh);
 WNODE *win_ontop(void);

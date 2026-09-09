@@ -313,6 +313,45 @@ def drive(b, count_addr, ptr, plan, read=None):
     return None
 
 
+def storm_check(b, addr=0x2000):
+    """A verdict when the machine has been painted by the emulator's
+    SEI-shadow IRQ storm rather than stopped by anything the program
+    did; None when it has not.
+
+    The storm pushes four bytes at every opcode fetch until the stack
+    has wrapped through bank $00 (tools/altirra/, patch 1), so it writes
+    the HARDWARE as well as the RAM.  Nothing a C program does can leave
+    ANTIC's registers holding the same byte pair its own memory is full
+    of, so the two conditions together tell a wild write in gem4xe from
+    a wild machine underneath it -- which took three phases to recognise
+    the first time (docs/phase26.md), and is one HWSTATE now.
+    """
+    dmp = bytes(b.memdump(addr, 256))
+    common = sorted({c: dmp.count(c) for c in set(dmp)}.items(),
+                    key=lambda kv: -kv[1])[:2]
+    if len(common) < 2 or sum(n for _, n in common) < 230:
+        return None                             # memory is not a pair
+    if common[1][1] < 32:
+        return None                             # ...it is one value and a few:
+                                                # memory a program zeroed, not
+                                                # memory something alternated
+    pair = {f"${v:02x}" for v, _ in common}
+    st = b.cmd("HWSTATE")
+    if not st.get("ok"):
+        return None
+    regs = [v for part in ("antic", "gtia", "pokey")
+            for k, v in (st.get(part) or {}).items()
+            if isinstance(v, str) and len(v) == 3 and v.startswith("$")]
+    if len(regs) < 20 or sum(v in pair for v in regs) * 10 < len(regs) * 8:
+        return None                             # the hardware disagrees
+    return ("the whole machine reads " + "/".join(sorted(pair)) + " -- RAM "
+            f"at ${addr:04X} AND ANTIC, GTIA and POKEY's registers.  Nothing "
+            "gem4xe does can write those: this is the emulator's SEI-shadow "
+            "IRQ storm (tools/altirra/altirra-65c816-native-mode.patch), and "
+            "the run says nothing about the desktop.  Re-run it with "
+            "ALTIRRASDL=<a build with the three patches>.")
+
+
 def compare(b, results_addr, n, script, want):
     """The first of the target's n result records that differs from the
     reference's, as a message; None if none does."""

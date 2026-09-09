@@ -9,6 +9,8 @@
  * then a key:
  *
  *     R   run M11.G4A, the gate application, and come back
+ *     C   run CALC.G4A, and K CLOCK.G4A -- the two accessories, which
+ *         are gated through this same loop (tests/emu/m22_apps.py)
  *     X   ask for NOPE.G4A, which is not there: the shell's alert, then
  *         the desktop again
  *     Q   shut GEM down and return to DOS
@@ -31,12 +33,27 @@ int main(void)
     v_opnvwk(work_in, &handle, work_out);
 
     vst_color(handle, 1);
-    v_gtext(handle, 8, hbox + 16, "gem4xe desktop  --  R runs M11.G4A, X a missing one, Q quits");
+    v_gtext(handle, 8, hbox + 16, "gem4xe desktop -- R M11.G4A, C CALC, K CLOCK, X a missing one, Q quits");
 
     for (;;) {
         k = (WORD)(evnt_keybd() & 0x00FF);
         if (k == 'r' || k == 'R') {
             shel_write(SHW_EXEC, 1, 0, "M11.G4A", "\0");
+            break;
+        }
+        /* Into the folder first, then the program by its full path --
+         * which is what the real desktop does before it runs one
+         * (src/desk/deskwin.c do_aopen), and what makes this gate cover
+         * the thing that was broken: an application in a FOLDER finding
+         * its own resource beside it (docs/phase29.md). */
+        if (k == 'c' || k == 'C') {
+            Dsetpath("A:\\APPS");
+            shel_write(SHW_EXEC, 1, 1, "A:\\APPS\\CALC.G4A", "\0");
+            break;
+        }
+        if (k == 'k' || k == 'K') {
+            Dsetpath("A:\\APPS");
+            shel_write(SHW_EXEC, 1, 1, "A:\\APPS\\CLOCK.G4A", "\0");
             break;
         }
         if (k == 'x' || k == 'X') {

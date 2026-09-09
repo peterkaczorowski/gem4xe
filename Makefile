@@ -307,6 +307,26 @@ $(eval $(call g4a,m11_app,$(APP_OBJS),$(APP_BSS),$(APP_BITS),$(APP_STACK),--c-ar
 build/app_blob.o: build/app_blob.c
 	$(CC) $(CFLAGS) -o $@ $<
 
+# The two accessories (src/apps): the first programs written to the
+# application ABI that are not tests.  Each is one C file, one resource
+# built on the host, and the same three-way link every .g4a takes.
+build/apps/%.o: src/apps/%.c src/app/gem.h build/calcrsc.h build/clockrsc.h
+	@mkdir -p build/apps
+	$(CC) $(CFLAGS) -I src/app -I build -o $@ $<
+
+build/calc.rsc build/calcrsc.h: tools/calcrsc.py tools/rsc.py tools/aesref.py
+	@mkdir -p build
+	python3 tools/calcrsc.py build/calc.rsc build/calcrsc.h
+
+build/clock.rsc build/clockrsc.h: tools/clockrsc.py tools/rsc.py tools/aesref.py
+	@mkdir -p build
+	python3 tools/clockrsc.py build/clock.rsc build/clockrsc.h
+
+CALC_OBJS  = $(G4A_LIB) build/apps/calc.o
+CLOCK_OBJS = $(G4A_LIB) build/apps/clock.o
+$(eval $(call g4a,calc,$(CALC_OBJS),1536,256,512,,))
+$(eval $(call g4a,clock,$(CLOCK_OBJS),1536,256,512,,))
+
 # The desktop (src/desk): a bigger near region than the gate application's,
 # for the object trees a desktop keeps in bank $00, and DESKTOP.RSC beside
 # it on the disk (tools/deskrsc.py; the icons from EmuTOS desk/icons.c
@@ -320,18 +340,28 @@ build/app_blob.o: build/app_blob.c
 # -- the button, do_open, do_dopen, do_wopen, a call to the AES on top --
 # ran 256 bytes out (phase 14, milestone 5).
 #
-# ⚠ 640 is not enough for the desktop of phase 26 and 896 is, measured
-# both ways and deterministic -- and the low-water mark at 896 says only
-# 302 bytes are ever used, which does not explain it.  The number is a
-# measurement, not an understanding: docs/phase26.md has what is known.  It shares the pool with
-# DESKTOP.RSC (6076 bytes) and with GEMDOS's work area (src/sys/gemdos.c),
-# which is why the desktop gates run a runner whose staging leaves the
-# pool the room GEM.COM leaves it (build/m3desk.xex, above).
+# 640 is the desktop's stack and the low-water mark says ~300 bytes of it
+# are ever used; 2944 of bss is what the rest of it measures.  For a
+# while the stack was 896 and the bss 3200, because the honest numbers
+# crashed -- which was never the desktop's doing: it is the emulator's
+# SEI-shadow IRQ storm (tools/altirra/, patch 1), which paints the whole
+# of bank $00, hardware registers and all, and which a couple of hundred
+# bytes of layout anywhere is enough to trip or untrip.  THAT IS WHY THE
+# NUMBERS HERE ARE THE MEASURED ONES AND NOT A DODGE: a dodge lasts
+# until the next thing that moves the code, which phase 27 demonstrated
+# by moving the storm from m19 into m18.  The desktop gates run against
+# a patched emulator -- ALTIRRASDL=<build> -- and say so when they find
+# the storm (tests/emu/m7_form.py storm_check).  docs/phase26.md.
+#
+# The pool is shared with DESKTOP.RSC (6226 bytes) and with GEMDOS's
+# work area (src/sys/gemdos.c), which is why the desktop gates run a
+# runner whose staging leaves the pool the room GEM.COM leaves it
+# (build/m3desk.xex, above).
 DESK_OBJS  = $(G4A_LIB) build/desk/desktop.o build/desk/deskobj.o build/desk/deskwin.o \
              build/desk/deskfun.o
-DESK_BSS   = 3200
+DESK_BSS   = 2944
 DESK_BITS  = 512
-DESK_STACK = 896
+DESK_STACK = 640
 DESK_H     = src/app/gem.h src/desk/desk.h build/deskrsc.h
 
 build/desk/%.o: src/desk/%.c $(DESK_H)
@@ -461,6 +491,17 @@ SHELL_DEPS  = build/m16_desk.g4a build/m11_app.g4a
 DESK_FILES  = --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
               --add build/m11_app.g4a M11.G4A
 DESK_DEPS   = build/desktop.g4a build/desktop.rsc build/m11_app.g4a
+# The two accessories (src/apps), on the media with room for them: the
+# SpartaDOS floppy, the CF card, and test-m22's own disk.  A prerequisite
+# list is expanded where it is written, so these live above every rule
+# that names them.
+# In a FOLDER, as the product has them: an application and its resource
+# live together in \APPS\, and finding the resource from there is the
+# thing test-m22 now covers (docs/phase29.md).
+APP_FILES = --mkdir APPS \
+            --add build/calc.g4a "APPS>CALC.G4A" --add build/calc.rsc "APPS>CALC.RSC" \
+            --add build/clock.g4a "APPS>CLOCK.G4A" --add build/clock.rsc "APPS>CLOCK.RSC"
+APP_DEPS  = build/calc.g4a build/calc.rsc build/clock.g4a build/clock.rsc
 
 build/test.rsc: tools/mkrsc.py tools/rsc.py tools/aesref.py
 	@mkdir -p build
@@ -511,6 +552,12 @@ build/816.com: tools/mk816.py
 	@mkdir -p build
 	python3 tools/mk816.py $@
 
+# The DOS 2 floppy carries the SYSTEM and no applications, deliberately.
+# It has 87 sectors free, the calculator and the clock want 49 of them,
+# and tests/emu/product_boot.py holds a floor of 80 -- which exists so
+# that the smallest disk is still somewhere a person can put a program
+# of their own.  Filling that space with ours would be taking exactly
+# what the floor is there to keep.  The other two media have room.
 build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com
 	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
@@ -518,12 +565,22 @@ build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_
 	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
 	    --add build/lang.rsc LANG.RSC --add build/816.com 816.COM
 
-build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc build/lang.rsc build/816.com $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
+# The product's SpartaDOS floppy is an INSTALL disk: the same \GEM\ and
+# \APPS\ layout the card has, so copying it onto an APT hard drive is a
+# directory copy and not a decision, and none of the file layer's
+# fixtures -- those belong on a gate's disk (--tree) and not on this one.
+build/gem-sp.atr: build/gem.xex build/lang.rsc build/816.com $(DESK_DEPS) $(APP_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --name GEM.COM --boot GEM \
-	    $(DISK_FILES) $(DESK_FILES) --add build/lang.rsc LANG.RSC \
-	    --add build/816.com 816.COM
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) \
+	    --name "GEM>GEM.COM" --boot "CD >GEM|GEM" --mkdir GEM --mkdir APPS \
+	    --add build/desktop.g4a "GEM>DESKTOP.G4A" \
+	    --add build/desktop.rsc "GEM>DESKTOP.RSC" \
+	    --add build/lang.rsc "GEM>LANG.RSC" \
+	    --add build/816.com "GEM>816.COM" \
+	    --add build/m11_app.g4a "APPS>M11.G4A" \
+	    --add build/calc.g4a "APPS>CALC.G4A" --add build/calc.rsc "APPS>CALC.RSC" \
+	    --add build/clock.g4a "APPS>CLOCK.G4A" --add build/clock.rsc "APPS>CLOCK.RSC"
 
 # The CF card: an APT table and two SDFS partitions, with the system in
 # \GEM\ and the demonstration application in \APPS\ -- the install
@@ -535,7 +592,7 @@ build/gem-sp.atr: build/gem.xex tests/fixtures/test.txt tests/fixtures/out.txt b
 # tools/apt.py writes the table, tests/host/test_apt.py checks it against
 # the rules Altirra's own parser applies, and test-cf boots it.
 build/gem-cf.img: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a \
-                  build/lang.rsc tools/mkcf.py tools/apt.py tools/atr.py
+                  build/lang.rsc $(APP_DEPS) tools/mkcf.py tools/apt.py tools/atr.py
 	@rm -f $@
 	python3 tools/mkcf.py $@
 
@@ -553,14 +610,33 @@ SP_SECTORS = --sectors 2560
 build/m14-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(SHELL_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(DISK_FILES) $(SHELL_FILES)
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(SHELL_FILES)
+
+# The accessories' disk (test-m22): test-m16's, with the two programs
+# and their resources added.  A disk of its own rather than SHELL_FILES,
+# because the file layer's gates count what is in a directory -- the
+# selector shows nine names and test-m12 predicts the listing -- and four
+# more files there would be four more names.
+build/m22-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(SHELL_DEPS) $(APP_DEPS) tools/mkspdisk.py tools/atr.py
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(SHELL_FILES) $(APP_FILES)
 
 # The desktop gate's disk (test-m17): the runner again, with the real
 # desktop and its resource where test-m16's stand-in was.
 build/m17-boot.atr: build/m3desk.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(DISK_FILES) $(DESK_FILES)
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(DESK_FILES)
+
+# The desktop-and-accessory gate's disk (test-m23): test-m17's, with the
+# two accessories in \APPS\ as the product media carries them.  This is
+# the disk that reproduces the user's own layout -- the real desktop, a
+# folder, and an application inside it that waits for the mouse.
+build/m23-boot.atr: build/m3desk.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) $(APP_DEPS) tools/mkspdisk.py tools/atr.py
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(DESK_FILES) $(APP_FILES)
 
 # The same program linked with bank $01 cut down to its top 16 KB, so that
 # the far image is forced to spill into bank $02 today rather than on the day
@@ -591,7 +667,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-boot
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-boot
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -758,11 +834,22 @@ test-m16: build/m14-boot.atr
 test-m17: build/m17-boot.atr build/desktop.g4a build/desktop.sym
 	python3 tests/emu/m17_desktop.py
 
+# The two accessories (src/apps): the calculator driven at its keypad and
+# the clock left to tick, both run through the shell loop and both checked
+# against what the host AES makes of their own resources.
+test-m22: build/m22-boot.atr build/calc.sym build/clock.sym
+	python3 tests/emu/m22_apps.py
+
 # A program run from the desktop and the desktop's windows back after it
 # (phase 14, milestone 6): two runs of the desktop against the model, with
 # M11.G4A between them.
 test-m18: build/m17-boot.atr build/desktop.g4a build/desktop.sym
 	python3 tests/emu/m18_launch.py
+
+# An accessory opened from a folder and used: the real desktop at the
+# mouse, a folder, and a program that waits for the mouse itself.
+test-m23: build/m23-boot.atr build/desktop.g4a build/desktop.sym build/calc.sym
+	python3 tests/emu/m23_deskapp.py
 
 # The desktop's writes to a disk (phase 14, milestone 7; phase 19): File
 # -> New folder, File -> Delete, and File -> Show info -- which is also
@@ -837,4 +924,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-boot test-cf demo movie bench emu-stop clean

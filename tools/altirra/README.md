@@ -27,7 +27,21 @@ Altirra's 65C816 core, in native mode (`src/Altirra/h/cpumachine.inl`):
    stack has wrapped through bank 0.
 
 How each was found, and what it cost: `docs/phase14.md`.  `make test-m12`
-fails deterministically on the unpatched emulator by the second one.
+failed deterministically on the unpatched emulator by the second one
+when it was written; it no longer does on every build, which is the
+nature of a timing bug -- so a green `test-m12` is **not** evidence that
+an emulator has the fix.
+
+The second one bit again in phase 26 and cost three phases of the
+desktop's memory budget before it was recognised (`docs/phase26.md`).
+Its signature, and the cheapest way to identify it: at the stall, dump
+the **whole** address space and read `HWSTATE`.  A storm that pushes
+four bytes per fetch walks the stack through all of bank `$00`, so RAM
+*and* the hardware registers -- `DMACTL`, `HSCROL`, GTIA's colours,
+POKEY's `AUDF`, PIA's `PORTB` -- all end up holding the same repeating
+pair of bytes.  Nothing a C program does can write ANTIC's registers.
+`ALTIRRASDL=... make test-m19` with `DESK_BSS = 2944` is the second
+reproducer.
 
 ## altirra-sdl-u1mb-keyraw.patch -- the Ultimate 1MB, headlessly
 

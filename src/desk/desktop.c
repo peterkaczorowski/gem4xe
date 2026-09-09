@@ -202,6 +202,72 @@ static WORD do_filemenu(WORD item)
  * carries between programs, kept on the boot drive so that it outlives
  * the machine being switched off (deskwin.c).  Neither ends the
  * desktop's loop -- only a program run from an icon does. */
+/* The view the desktop is in: the menu's checkmark moves with it and
+ * the item metrics are worked out again.  The View menu sets it, and so
+ * does the INF's environment line (deskwin.c inf_parse), which is why
+ * it is here rather than inside the menu's handler. */
+void desk_view(WORD view)
+{
+    if (view != G.g_iview) {
+        menu_icheck(G.a_menu, (WORD)(ICONITEM + G.g_iview), 0);
+        menu_icheck(G.a_menu, (WORD)(ICONITEM + view), 1);
+        G.g_iview = view;
+    }
+    win_view();
+}
+
+/* ...and the order its listings are in.  The item and the order are the
+ * same number less NAMEITEM, which is how the donor's deskfpd.h defines
+ * them. */
+void desk_sort(WORD sort)
+{
+    if (sort != G.g_isort) {
+        menu_icheck(G.a_menu, (WORD)(NAMEITEM + G.g_isort), 0);
+        menu_icheck(G.a_menu, (WORD)(NAMEITEM + sort), 1);
+        G.g_isort = sort;
+    }
+}
+
+/* View: which of the two views the windows are in, and which order
+ * their listings are in.  A change sorts every open window, then
+ * builds every one of them, and only then draws any -- the donor's
+ * desk_all, in that sequence. */
+static WORD do_viewmenu(WORD item)
+{
+    WORD sorted = FALSE, viewed = FALSE;
+
+    switch (item) {
+    case ICONITEM:
+    case TEXTITEM:
+        if ((WORD)(item - ICONITEM) == G.g_iview)
+            break;
+        desk_view((WORD)(item - ICONITEM));
+        viewed = TRUE;
+        break;
+    case NAMEITEM:
+    case TYPEITEM:
+    case SIZEITEM:
+    case DATEITEM:
+    case NSRTITEM:
+        if ((WORD)(item - NAMEITEM) == G.g_isort)
+            break;
+        desk_sort((WORD)(item - NAMEITEM));
+        sorted = TRUE;
+        break;
+    default:
+        break;
+    }
+    if (sorted || viewed) {
+        desk_busy(TRUE);
+        if (sorted)
+            win_srtall();
+        win_bdall();
+        win_shwall();
+        desk_busy(FALSE);
+    }
+    return FALSE;
+}
+
 static WORD do_optnmenu(WORD item)
 {
     switch (item) {
@@ -229,6 +295,9 @@ static WORD hndl_menu(WORD title, WORD item)
         break;
     case FILEMENU:
         done = do_filemenu(item);
+        break;
+    case VIEWMENU:
+        done = do_viewmenu(item);
         break;
     case OPTNMENU:
         done = do_optnmenu(item);
@@ -421,12 +490,15 @@ int main(void)
     rsrc_gaddr(R_TREE, ADDELDIA, (void **)&G.a_delete);
     rsrc_gaddr(R_TREE, ADFINFO, (void **)&G.a_finfo);
     rsrc_gaddr(R_ICONBLK, 0, (void **)&G.a_iblist);
+    rsrc_gaddr(R_STRING, STFLINE, (void **)&G.g_fline);
+    rsrc_gaddr(R_STRING, STFMARK, (void **)&G.g_fmark);
     set_version();
     for (i = 0; i < N_NOT_YET; i++)
         menu_ienable(G.a_menu, not_yet[i], 0);
 
     obj_init();
     desk_build();
+    win_view();                                 /* V_ICON, until the INF */
     if (!win_start()) {
         desk_busy(FALSE);
         fun_alert(1, STNOMEM);

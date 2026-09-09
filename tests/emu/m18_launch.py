@@ -52,7 +52,7 @@ from deskref import Desktop, DROOT, GLOBES_SIZE, STACK_STRING  # noqa: E402
 from aesref import W_FULLER, FA_SUBDIR, RSRC_LOAD, Text    # noqa: E402
 from deskrsc import FILEMENU, QUITITEM      # noqa: E402
 from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE,  # noqa: E402
-                     F, DCLICK, drive, compare)
+                     F, DCLICK, drive, compare, storm_check)
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
 from m11_abi import app_calls               # noqa: E402
 from m12_file import Runner                 # noqa: E402
@@ -136,6 +136,7 @@ def model_desk(v, a):
     a.wm_init()
     a.mn_init()
     a.ratinit()
+    a.gr_mouse(aesref.ARROW)   # the form is one global here (shel.c)
     a.tree = a.W_TREE
     a.draw(0, 0, (0, 0, a.gl_width, a.gl_height))
 
@@ -349,6 +350,9 @@ def main(argv):
         def stall(what):
             # where it stuck: the screen, the CPU, and the last few frames
             # of history (the patched bridge; --shot keeps the picture)
+            storm = storm_check(b)
+            if storm:
+                print(f"  {storm}")
             print(f"  screen at the stall: {shot(b, 'stall')}")
             fault = b.peek(syms["irq_fault"])          # src/sys/irq.s
             lw = desk_low_water(b)

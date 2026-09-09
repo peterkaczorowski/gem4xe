@@ -65,22 +65,80 @@ Then File -> Delete, whose dialog counts four files and two folders --
 the folder tree and the file beside it -- and the image afterwards has
 neither.
 
-## ⚠ An anomaly, written down rather than explained
+## The stack that was never the stack: an emulator bug, found
 
-The desktop's stack was 640 bytes and had to become 896.  At 640 the
-run dies at the *click* that precedes the band, with `irq_fault 4`, the
+The desktop's stack was 640 bytes and had to become 896.  At 640 the run
+died at the *click* that precedes the band, with `irq_fault 4`, the
 program counter in DOS's memory, and G and `op_path` smeared with a
-repeating `02 04`.  At 896 every gate passes.  Both directions
-reproduce, and the change is one line of the Makefile.
+repeating `02 04`.  At 896 every gate passed.  Both directions
+reproduced, and the change was one line of the Makefile.  The low-water
+mark at 896 said 302 bytes, so "the stack was too small" explained
+nothing, and the note here said so: *896 is a measurement, not an
+understanding*.
 
-**And the low-water mark at 896 says 302 bytes.**  Nothing in the run
-ever went deeper than 302, so "the stack was too small" does not explain
-a failure at 640.  What else moves with `DESK_STACK` is where `data`
-lands after it -- the sections go `zdata`, `stack`, `data` -- so this
-has the shape of the layout lottery `docs/phase24.md` describes, where
-a wild write's victim depends on the layout and a size change moves it.
+It is understood now, and it was never gem4xe's.
 
-The far allocator's straddle was exactly that, and was found by pushing
-on it until it moved somewhere legible.  This one has not been pushed
-on yet.  **896 is a measurement, not an understanding**, and the next
-person to touch the desktop's memory should know it.
+**What the wreckage actually was.**  The `02 04` is not a smeared buffer.
+Dumping the whole address space at the stall -- rather than the region
+the guess was about -- finds it *everywhere*: `$0400-$1FFF`,
+`$2042-$CFFF`, `$E000-$FF97`, and, decisively, **the hardware**.
+`HWSTATE` reports `DMACTL $02`, `HSCROL $02`, `VSCROL $04`, every GTIA
+colour register, POKEY's `AUDF`/`AUDC`, PIA's `PORTB`: all `$02`/`$04`.
+No C buffer overrun writes ANTIC's registers.  A **stack** does, when it
+descends through the whole of bank `$00` -- and four bytes at a time is
+what a 65C816 interrupt pushes.
+
+That is the signature of the second bug in
+`tools/altirra/altirra-65c816-native-mode.patch`, in the patch's own
+words: *"SEI with a POKEY IRQ pending in native mode pushed four bytes
+per fetch until the stack had wrapped through bank 0."*  The handler is
+re-entered at every opcode fetch because the emulator's native-mode
+vector states never clear the "one more IRQ" shadow flag.
+
+**The controls.**  With `DESK_BSS = 2944`, `DESK_STACK = 640` -- the
+build that fails -- and the gate unmodified:
+
+    /usr/bin/AltirraSDL (altirrasdl-git r535, 3e85661e)   FAILS
+    b3061c7 + the three patches in tools/altirra/          PASSES
+    ...with only the SEI hunk reverted                     dies sooner
+                                                           still (the
+                                                           runner never
+                                                           comes up)
+
+The installed build is an *ancestor* of b3061c7 and nothing between them
+touches `cpumachine.inl`, so the CPU core is the same code in both: the
+difference is the patch, and reverting one hunk of it puts the failure
+back.  `make test-m12`, which `tools/altirra/README.md` says fails
+deterministically on an unpatched emulator, happens to pass on it today
+-- which is why the emulator was not the first suspect.  A timing bug
+that a couple of hundred bytes of layout will trip or untrip does not
+stay reproduced by the case that first found it.
+
+**What it cost, and the lesson.**  Three phases of the desktop's memory
+budget were tuned around it, and `docs/phase24.md`'s layout-lottery
+reasoning -- correct for the far allocator's bank straddle -- was the
+wrong frame here, because it kept the search inside gem4xe.  The thing
+that broke the deadlock was cheap and should have come first: **dump the
+whole machine, not the part the hypothesis is about.**  One `HWSTATE`
+said what a week of canaries could not, because a corrupted `DMACTL`
+has exactly one explanation and it is not a C program's array.
+
+**Where the numbers stand.**  `DESK_STACK` is 640, its measured
+low-water use ~300, and `DESK_BSS` is the 2944 the desktop actually
+needs.  They were briefly 896 and 3200 -- 256 bytes of slack that kept
+an *unpatched* emulator green -- and phase 27 took that back, because
+**a dodge is not a fix and does not keep**: adding the text view and the
+sorts moved the code, and the storm moved with it, out of m19 and into
+m18.  There is no layout that is safe; there is a patched emulator.
+
+    ALTIRRASDL=/path/to/patched/AltirraSDL make test
+
+What is left behind instead is a *diagnosis*.  Every desktop gate now
+calls `storm_check` (`tests/emu/m7_form.py`) when it stalls: if the RAM
+it samples is one alternating pair of bytes **and** ANTIC's, GTIA's and
+POKEY's registers hold the same pair, it says so, names the patch, and
+says the run tells you nothing about the desktop.  Nothing gem4xe can do
+writes ANTIC's registers, so the two conditions together cannot mean
+anything else.  `tests/host/test_storm.py` gates the rule itself,
+against a faked bridge -- a storm is the emulator's to produce and no
+target run can be asked for one on demand.

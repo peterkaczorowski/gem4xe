@@ -11,7 +11,8 @@ Under SpartaDOS X the cartridge boots instead and this is just D1:, which
 is why the tree, not the boot code, is the point of the disk.
 
   python3 tools/mkspdisk.py <sparta32.atr> <m3.xex> <out.atr> [--name M3.COM] [--sectors N]
-                            [--add FILE NAME]... [--boot GEM]
+                            [--add FILE NAME]... [--mkdir NAME]...
+                            [--tree] [--boot "CD >GEM|GEM"]
 
 --boot writes the batch files that run a command at boot, which is how the
 product disk comes up in the desktop rather than at a prompt (BOOT_FILES
@@ -37,7 +38,7 @@ from atr import ATRImage, Sdfs  # noqa: E402
 # or U1MB flash and reads CONFIG.SYS then AUTOEXEC.BAT off D1:.  So the
 # disk carries both, four bytes each, and the program keeps its name.
 BOOT_FILES = ("STARTUP.BAT", "AUTOEXEC.BAT")
-EOL = 0x9B
+EOL = bytes([0x9B])
 
 # (path, contents); a path with no contents is a directory
 TREE = [
@@ -50,11 +51,13 @@ TREE = [
 
 
 def build(src_atr, xex, out_atr, sectors=1040, adds=(), volname="GEM4XE", name="M3.COM",
-          boot=None):
+          boot=None, tree=False, dirs=()):
     os.makedirs(os.path.dirname(os.path.abspath(out_atr)), exist_ok=True)
     img = ATRImage(128, sectors)
     fs = Sdfs.format(img, volname)
     fs.boot_from(Sdfs(ATRImage.load(src_atr)))
+    for d in dirs:                      # before anything that goes in one
+        fs.mkdir(d)
     with open(xex, "rb") as f:
         fs.add_file(name, f.read())
     for path, name in adds:
@@ -62,12 +65,14 @@ def build(src_atr, xex, out_atr, sectors=1040, adds=(), volname="GEM4XE", name="
             fs.add_file(name, f.read())
     if boot:
         for batch in BOOT_FILES:
-            fs.add_file(batch, boot.encode("ascii") + bytes([EOL]))
-    for path, data in TREE:
-        if data is None:
-            fs.mkdir(path)
-        else:
-            fs.add_file(path, data)
+            fs.add_file(batch, EOL.join(
+                ln.encode("ascii") for ln in boot.split("|")) + EOL)
+    if tree:
+        for path, data in TREE:
+            if data is None:
+                fs.mkdir(path)
+            else:
+                fs.add_file(path, data)
     img.save(out_atr)
     print(f"{out_atr}: {sectors} x 128, {len(fs.list())} in MAIN, "
           f"{fs.free_count()} sectors free")
@@ -82,10 +87,16 @@ def main(argv=None):
     ap.add_argument("--name", default="M3.COM", help="the program's name on the disk")
     ap.add_argument("--sectors", type=int, default=1040)
     ap.add_argument("--add", nargs=2, action="append", default=[], metavar=("FILE", "NAME"))
+    ap.add_argument("--mkdir", action="append", default=[], metavar="NAME",
+                    help="a directory, made before the files that go in it")
+    ap.add_argument("--tree", action="store_true",
+                    help="the file selector's fixture directory as well -- "
+                         "what a GATE disk wants and a product disk does not")
     ap.add_argument("--boot", metavar="CMD",
                     help="a command line for STARTUP.BAT and AUTOEXEC.BAT")
     a = ap.parse_args(argv)
-    build(a.src, a.xex, a.out, a.sectors, a.add, name=a.name, boot=a.boot)
+    build(a.src, a.xex, a.out, a.sectors, a.add, name=a.name, boot=a.boot,
+          tree=a.tree, dirs=a.mkdir)
     return 0
 
 

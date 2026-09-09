@@ -121,7 +121,7 @@ WORD obj_get_obid(WORD drive)
     for (objnum = G.g_screen[DROOT].ob_head; objnum >= WOBS_START;
          objnum = G.g_screen[objnum].ob_next) {
         if (G.g_screen[objnum].ob_type == G_ICON
-         && (obj_info(objnum)->icon.ib_char & 0xFF) == drive)
+         && (obj_info(objnum)->i.blk.ib_char & 0xFF) == drive)
             return objnum;
     }
     return 0;
@@ -130,6 +130,22 @@ WORD obj_get_obid(WORD drive)
 SCREENINFO *obj_info(WORD obj)
 {
     return &G.g_screeninfo[obj - WOBS_START];
+}
+
+/* The store an item object's ob_spec points into, emptied before it is
+ * written.  The two halves of the union are different lengths and an
+ * item slot is reused in both views, so without this what a slot holds
+ * past its own text is what the LAST item to use it left there -- and
+ * G is compared with the model byte for byte (tests/emu/m17_desktop.py),
+ * which makes residue a thing that has to be modelled rather than a
+ * thing nobody sees. */
+static void obj_clear(SCREENINFO *si)
+{
+    char *p = si->line;
+    WORD i;
+
+    for (i = 0; i < (WORD)sizeof(SCREENINFO); i++)
+        p[i] = 0;
 }
 
 /* An icon item under wparent at (x, y): a copy of the resource's
@@ -153,7 +169,8 @@ WORD obj_icon(WORD wparent, WORD x, WORD y, WORD which,
     pob->ob_flags = NONE;
     pob->ob_type = G_ICON;
     si = obj_info(obid);
-    pic = &si->icon;
+    obj_clear(si);
+    pic = &si->i.blk;
     *pic = G.a_iblist[which];
     pob->ob_spec = (LONG)(uint16_t)pic;
     pic->ib_xicon = (WORD)((G.g_wicon - pic->ib_wicon) / 2);
@@ -161,10 +178,32 @@ WORD obj_icon(WORD wparent, WORD x, WORD y, WORD which,
     pic->ib_wtext = (WORD)(MAX_ICONTEXT_WIDTH * G.g_wchar);
     pic->ib_htext = (WORD)(G.g_hchar + 2);
     pic->ib_char = (WORD)((pic->ib_char & 0xFF00) | letter);
-    d = si->label;
-    while (*label && d < si->label + LABEL_LEN - 1)
+    d = si->i.label;
+    while (*label && d < si->i.label + LABEL_LEN - 1)
         *d++ = *label++;
     *d = 0;
-    pic->ib_ptext = (LONG)(uint16_t)si->label;
+    pic->ib_ptext = (LONG)(uint16_t)si->i.label;
+    return obid;
+}
+
+/* An item object for the TEXT view: a G_STRING over the line, which the
+ * caller fills in place (deskwin.c win_line) rather than handing over,
+ * so that no 48-byte copy of it stands on the desktop's stack.  0 when
+ * the items are all in use, as obj_icon's is. */
+WORD obj_text(WORD wparent, WORD x, WORD y, WORD w, WORD h)
+{
+    WORD obid = obj_ialloc(wparent, x, y, w, h);
+    OBJECT *pob;
+    SCREENINFO *si;
+
+    if (!obid)
+        return 0;
+    pob = &G.g_screen[obid];
+    pob->ob_state = NORMAL;
+    pob->ob_flags = NONE;
+    pob->ob_type = G_STRING;
+    si = obj_info(obid);
+    obj_clear(si);
+    pob->ob_spec = (LONG)(uint16_t)si->line;
     return obid;
 }

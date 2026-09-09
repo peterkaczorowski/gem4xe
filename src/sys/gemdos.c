@@ -47,6 +47,14 @@ typedef int32_t  LONG;
 
 static uint32_t gd_pb;          /* the call block */
 static uint32_t gd_dirs;        /* GD_DRIVES x GD_DIRMAX */
+/* ...and whether each one has been SET, which is not the same as being
+ * the root.  gem4xe keeps its own current directory because the DOS
+ * underneath has no GEMDOS to keep one -- but at start-up it does not
+ * know where that DOS already is (a boot batch may have changed into a
+ * directory before GEM ran), so an UNSET drive means "wherever the DOS
+ * is", and a set one means "here, absolutely".  gd_cioname is where the
+ * difference is spent. */
+static uint8_t gd_dirset[GD_DRIVES];
 static uint32_t gd_dta0;        /* the default DTA */
 static uint32_t gd_dta;         /* the current one */
 static uint32_t gd_slots;       /* GD_SLOTS x SL_SIZE */
@@ -847,7 +855,39 @@ static LONG gd_setpath(LONG path)
         far_strput(gd_dirs + (uint32_t)d * GD_DIRMAX, full + 2, GD_DIRMAX);
     } else
         far_write8(gd_dirs + (uint32_t)d * GD_DIRMAX, 0);
+    gd_dirset[d] = 1;
     return 0;
+}
+
+/* A file name the AES was given, as CIO wants it, resolved the way
+ * GEMDOS resolves one -- which is what makes Dsetpath mean something to
+ * rsrc_load and to the shell (src/aes/shel.c sh_cioname).  A relative
+ * name on a drive nobody has set is left to CIO and so to the DOS's own
+ * idea of where it is: that is how the system's own files are found at
+ * boot, when a start-up batch has changed directory and gem4xe was not
+ * told.  docs/phase29.md. */
+void gd_cioname(const char *name, char *cio)
+{
+    uint16_t mark = pool_mark();
+    char *full;
+    WORD d = gd_drive;
+
+    if (name[0] && name[1] == ':') {
+        int c = (uint8_t)name[0];
+        if (c >= 'a' && c <= 'z')
+            c -= 0x20;
+        d = (WORD)(c - 'A');
+    }
+    /* The scratch is the pool's, not gw's: gw belongs to a GEMDOS call
+     * and this is not one -- the AES calls in between, when what gw
+     * points at has been released. */
+    full = (d >= 0 && d < GD_DRIVES && gd_dirset[d])
+           ? (char *)pool_alloc(GD_PATHMAX, 2) : 0;
+    if (!full || gd_full(name, full) < 0)
+        dos_cioname(name, cio);
+    else
+        dos_cioname(full, cio);
+    pool_release(mark);
 }
 
 /* Dgetpath: "" at the root, "\DIR\SUB" below it, as the ST says it. */
@@ -1116,8 +1156,10 @@ void gemdos_init(void)
     gd_slots = far_alloc((uint32_t)GD_SLOTS * SL_SIZE);
     gd_files = far_alloc((uint32_t)CIO_IOCBS * FH_SIZE);
     gd_scratch = far_alloc(DTA_SIZE + GD_KEEPNAME);
-    for (i = 0; i < GD_DRIVES; i++)
+    for (i = 0; i < GD_DRIVES; i++) {
         far_write8(gd_dirs + (uint32_t)i * GD_DIRMAX, 0);
+        gd_dirset[i] = 0;
+    }
     for (i = 0; i < GD_SLOTS; i++) {
         wr32(gd_slot(i) + SL_OWNER, 0);
         far_write8(gd_slot(i) + SL_IOCB, 0);

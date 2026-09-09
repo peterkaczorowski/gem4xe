@@ -220,12 +220,54 @@ FNODE __far *win_fnode(WNODE *pw, WORD obj)
     return NULL;
 }
 
-/* Folders first, then by name: the donor's pn_fcomp for S_NAME. */
+/* The field the current order compares, the donor's pn_fcomp: date and
+ * size run the other way round -- newest and biggest first -- because
+ * that is what a person looking for either of them wants at the top.
+ * Every order falls back to the name, which is the whole of S_NAME and
+ * the tie-break for the rest, so the listing never depends on the order
+ * the directory happened to be in.  Except S_NSRT, which is that
+ * order. */
+static WORD pn_fcomp(const FNODE *a, const FNODE __far *b)
+{
+    const char __far *ea;
+    const char *ta;
+    LONG chk = 0;
+
+    switch (G.g_isort) {
+    case S_DATE:
+        chk = (LONG)b->f_date - (LONG)a->f_date;
+        if (!chk)
+            chk = (LONG)b->f_time - (LONG)a->f_time;
+        break;
+    case S_SIZE:
+        chk = b->f_size - a->f_size;
+        break;
+    case S_TYPE:
+        for (ta = a->f_name; *ta && *ta != '.'; ta++)
+            ;
+        for (ea = b->f_name; *ea && *ea != '.'; ea++)
+            ;
+        chk = far_strcmp(ta, ea);
+        break;
+    case S_NSRT:
+        chk = (LONG)a->f_seq - (LONG)b->f_seq;
+        break;
+    default:
+        break;
+    }
+    if (chk)
+        return chk < 0 ? -1 : 1;
+    return far_strcmp(a->f_name, b->f_name);
+}
+
+/* Folders first -- unless nothing is being sorted, when the directory's
+ * own order is the whole of it -- and then the field: the donor's
+ * pn_comp. */
 static WORD pn_comp(const FNODE *a, const FNODE __far *b)
 {
-    if ((a->f_attr ^ b->f_attr) & FA_SUBDIR)
+    if (G.g_isort != S_NSRT && ((a->f_attr ^ b->f_attr) & FA_SUBDIR))
         return (a->f_attr & FA_SUBDIR) ? -1 : 1;
-    return far_strcmp(a->f_name, b->f_name);
+    return pn_fcomp(a, b);
 }
 
 /* Take the search spec; FALSE if it does not fit. */
@@ -256,6 +298,17 @@ static void fn_copy(FNODE __far *d, const FNODE *s)
         *pd++ = *ps++;
 }
 
+/* ...and a far one into a near one, for the same reason. */
+static void fn_read(FNODE *d, const FNODE __far *s)
+{
+    char *pd = (char *)d;
+    const char __far *ps = (const char __far *)s;
+    WORD n;
+
+    for (n = 0; n < sizeof(FNODE); n++)
+        *pd++ = *ps++;
+}
+
 /* Read the directory through the DTA into the FNODEs, each one into its
  * place in the order: the count and the bytes together.  An error from
  * Fsfirst lists nothing. */
@@ -274,6 +327,7 @@ static void pn_active(PNODE *pn)
         if (dta->d_fname[0] != '.') {
             fn.f_obid = 0;
             fn.f_flags = 0;
+            fn.f_seq = count;               /* where the directory had it */
             fn.f_attr = (WORD)(unsigned char)dta->d_attrib;
             fn.f_time = dta->d_time;
             fn.f_date = dta->d_date;
@@ -297,6 +351,40 @@ static void pn_active(PNODE *pn)
         ret = Fsnext();
     }
     pn->p_count = count;
+}
+
+/* The listing put into the current order where it stands: the same
+ * insertion sort pn_active runs as it reads, over what is already
+ * there (the donor's pn_sort).  A change of order costs no directory
+ * read, which is the whole reason an FNODE carries f_seq. */
+static void pn_sort(PNODE *pn)
+{
+    FNODE __far *pf;
+    FNODE fn;
+    WORD i, j;
+
+    for (i = 1; i < pn->p_count; i++) {
+        pf = pn->p_flist + i;
+        fn_read(&fn, pf);
+        j = i;
+        while (j > 0 && pn_comp(&fn, pf - 1) < 0) {
+            *pf = *(pf - 1);
+            pf--;
+            j--;
+        }
+        fn_copy(pf, &fn);
+    }
+}
+
+/* Every open window's listing sorted again: the donor's win_srtall,
+ * which runs before the views are built (desktop.c do_viewmenu). */
+void win_srtall(void)
+{
+    WORD i;
+
+    for (i = 0; i < NUM_WNODES; i++)
+        if (G.g_wlist[i].w_id)
+            pn_sort(&G.g_wlist[i].w_path);
 }
 
 /* -- the name and information lines ------------------------------------ */
@@ -337,13 +425,126 @@ static WORD win_which(const FNODE __far *pf)
     return IB_DOCU;
 }
 
+/* What an item of the current view fills, and the space in front of it
+ * (the donor's win_view).  ONE DEPARTURE: the donor makes a text line's
+ * left margin `2*gl_wchar - 1`, an odd number, to land the text on a
+ * byte boundary and reach the ST's fast text output.  Here the
+ * arithmetic inverts -- 4bpp packs two pixels to a byte, so an ODD x is
+ * the pre-shifted strip and the slow path (docs/phase2b.md) -- so the
+ * margin is even. */
+void win_view(void)
+{
+    if (G.g_iview == V_TEXT) {
+        G.g_iwext = (WORD)(LEN_FNODE * G.g_wchar);
+        G.g_ihext = G.g_hchar;
+        G.g_iwint = (WORD)(2 * G.g_wchar);
+        G.g_ihint = 2;
+    } else {
+        G.g_iwext = G.g_wicon;
+        G.g_ihext = G.g_hicon;
+        G.g_iwint = MIN_WINT;
+        G.g_ihint = MIN_HINT;
+    }
+}
+
+/* A number into n places, right-aligned, padded with `pad`; the places
+ * are filled from the right, so a value too long for them loses its
+ * high digits rather than the field's shape. */
+static void win_num(char *d, WORD n, LONG value, char pad)
+{
+    WORD i = n;
+
+    while (i > 0) {
+        d[--i] = (char)('0' + (WORD)(value % 10));
+        value /= 10;
+        if (!value)
+            break;
+    }
+    while (i > 0)
+        d[--i] = pad;
+}
+
+/* One line of the text view, from the template the resource carries
+ * (tools/deskrsc.py, STFLINE).  Each RUN of a placeholder letter takes
+ * one field, in the template's own order and width: a translation may
+ * move the columns, change the separators or leave a field out, and
+ * none of that is written here.  A run shorter than its field truncates
+ * it, a longer one pads it.  Anything that is not a placeholder is
+ * copied as it stands. */
+static void win_line(char *d, const FNODE __far *pf)
+{
+    const char *t = G.g_fline;
+    const char __far *s;
+    char *end = d + LEN_FNODE - 1;
+    WORD n, i;
+    char c;
+
+    while (*t && d < end) {
+        c = *t;
+        for (n = 1; t[n] == c; n++)
+            ;
+        if (n > (WORD)(end - d))
+            n = (WORD)(end - d);
+        switch (c) {
+        case 'f':                               /* the mark, one of three */
+            for (i = 0; i < n; i++)
+                d[i] = G.g_fmark[(pf->f_attr & FA_SUBDIR) ? 0
+                                 : (pf->f_attr & FA_RDONLY) ? 1 : 2];
+            break;
+        case 'n':                               /* the name up to the dot */
+        case 'e':                               /* ...and what follows it */
+            s = pf->f_name;
+            if (c == 'e') {
+                while (*s && *s != '.')
+                    s++;
+                if (*s)
+                    s++;
+            }
+            for (i = 0; i < n; i++)
+                d[i] = (*s && *s != '.') ? *s++ : ' ';
+            break;
+        case 's':                               /* a folder's size is what it
+                                                 * holds, and Show info is
+                                                 * where the walk for that is */
+            if (pf->f_attr & FA_SUBDIR)
+                for (i = 0; i < n; i++)
+                    d[i] = ' ';
+            else
+                win_num(d, n, pf->f_size, ' ');
+            break;
+        case 'd':
+            win_num(d, n, (LONG)(pf->f_date & 0x1F), '0');
+            break;
+        case 'm':
+            win_num(d, n, (LONG)((pf->f_date >> 5) & 0x0F), '0');
+            break;
+        case 'y':
+            win_num(d, n, (LONG)(((pf->f_date >> 9) + 80) % 100), '0');
+            break;
+        case 'H':
+            win_num(d, n, (LONG)((pf->f_time >> 11) & 0x1F), '0');
+            break;
+        case 'M':
+            win_num(d, n, (LONG)((pf->f_time >> 5) & 0x3F), '0');
+            break;
+        default:
+            for (i = 0; i < n; i++)
+                d[i] = c;
+            break;
+        }
+        d += n;
+        t += n;
+    }
+    *d = 0;
+}
+
 /* The window's items for the view over work area *r: the grid that
- * fits (the donor's win_ocalc), then an icon per entry in the rows
+ * fits (the donor's win_ocalc), then an item per entry in the rows
  * shown, and the sliders to match. */
 static void win_bldview(WNODE *pw, const GRECT *r)
 {
-    WORD iwspc = (WORD)(G.g_wicon + MIN_WINT);
-    WORD ihspc = (WORD)(G.g_hicon + MIN_HINT);
+    WORD iwspc = (WORD)(G.g_iwext + G.g_iwint);
+    WORD ihspc = (WORD)(G.g_ihext + G.g_ihint);
     FNODE __far *pf;
     WORD wfit, hfit, i, n, row, col, obid, which;
 
@@ -374,9 +575,18 @@ static void win_bldview(WNODE *pw, const GRECT *r)
         hfit = (WORD)(pw->w_pnrow + 1);         /* a row may show in part */
     for (row = 0, i = 0; row < hfit && i < n; row++) {
         for (col = 0; col < pw->w_pncol && i < n; col++, i++, pf++) {
-            which = win_which(pf);
-            obid = obj_icon(pw->w_root, (WORD)(col * iwspc + MIN_WINT),
-                            (WORD)(row * ihspc + MIN_HINT), which, pf->f_name, 0);
+            if (G.g_iview == V_TEXT) {
+                obid = obj_text(pw->w_root, (WORD)(col * iwspc + G.g_iwint),
+                                (WORD)(row * ihspc + G.g_ihint),
+                                G.g_iwext, G.g_ihext);
+                if (obid)
+                    win_line(obj_info(obid)->line, pf);
+            } else {
+                which = win_which(pf);
+                obid = obj_icon(pw->w_root, (WORD)(col * iwspc + G.g_iwint),
+                                (WORD)(row * ihspc + G.g_ihint), which,
+                                pf->f_name, 0);
+            }
             if (!obid) {
                 row = hfit;                     /* no items left: stop */
                 break;
@@ -656,6 +866,32 @@ static WORD do_diropen(WNODE *pw, WORD new_win, WORD curr, const char *path,
     return TRUE;
 }
 
+/* Every open window's items built again over its work area, and then
+ * every one of them drawn: the donor's win_bdall and win_shwall, which
+ * a change of view needs one after the other -- all the building
+ * first, so that no window is drawn in the new view beside one still
+ * standing in the old. */
+void win_bdall(void)
+{
+    WORD i;
+
+    for (i = 0; i < NUM_WNODES; i++)
+        if (G.g_wlist[i].w_id)
+            desk_verify(G.g_wlist[i].w_id);
+}
+
+void win_shwall(void)
+{
+    GRECT t;
+    WORD i;
+
+    for (i = 0; i < NUM_WNODES; i++)
+        if (G.g_wlist[i].w_id) {
+            wind_get_grect(G.g_wlist[i].w_id, WF_WORKXYWH, &t);
+            do_wredraw(G.g_wlist[i].w_id, &t);
+        }
+}
+
 /* The window's directory listed again, after something on the disk
  * changed it: the same place, the same view, the items rebuilt.  The
  * listing's DTA is put back first -- a delete's walk leaves its own
@@ -688,7 +924,7 @@ static WORD do_dopen(WORD curr)
         act_chg(DESKWH, DROOT, curr, FALSE, TRUE);
         return FALSE;
     }
-    path[0] = (char)(obj_info(curr)->icon.ib_char & 0xFF);
+    path[0] = (char)(obj_info(curr)->i.blk.ib_char & 0xFF);
     path[1] = ':';
     path[2] = '\\';
     path[3] = '*';
@@ -790,7 +1026,7 @@ WORD do_open(WORD wh, WORD obj)
     FNODE __far *pf;
 
     if (wh == DESKWH) {
-        if (obj_info(obj)->icon.ib_char & 0xFF)
+        if (obj_info(obj)->i.blk.ib_char & 0xFF)
             do_dopen(obj);
         return FALSE;                           /* else the trash */
     }
@@ -920,6 +1156,19 @@ static WORD inf_write(void)
     p = put_far(p, "#R");
     p = put_hex2(p, INF_REV_LEVEL);
     p = put_far(p, "\r\n");
+    /* the environment, in the donor's first byte: bit 7 is the text
+     * view, bits 6-5 the sort (deskapp.c INF_E1_VIEWTEXT).  The second
+     * byte is the donor's date and clock formats, which are the
+     * resource's here (deskrsc.py STFLINE), so it goes out as zero and
+     * is not read back. */
+    p = put_far(p, "#E");
+    p = put_hex2(p, (WORD)((G.g_iview == V_TEXT ? INF_E1_VIEWTEXT : 0)
+                           | ((G.g_isort == S_NSRT ? 0 : G.g_isort) << 5)));
+    p = put_hex2(p, 0);
+    p = put_hex2(p, 0);
+    p = put_hex2(p, 0);
+    p = put_hex2(p, (WORD)(G.g_isort == S_NSRT ? INF_E5_NOSORT : 0));
+    p = put_far(p, "\r\n");
     for (i = 0; i < NUM_WNODES; i++, pws++) {
         p = put_far(p, "#W");
         p = put_hex2(p, pws->hsl_save);
@@ -1014,6 +1263,20 @@ static void inf_parse(const char __far *pcurr)
             rev = scan_2(&pcurr);
             (void)rev;
             break;
+        case 'E': {
+            WORD e1, e5;
+
+            pcurr++;
+            e1 = scan_2(&pcurr);
+            scan_2(&pcurr);                     /* the donor's date and clock */
+            scan_2(&pcurr);                     /* formats, and its video     */
+            scan_2(&pcurr);                     /* words: the resource's here */
+            e5 = scan_2(&pcurr);
+            desk_view((WORD)((e1 & INF_E1_VIEWTEXT) ? V_TEXT : V_ICON));
+            desk_sort((WORD)((e5 & INF_E5_NOSORT) ? S_NSRT
+                             : (e1 & INF_E1_SORTMASK) >> 5));
+            break;
+        }
         case 'W':
             pcurr++;
             if (wincnt < NUM_WNODES) {

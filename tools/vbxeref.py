@@ -112,6 +112,18 @@ class Surface:
                 for y in range(SCR_H)]
 
 
+def save_rgb(expected_rgb, path):
+    """The model's own picture, written where it can be looked at beside
+    the target's screenshot.  A gate that only reports how many pixels
+    differ says nothing about WHAT differs; this is how the two are put
+    side by side."""
+    from PIL import Image
+    im = Image.new("RGB", (SCR_W, SCR_H))
+    im.putdata([px for row in expected_rgb for px in row])
+    im.save(path)
+    return path
+
+
 def compare_to_shot(expected_rgb, shot_path, max_report=8):
     """Compare the reference image against an Altirra screenshot.
 

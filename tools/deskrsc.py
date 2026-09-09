@@ -108,6 +108,22 @@ STFIINFO, STFOINFO, STRENAME = 17, 18, 19
 # ...and what the Options menu says when the layout will not go to the
 # disk, or is not there to come back from.
 STSVINF, STRDINF = 20, 21
+# The text view's line, and the three marks its first column can take.
+# The line is a TEMPLATE, not a format: every character of it is the
+# resource's, and the desktop fills the runs of placeholders in place
+# (deskwin.c win_line).  A translation may move the columns, change the
+# separators or drop a field, and the C is not told.
+#
+#   f  the folder / read-only / plain mark, one place, from STFMARK
+#   n  a place of the name, e a place of the extension
+#   s  a place of the size, right-aligned in its run, blank for a folder
+#   d  day   m  month   y  year   H  hour   M  minute
+#
+# Anything else is literal.  A run shorter than its field truncates it;
+# a longer one pads.  The desk is 640 wide, so this is the donor's WIDE
+# layout (deskinf.c format_fnode, USE_WIDE_FORMAT): the narrow one it
+# falls back to on a 320-pixel screen has no place here.
+STFLINE, STFMARK = 22, 23
 
 # (index, name, text) in index order; the alerts as form_alert parses
 # them -- [icon][the lines, | between][the buttons]
@@ -150,6 +166,31 @@ RENAME_ALERT = [
                            "[ OK ]"),
 ]
 
+# The text view's line: 36 places of the 48 a selected line highlights
+# (LEN_FNODE, src/desk/desk.h), which leaves a translation room to grow.
+# STFMARK is indexed, not searched: folder, read-only, plain.
+#
+# This is the donor's NARROW layout -- mark, name padded to nine, three
+# of extension, a space and seven of size, then the stamp -- and not the
+# wide one it would pick for a 640-pixel screen (deskinf.c format_fnode,
+# USE_WIDE_FORMAT).  The donor asks how wide the SCREEN is; what a line
+# has to fit is a WINDOW, and a window here opens 38 characters wide
+# (WIN_WCELL): 304 pixels, less 1 for the left border and 12 for the
+# slider's (gl_wbox), less the view's own 16-pixel margin, is 275 --
+# thirty-four characters.  So a window AS IT OPENS shows all but the
+# last two places of the line, and the minute's second digit arrives
+# when the window is fulled or dragged wider.  That is the DONOR's
+# behaviour and not a trade made here: its own default window is the
+# same 38 characters (deskapp.c desk_inf_data1, "#W 00 00 02 06 26 0C")
+# and its narrow line the same 36 places, so an ST clips it too.  The
+# alternative was to cut a column to fit the smallest window a person
+# might use, and a narrower size field or a year-less date is the worse
+# trade.  It is one line here for anyone who disagrees.
+FILE_LINE = [
+    (STFLINE, "STFLINE", "fnnnnnnnnneee sssssss dd/mm/yy HH:MM"),
+    (STFMARK, "STFMARK", "\x07\x7f "),
+]
+
 # ICONBLKs, in the order of the table; IG_* name them
 IB_HARD, IB_FLOPPY, IB_TRASH, IB_FOLDER, IB_APPL, IB_DOCU = 0, 1, 2, 3, 4, 5
 IB_TABLE = ((IB_HARD, deskicons.IG_HARD), (IB_FLOPPY, deskicons.IG_FLOPPY),
@@ -182,14 +223,14 @@ INDICES = [
     *[(name, i) for i, name, _ in ALERTS],
     *[(name, i) for i, name, _ in TITLES],
     *[(name, i) for i, name, _ in RENAME_ALERT],
+    *[(name, i) for i, name, _ in FILE_LINE],
     ("IB_HARD", IB_HARD), ("IB_FLOPPY", IB_FLOPPY), ("IB_TRASH", IB_TRASH),
     ("IB_FOLDER", IB_FOLDER), ("IB_APPL", IB_APPL), ("IB_DOCU", IB_DOCU),
 ]
 
 # The items the desktop does not do yet: disabled at start (menu_ienable),
 # not in the file, so the file stays RCS-shaped.
-NOT_YET = (FORMITEM, TEXTITEM, NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM,
-           NSRTITEM, FITITEM, IICNITEM, IAPPITEM, PREFITEM)
+NOT_YET = (FORMITEM, FITITEM, IICNITEM, IAPPITEM, PREFITEM)
 
 # The menu, box by box: (title, box x, box width, items); an item is a
 # string, "-" for a separator, and (string, state) for a state.
@@ -199,8 +240,9 @@ MENU = [
                        "  Close folder", "  Close window", "-",
                        "  Delete...", "  Format...", "-", "  Quit"]),
     (" View ", 14, 17, [("  Show as icons", CHECKED), "  Show as text", "-",
-                        "  Sort by name", "  Sort by type", "  Sort by size",
-                        "  Sort by date", "  No sort", "-", "  Size to fit"]),
+                        ("  Sort by name", CHECKED), "  Sort by type",
+                        "  Sort by size", "  Sort by date", "  No sort",
+                        "-", "  Size to fit"]),
     (" Options ", 20, 25, ["  Install icon...", "  Install application...",
                            "-", "  Set preferences...", "-",
                            "  Read .INF file...", "  Save desktop..."]),
@@ -416,6 +458,8 @@ def build():
     for i, name, text in TITLES:
         assert r.free_string(text) == i, (name, i)
     for i, name, text in RENAME_ALERT:
+        assert r.free_string(text) == i, (name, i)
+    for i, name, text in FILE_LINE:
         assert r.free_string(text) == i, (name, i)
     for ib, ig in IB_TABLE:
         (mask, data, char, xchar, ychar, xicon, yicon, wicon, hicon,
