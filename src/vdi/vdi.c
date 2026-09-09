@@ -11,7 +11,6 @@
 #include "pointer.h"
 #include "font.h"
 #include "sys/zwin.h"
-#include "../vbxe/vbxe.h"
 #include "../sys/irq.h"
 #include "../sys/zwin.h"
 #include "../sys/farmem.h"
@@ -28,21 +27,8 @@ static const UWORD line_styles[7] = {
     0xFFFF, 0xFFFF, 0xFFF0, 0xE0E0, 0xFF18, 0xFF00, 0xF191
 };
 
-/* VDI pen -> hardware pen.
- *
- * GEM numbers its pens white=0, black=1, red=2 ... but XOR mode complements
- * the pixel's BITS, and the AES relies on that complement turning black into
- * white and back (a selected button is drawn by XORing its rectangle).  That
- * only holds if black and white are bitwise complements in the hardware, so
- * the VDI keeps GEM's pen numbers at its interface and stores every pixel
- * through this map -- the same permutation the ST's VDI applies -- with the
- * palette loaded in hardware order to match.  black -> 15, white -> 0. */
-const uint8_t map_col[16] = {
-    0, 15, 1, 2, 4, 6, 3, 5, 7, 8, 9, 10, 12, 14, 11, 13
-};
-
 /* GEM's standard 16 colours, in VDI pen order; v_opnwk permutes them into
- * hardware order through map_col[] before loading the palette. */
+ * pen order; the device permutes them into its own. */
 static const uint8_t gem_rgb[16 * 3] = {
     0xFF, 0xFF, 0xFF,   /*  0 white        */
     0x00, 0x00, 0x00,   /*  1 black        */
@@ -61,19 +47,6 @@ static const uint8_t gem_rgb[16 * 3] = {
     0xBB, 0xBB, 0x00,   /* 14 dark yellow  */
     0xBB, 0x00, 0xBB    /* 15 dark magenta */
 };
-
-#define HW(pen) ((WORD)map_col[(pen) & 0x0F])
-
-/* And back: the VDI pen that maps to a hardware index.  A search, not a
- * second table -- it is wanted once per v_get_pixel and nowhere hot. */
-static WORD rev_col(WORD hw)
-{
-    WORD i;
-    for (i = 0; i < 16; i++)
-        if (map_col[i] == (uint8_t)hw)
-            return i;
-    return 0;
-}
 
 /* ---------------------------------------------------------------------- */
 /* helpers                                                                */
@@ -475,7 +448,7 @@ static void fill_workout(void)
     contrl[4] = 45;
 }
 
-/* The palette in HARDWARE order: entry map_col[pen] gets pen's colour. */
+/* The palette the device was asked for, in VDI pen order. */
 /* What vs_color was ASKED for, 0..1000 a channel, so vq_color can answer
  * the request as well as what the hardware made of it.  In the banked
  * window (src/sys/zwin.h) because bank $00's own data is spoken for, and
@@ -501,15 +474,9 @@ static WORD hw_to_col(uint8_t h)
 
 static void load_palette(void)
 {
-    uint8_t hw[16 * 3];
     WORD pen;
-    for (pen = 0; pen < 16; pen++) {
-        WORD h = map_col[pen];
-        hw[h * 3]     = gem_rgb[pen * 3];
-        hw[h * 3 + 1] = gem_rgb[pen * 3 + 1];
-        hw[h * 3 + 2] = gem_rgb[pen * 3 + 2];
-    }
-    vbxe_palette(1, 0, hw, 16);
+
+    dev_palette_all(gem_rgb);
     for (pen = 0; pen < 16; pen++) {
         pal_req[pen][0] = hw_to_col(gem_rgb[pen * 3]);
         pal_req[pen][1] = hw_to_col(gem_rgb[pen * 3 + 1]);
@@ -531,7 +498,7 @@ static void vdi_vs_color(void)
         pal_req[i][k] = (WORD)(v < 0 ? 0 : v > 1000 ? 1000 : v);
         rgb[k] = col_to_hw(v);
     }
-    vbxe_palette(1, (uint8_t)HW(i), rgb, 1);
+    dev_palette_one(i, rgb);
 }
 
 /* vq_color: what was asked for (flag 0) or what the hardware made of it
@@ -743,8 +710,7 @@ static void vdi_v_clrwk(void)
     WORD was_drawn = cur_drawn;
     dev_cursor_discard();               /* discard, do not restore */
     cur_drawn = 0;
-    blit_fill(VR_SCREEN0, SCR_STRIDE, SCR_STRIDE, SCR_H, 0x00);
-    blit_run();
+    dev_clear_screen();
     if (was_drawn && cur_hide == 0)
         cursor_show_now();
 }
@@ -1085,29 +1051,12 @@ ZWIN static WORD     cf_dirty;          /* the bitmap row has been marked */
 
 /* One row of the screen, through a single mapping of each 4K page it
  * crosses -- the whole point of doing this a row at a time. */
-static void cf_read_px(WORD y, uint8_t *px)
-{
-    uint32_t base = VR_SCREEN0 + (uint32_t)y * SCR_STRIDE;
-    WORD i = 0;
-
-    while (i < SCR_STRIDE) {
-        volatile uint8_t *w = vram_win(base + (uint32_t)i);
-        WORD room = (WORD)(0x1000 - (WORD)((base + (uint32_t)i) & 0x0FFF));
-        WORD k = (WORD)(SCR_STRIDE - i), j;
-
-        if (k > room)
-            k = room;
-        for (j = 0; j < k; j++)
-            px[i + j] = w[j];
-        i = (WORD)(i + k);
-    }
-}
 
 static void cf_load_px(WORD y, uint8_t *px)
 {
     if (cf_py == y)
         return;
-    cf_read_px(y, px);
+    dev_read_row(y, px);
     cf_py = y;
 }
 
@@ -1133,13 +1082,11 @@ static void cf_load_sn(WORD y, uint8_t *sn)
  * the row already. */
 static WORD cf_inside(WORD x, const uint8_t *px)
 {
-    uint8_t b;
     WORD hw;
 
     if (x < cf_x0 || x > cf_x1)
         return 0;
-    b = px[(UWORD)x >> 1];              /* unsigned: see asr() */
-    hw = (WORD)((x & 1) ? (b & 0x0F) : (b >> 4));
+    hw = dev_row_pixel(px, x);
     return (WORD)(cf_type ? (hw == cf_search) : (hw != cf_search));
 }
 
@@ -1208,11 +1155,10 @@ static void vdi_v_contourfill(void)
     /* A colour index says "stop where that colour starts"; no index says
      * "spread over the colour the seed is on". */
     if (index >= 0) {
-        cf_search = HW(index);
+        cf_search = dev_pen_value(index);
         cf_type = 0;
     } else {
-        uint8_t b = px[(UWORD)x >> 1];
-        cf_search = (WORD)((x & 1) ? (b & 0x0F) : (b >> 4));
+        cf_search = dev_row_pixel(px, x);
         cf_type = 1;
     }
     {   /* the bitmap starts empty */
@@ -1845,15 +1791,12 @@ static void vdi_vst_rotation(void)
  * true of the donor on an ST as well. */
 static void vdi_v_get_pixel(void)
 {
-    WORD x = ptsin[0], y = ptsin[1], hw = 0;
+    WORD x = ptsin[0], y = ptsin[1], hw = 0, pen = 0;
 
-    if (x >= 0 && y >= 0 && x < SCR_W && y < SCR_H) {
-        uint8_t b = vram_read8(VR_SCREEN0 + (uint32_t)y * SCR_STRIDE
-                               + (uint32_t)((UWORD)x >> 1));
-        hw = (WORD)((x & 1) ? (b & 0x0F) : (b >> 4));
-    }
+    if (x >= 0 && y >= 0 && x < SCR_W && y < SCR_H)
+        dev_get_pixel(x, y, &hw, &pen);
     intout[0] = hw;
-    intout[1] = rev_col(hw);
+    intout[1] = pen;
     contrl[4] = 2;
 }
 
@@ -1932,7 +1875,7 @@ static void vdi_vswr_mode(void)
  *
  * FORMS.  Each MFDB names a raster form: fd_addr 0 is the screen (the VDI's
  * own convention), anything else is a VRAM address whose rows are
- * fd_wdwidth words x fd_nplanes apart -- the AES's save buffer at VR_SAVE is
+ * fd_wdwidth words x fd_nplanes apart -- the AES's save buffer is
  * the one such form, laid out like the screen so a save is a same-
  * coordinates copy.  A null MFDB pointer is taken as the screen too, so a
  * bare screen-to-screen script (the conformance runner's) does not read a

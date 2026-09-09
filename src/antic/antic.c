@@ -89,6 +89,19 @@ void antic_init(uint8_t fg, uint8_t bg)
     REG8(AN_SDMCTL) = 0x22;
 }
 
+void antic_recolour(int16_t pen, uint8_t value)
+{
+    if (pen) {
+        REG8(AN_COLPF1) = value;
+        REG8(AN_COLOR1) = value;
+    } else {
+        REG8(AN_COLPF2) = value;
+        REG8(AN_COLBK)  = value;
+        REG8(AN_COLOR2) = value;
+        REG8(AN_COLOR4) = value;
+    }
+}
+
 void antic_off(void)
 {
     REG8(AN_DMACTL) = 0;

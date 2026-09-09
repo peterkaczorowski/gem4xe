@@ -364,3 +364,67 @@ void dev_copy_form(const RFORM *src, WORD sx1, WORD sy1,
         }
     }
 }
+
+/* ---- the rest ----------------------------------------------------------
+ * A device with TWO colours, so the pen mapping is no mapping: pen 0 is
+ * the background and anything else is ink.  There is no permutation to
+ * make black and white bitwise complements, because on one bit they
+ * already are -- which is the whole reason the VBXE device needs
+ * map_col, and a good illustration of what the seam is hiding.
+ */
+void dev_clear_screen(void)
+{
+    antic_clear(0);
+}
+
+WORD dev_pen_value(WORD pen)
+{
+    return (WORD)(pen ? 1 : 0);
+}
+
+void dev_get_pixel(WORD x, WORD y, WORD *value, WORD *pen)
+{
+    WORD v = (WORD)antic_get_pixel((int16_t)x, (int16_t)y);
+
+    *value = v;
+    *pen = v;                           /* the same thing here */
+}
+
+void dev_read_row(WORD y, uint8_t *px)
+{
+    const uint8_t *p = (const uint8_t *)(uint16_t)
+                       (AN_SCREEN + (uint16_t)y * AN_STRIDE);
+    WORD i;
+
+    for (i = 0; i < AN_STRIDE; i++)
+        px[i] = p[i];
+}
+
+WORD dev_row_pixel(const uint8_t *px, WORD x)
+{
+    uint8_t b = px[(UWORD)x >> 3];      /* unsigned: see asr() */
+    return (WORD)((b >> (7 - (x & 7))) & 1);
+}
+
+/* Two colours, and only one of them is a choice: mode F takes the
+ * LUMINANCE of COLPF1 on the hue of COLPF2 (src/antic/antic.h).  So the
+ * sixteen entries the VDI offers come down to the brightness of pen 1
+ * against pen 0, and the rest is discarded rather than approximated --
+ * a device that cannot show a colour should not pretend to. */
+static uint8_t an_lum(const uint8_t *rgb)
+{
+    /* the usual weights, to a 4-bit Atari luminance */
+    uint16_t l = (uint16_t)((rgb[0] * 77u + rgb[1] * 151u + rgb[2] * 28u) >> 8);
+    return (uint8_t)((l >> 4) & 0x0E);
+}
+
+void dev_palette_all(const uint8_t *rgb)
+{
+    antic_init(an_lum(rgb + 3), an_lum(rgb));   /* pen 1 on pen 0 */
+}
+
+void dev_palette_one(WORD pen, const uint8_t *rgb)
+{
+    if (pen == 0 || pen == 1)
+        antic_recolour(pen, an_lum(rgb));
+}

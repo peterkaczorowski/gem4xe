@@ -18,11 +18,10 @@
 #include "../vbxe/vbxe.h"
 #include "font.h"
 
-/* The VDI's pen order into this device's hardware indices.  The table is
- * the VDI's (src/vdi/vdi.c) because the palette is loaded through it;
- * what it MEANS is this device's, which is why the seam passes a VDI pen
- * and the mapping happens here. */
+/* The VDI's pen order into this device's hardware indices; the table is
+ * below, with the reason it exists. */
 #define HW(pen) ((WORD)map_col[(pen) & 0x0F])
+extern const uint8_t map_col[16];
 
 void dev_fill_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen)
 {
@@ -1186,4 +1185,97 @@ void dev_copy_form(const RFORM *src, WORD sx1, WORD sy1,
             rform_plot(dst, dx, dy, (WORD)((sx & 1) ? (v & 0x0F) : (v >> 4)));
         }
     }
+}
+
+/* VDI pen -> hardware pen.
+ *
+ * GEM numbers its pens white=0, black=1, red=2 ... but XOR mode complements
+ * the pixel's BITS, and the AES relies on that complement turning black into
+ * white and back (a selected button is drawn by XORing its rectangle).  That
+ * only holds if black and white are bitwise complements in the hardware, so
+ * the VDI keeps GEM's pen numbers at its interface and stores every pixel
+ * through this map -- the same permutation the ST's VDI applies -- with the
+ * palette loaded in hardware order to match.  black -> 15, white -> 0. */
+const uint8_t map_col[16] = {
+    0, 15, 1, 2, 4, 6, 3, 5, 7, 8, 9, 10, 12, 14, 11, 13
+};
+
+
+#define HW(pen) ((WORD)map_col[(pen) & 0x0F])
+
+/* And back: the VDI pen that maps to a hardware index.  A search, not a
+ * second table -- it is wanted once per v_get_pixel and nowhere hot. */
+static WORD rev_col(WORD hw)
+{
+    WORD i;
+    for (i = 0; i < 16; i++)
+        if (map_col[i] == (uint8_t)hw)
+            return i;
+    return 0;
+}
+
+void dev_read_row(WORD y, uint8_t *px)
+{
+    uint32_t base = VR_SCREEN0 + (uint32_t)y * SCR_STRIDE;
+    WORD i = 0;
+
+    while (i < SCR_STRIDE) {
+        volatile uint8_t *w = vram_win(base + (uint32_t)i);
+        WORD room = (WORD)(0x1000 - (WORD)((base + (uint32_t)i) & 0x0FFF));
+        WORD k = (WORD)(SCR_STRIDE - i), j;
+
+        if (k > room)
+            k = room;
+        for (j = 0; j < k; j++)
+            px[i + j] = w[j];
+        i = (WORD)(i + k);
+    }
+}
+
+/* Two pixels share a byte, high nibble the LEFT one. */
+WORD dev_row_pixel(const uint8_t *px, WORD x)
+{
+    uint8_t b = px[(UWORD)x >> 1];      /* unsigned: see asr() */
+    return (WORD)((x & 1) ? (b & 0x0F) : (b >> 4));
+}
+
+WORD dev_pen_value(WORD pen)
+{
+    return HW(pen);
+}
+
+void dev_get_pixel(WORD x, WORD y, WORD *value, WORD *pen)
+{
+    uint8_t b = vram_read8(VR_SCREEN0 + (uint32_t)y * SCR_STRIDE
+                           + (uint32_t)((UWORD)x >> 1));
+    WORD hw = (WORD)((x & 1) ? (b & 0x0F) : (b >> 4));
+
+    *value = hw;
+    *pen = rev_col(hw);
+}
+
+void dev_clear_screen(void)
+{
+    blit_fill(VR_SCREEN0, SCR_STRIDE, SCR_STRIDE, SCR_H, 0x00);
+    blit_run();
+}
+
+/* The palette in HARDWARE order: entry map_col[pen] gets pen's colour. */
+void dev_palette_all(const uint8_t *rgb)
+{
+    uint8_t hw[16 * 3];
+    WORD pen;
+
+    for (pen = 0; pen < 16; pen++) {
+        WORD h = map_col[pen];
+        hw[h * 3]     = rgb[pen * 3];
+        hw[h * 3 + 1] = rgb[pen * 3 + 1];
+        hw[h * 3 + 2] = rgb[pen * 3 + 2];
+    }
+    vbxe_palette(1, 0, hw, 16);
+}
+
+void dev_palette_one(WORD pen, const uint8_t *rgb)
+{
+    vbxe_palette(1, (uint8_t)HW(pen), rgb, 1);
 }

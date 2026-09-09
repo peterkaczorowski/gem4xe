@@ -32,6 +32,20 @@
 
 #include "vdi.h"
 
+/* THE GEOMETRY COMES FROM THE DEVICE.  vdi.c used to include vbxe.h for
+ * SCR_W, SCR_H and SCR_STRIDE, which is the last place the VBXE leaked
+ * into code that is meant to be portable.  Now the device that is being
+ * linked says what they are, and the names stay so that nothing else has
+ * to change. */
+#ifdef GEM4XE_DEV_ANTIC
+#  include "../antic/antic.h"
+#  define SCR_W       AN_W
+#  define SCR_H       AN_H
+#  define SCR_STRIDE  AN_STRIDE
+#else
+#  include "../vbxe/vbxe.h"
+#endif
+
 /* A raster form as the copy sees it: an MFDB resolved, or the screen.
  * `base` is 24-bit because on one device it is a VRAM address and on the
  * other a bank-$00 one, and the VDI does not care which. */
@@ -143,6 +157,35 @@ void dev_copy_form(const RFORM *src, WORD sx, WORD sy,
  * the device's: VRAM on one, and there is no such thing to spare in bank
  * $00 on the other. */
 void dev_save_form(MFDB *m);
+
+/* ---- the rest ---------------------------------------------------------
+ * The screen, cleared.  The pointer is the VDI's to put back afterwards.
+ */
+void dev_clear_screen(void);
+
+/* One pixel read back: `value` is what the device stores there and is
+ * what v_get_pixel reports as intout[0], `pen` the VDI pen it maps to.
+ * Both, because the VDI's contract asks for both and only the device can
+ * answer either. */
+void dev_get_pixel(WORD x, WORD y, WORD *value, WORD *pen);
+
+/* The value this device stores for a VDI pen -- the units dev_get_pixel
+ * and dev_row_pixel answer in. */
+WORD dev_pen_value(WORD pen);
+
+/* One screen row into SCR_STRIDE bytes, and a pixel out of it.  This is
+ * the paint bucket's, and it is the one primitive that has to look at
+ * what is already on the screen a whole row at a time; keeping the row
+ * in the DEVICE's packed form and asking for pixels out of it is what
+ * stops a 640-pixel row costing 640 bytes of a 2 KB stack. */
+void dev_read_row(WORD y, uint8_t *px);
+WORD dev_row_pixel(const uint8_t *px, WORD x);
+
+/* The palette: sixteen VDI pens' worth of 8-bit RGB, or one of them.
+ * The device permutes into whatever order its hardware wants -- and a
+ * device with two colours takes what it can of it. */
+void dev_palette_all(const uint8_t *rgb);
+void dev_palette_one(WORD pen, const uint8_t *rgb);
 
 /* Whatever the device precomputed about the current pattern or pen is
  * stale.  The VDI calls this when a workstation is selected or reset or

@@ -67,6 +67,10 @@
  * Atari colour bytes: fg's luminance and bg's hue are what show. */
 void antic_init(uint8_t fg, uint8_t bg);
 
+/* One of the two colours changed: pen 0 is the background's hue and pen
+ * 1 the foreground's luminance, which is all mode F has. */
+void antic_recolour(int16_t pen, uint8_t value);
+
 /* The screen off again, and the OS's own display list back. */
 void antic_off(void);
 
