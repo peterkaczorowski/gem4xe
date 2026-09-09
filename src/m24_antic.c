@@ -28,6 +28,10 @@
 __task void main(void)
 {
     int16_t i;
+    /* the same eight rows tools/anticref.py has */
+    static const uint16_t patt[8] = {
+        0xFF00, 0x8080, 0x8080, 0x8080, 0x0FF0, 0x0808, 0x0808, 0x0808
+    };
 
     STATUS[0] = 'A';
     STATUS[1] = 'N';
@@ -82,6 +86,19 @@ __task void main(void)
         antic_glyph((uint16_t)('a' + i), (int16_t)(20 + i * 9), 60, 2, 0);
     for (i = 0; i < 8; i++)                         /* XOR on clear     */
         antic_glyph((uint16_t)('0' + i), (int16_t)(20 + i * 9), 70, 3, 1);
+
+    /* -- patterned fills, and the styled lines that are the same thing -
+     * Two runs side by side: the pattern is aligned to the SCREEN's
+     * 16-pixel word, not to the run, so the two carry one continuous
+     * pattern across the join at x=149 -- which is the property that
+     * makes two adjacent window backgrounds look like one desk. */
+    for (i = 0; i < 8; i++) {
+        antic_patt_span(30, 148, (int16_t)(152 + i), patt[i], 1, 1);
+        antic_patt_span(149, 269, (int16_t)(152 + i), patt[i], 1, 1);
+    }
+    antic_patt_span(30, 269, 162, 0xF0F0, 1, 1);
+    antic_vline(24, 150, 165, 0xCCCC, 1, 1);
+    antic_vline(275, 150, 165, 0xAAAA, 1, 1);
 
     /* -- v_get_pixel, which no picture can check ----------------------- */
     STATUS[4] = antic_get_pixel(0, 0);              /* border: set      */

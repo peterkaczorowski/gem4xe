@@ -361,3 +361,86 @@ uint8_t antic_get_pixel(int16_t x, int16_t y)
     p = an_at(x, y);
     return (uint8_t)((*p >> (7 - (x & 7))) & 1);
 }
+
+/* ---- patterns, and the styled lines that are patterns ------------------ */
+
+/* The byte of `patrow` that lands on screen byte `bx`: the pattern is
+ * aligned to the screen's 16-pixel word, so an even byte takes the high
+ * half and an odd byte the low one. */
+static uint8_t an_patt_byte(uint16_t patrow, int16_t bx)
+{
+    return (uint8_t)((bx & 1) ? (patrow & 0xFF) : (patrow >> 8));
+}
+
+void antic_patt_span(int16_t x1, int16_t x2, int16_t y, uint16_t patrow,
+                     int16_t mode, uint8_t pen)
+{
+    volatile uint8_t *p;
+    uint8_t lm, rm, src, v;
+    int16_t b1, b2, b;
+
+    if (y < 0 || y >= AN_H)
+        return;
+    if (x1 > x2) {
+        int16_t t = x1; x1 = x2; x2 = t;
+    }
+    if (x2 < 0 || x1 >= AN_W)
+        return;
+    if (x1 < 0)
+        x1 = 0;
+    if (x2 >= AN_W)
+        x2 = AN_W - 1;
+
+    b1 = (int16_t)((uint16_t)x1 >> 3);
+    b2 = (int16_t)((uint16_t)x2 >> 3);
+    lm = an_left[x1 & 7];
+    rm = an_right[x2 & 7];
+    p = SCREEN + (uint16_t)y * AN_STRIDE + (uint16_t)b1;
+
+    if (b1 == b2) {
+        src = an_patt_byte(patrow, b1);
+        v = *p;
+        v = an_apply(v, src, (uint8_t)(lm & rm), mode, pen);
+        *p = v;
+        return;
+    }
+    src = an_patt_byte(patrow, b1);
+    v = *p;
+    v = an_apply(v, src, lm, mode, pen);
+    *p = v;
+    for (b = (int16_t)(b1 + 1); b < b2; b++) {
+        p++;
+        src = an_patt_byte(patrow, b);
+        v = *p;
+        v = an_apply(v, src, 0xFF, mode, pen);
+        *p = v;
+    }
+    p++;
+    src = an_patt_byte(patrow, b2);
+    v = *p;
+    v = an_apply(v, src, rm, mode, pen);
+    *p = v;
+}
+
+void antic_vline(int16_t x, int16_t y1, int16_t y2, uint16_t mask,
+                 int16_t mode, uint8_t pen)
+{
+    int16_t y;
+    uint8_t bit;
+
+    if (x < 0 || x >= AN_W)
+        return;
+    if (y1 > y2) {
+        y = y1; y1 = y2; y2 = y;
+    }
+    if (y1 < 0)
+        y1 = 0;
+    if (y2 >= AN_H)
+        y2 = AN_H - 1;
+    for (y = y1; y <= y2; y++) {
+        /* the style is anchored to the screen's grid, as a horizontal
+         * one is: pixel y takes bit 15 - (y & 15) */
+        bit = (uint8_t)((mask >> (15 - (y & 15))) & 1);
+        antic_patt_span(x, x, y, bit ? 0xFFFF : 0x0000, mode, pen);
+    }
+}

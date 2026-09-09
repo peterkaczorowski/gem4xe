@@ -16,6 +16,11 @@ LEFT = (0xFF, 0x7F, 0x3F, 0x1F, 0x0F, 0x07, 0x03, 0x01)
 RIGHT = (0x80, 0xC0, 0xE0, 0xF0, 0xF8, 0xFC, 0xFE, 0xFF)
 
 MD_REPLACE, MD_TRANS, MD_XOR, MD_ERASE = 1, 2, 3, 4
+
+# An eight-row fill pattern for the gate, in the same form fillpat.c
+# stores GEM's: one UWORD a row, bit 15 the leftmost pixel of a
+# 16-aligned screen word.
+PATT = (0xFF00, 0x8080, 0x8080, 0x8080, 0x0FF0, 0x0808, 0x0808, 0x0808)
 AN_GLYPH_W = AN_GLYPH_H = 8
 
 # The same font the target links, read from the same file, so the model
@@ -132,6 +137,44 @@ class Antic:
                 self.mem[i] = apply(self.mem[i], hi, mh, mode, pen)
                 self.mem[i + 1] = apply(self.mem[i + 1], lo, ml, mode, pen)
 
+    def patt_byte(self, patrow, bx):
+        return (patrow & 0xFF) if (bx & 1) else (patrow >> 8)
+
+    def patt_span(self, x1, x2, y, patrow, mode, pen):
+        if y < 0 or y >= AN_H:
+            return
+        if x1 > x2:
+            x1, x2 = x2, x1
+        if x2 < 0 or x1 >= AN_W:
+            return
+        x1, x2 = max(x1, 0), min(x2, AN_W - 1)
+        b1, b2 = x1 >> 3, x2 >> 3
+        lm, rm = LEFT[x1 & 7], RIGHT[x2 & 7]
+        base = y * AN_STRIDE
+
+        def at(b, m):
+            i = base + b
+            self.mem[i] = apply(self.mem[i], self.patt_byte(patrow, b), m,
+                                mode, pen)
+
+        if b1 == b2:
+            at(b1, lm & rm)
+            return
+        at(b1, lm)
+        for b in range(b1 + 1, b2):
+            at(b, 0xFF)
+        at(b2, rm)
+
+    def vline(self, x, y1, y2, mask, mode, pen):
+        if x < 0 or x >= AN_W:
+            return
+        if y1 > y2:
+            y1, y2 = y2, y1
+        y1, y2 = max(y1, 0), min(y2, AN_H - 1)
+        for y in range(y1, y2 + 1):
+            bit = (mask >> (15 - (y & 15))) & 1
+            self.patt_span(x, x, y, 0xFFFF if bit else 0x0000, mode, pen)
+
     def get_pixel(self, x, y):
         if x < 0 or y < 0 or x >= AN_W or y >= AN_H:
             return 0
@@ -178,6 +221,15 @@ def pattern():
         a.glyph(ord('a') + i, 20 + i * 9, 60, MD_TRANS, 0)
     for i in range(8):
         a.glyph(ord('0') + i, 20 + i * 9, 70, MD_XOR, 1)
+    # patterned fills: two 8-row patterns, side by side so the screen's
+    # own 16-pixel alignment shows as one continuous pattern
+    for k, row in enumerate(PATT):
+        a.patt_span(30, 148, 152 + k, row, MD_REPLACE, 1)
+        a.patt_span(149, 269, 152 + k, row, MD_REPLACE, 1)
+    # styled lines: a dashed horizontal and two dashed verticals
+    a.patt_span(30, 269, 162, 0xF0F0, MD_REPLACE, 1)
+    a.vline(24, 150, 165, 0xCCCC, MD_REPLACE, 1)
+    a.vline(275, 150, 165, 0xAAAA, MD_REPLACE, 1)
     return a
 
 

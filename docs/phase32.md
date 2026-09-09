@@ -135,9 +135,25 @@ values and not only pixels.
 
 It passed first time, which is what the ccbug rules are for.
 
+## Patterns, and the styled lines that are the same thing
+
+A GEM fill pattern is one UWORD a row with bit 15 the leftmost pixel of a
+**16-aligned screen word** (`src/vdi/fillpat.c`).  The alignment is the
+SCREEN's, not the run's, which is the property that makes two window
+backgrounds side by side look like one desk rather than two patterns that
+happen to abut.  The gate draws two runs meeting at x=149 for exactly
+that reason.
+
+And a styled horizontal line is not a separate thing: the VDI anchors
+`vsl_type`'s mask to the same screen grid with `style_anchor()` and then
+draws the line as a patterned span.  So `antic_patt_span` serves both,
+and **the two drivers cannot disagree about the phase** -- which they
+could very easily have done if the ANTIC side had grown its own idea of
+where a dash starts.  A vertical line indexes the same mask by y.
+
 ## Still to come
 
-Lines, the fill patterns, `vro_cpyfm` and the mouse cursor, and then
+`vro_cpyfm` and the mouse cursor, and then
 wiring the dispatcher so that `screen()` reaches these instead of the
 blitter.  `v_opnwk` already answers a device capability array and the AES
 already lays out to whatever it says -- that is what the mechanism is for

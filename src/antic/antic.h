@@ -103,6 +103,23 @@ void antic_rect_mode(int16_t x1, int16_t y1, int16_t x2, int16_t y2,
  * the same glyph expanded to 4bpp masks in VRAM at both parities. */
 void antic_glyph(uint16_t ch, int16_t x, int16_t y, int16_t mode, uint8_t pen);
 
+/* A PATTERNED run.  `patrow` is one row of a GEM fill pattern: sixteen
+ * bits, bit 15 the leftmost pixel of a 16-ALIGNED screen word, which is
+ * how src/vdi/fillpat.c stores them and how the VBXE driver consumes
+ * them.  The alignment is the screen's, not the run's, so two rectangles
+ * side by side carry one continuous pattern.
+ *
+ * A styled horizontal LINE is the same thing: the VDI anchors vsl_type's
+ * mask to the screen grid with style_anchor() and then draws the line as
+ * a patterned span, so this one primitive serves both and the two
+ * drivers cannot disagree about the phase. */
+void antic_patt_span(int16_t x1, int16_t x2, int16_t y, uint16_t patrow,
+                     int16_t mode, uint8_t pen);
+
+/* A vertical line, styled: the mask is indexed by y the same way. */
+void antic_vline(int16_t x, int16_t y1, int16_t y2, uint16_t mask,
+                 int16_t mode, uint8_t pen);
+
 /* v_get_pixel: 0 or 1, and 0 for anything off the screen. */
 uint8_t antic_get_pixel(int16_t x, int16_t y);
 
