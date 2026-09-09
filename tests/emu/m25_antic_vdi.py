@@ -28,13 +28,18 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from a8test.launcher import launch          # noqa: E402
 import anticref                             # noqa: E402
+import fontconv6                            # noqa: E402
 from anticref import AN_W, AN_H, MD_REPLACE, MD_XOR   # noqa: E402
 
 DISK = os.path.abspath(os.path.join(ROOT, "build", "m25-boot.atr"))
 SHOT = os.path.abspath(os.path.join(ROOT, "build", "m25.png"))
 STATUS = 0x0600
 SHOT_X0, SHOT_Y0 = 8, 24
-FONT_TOP = 6                                # src/vdi/vdi.h: baseline to top
+FONT_W, FONT_H, FONT_TOP = 6, 6, 4          # the ANTIC face (vdidev.h)
+# ...read from the same file the target links, so the model cannot drift
+FACE = fontconv6.unpack(fontconv6.parse(
+    os.path.join(os.path.expanduser("~"), "dev", "emutos",
+                 "bios", "fnt_st_6x6.c")))
 
 
 def model():
@@ -51,7 +56,8 @@ def model():
     a.rect_mode(60, 30, 160, 50, MD_XOR, 1)
     text = "GEM ON ANTIC"
     for i, ch in enumerate(text):
-        a.glyph(ord(ch), 20 + i * 8, 80 - FONT_TOP, MD_REPLACE, 1)
+        a.glyph(ord(ch), 20 + i * FONT_W, 80 - FONT_TOP, MD_REPLACE, 1,
+                FONT_W, FACE, FONT_H)
     return a
 
 
@@ -104,8 +110,13 @@ def main(argv):
         check(planes == 1,
               f"the AES thinks the device has {planes} planes, not 1 -- it "
               f"sizes its menu save buffer from that")
-        check((wchar, hchar) == (8, 8),
-              f"the system font's cell came back {wchar}x{hchar}")
+        check((wchar, hchar) == (FONT_W, FONT_H),
+              f"the system font's cell came back {wchar}x{hchar}, not "
+              f"{FONT_W}x{FONT_H} -- this device carries Atari's condensed "
+              f"face, because 8 wide would be forty columns")
+        check(width // wchar >= 53,
+              f"{width // wchar} columns; the point of the narrow face is to "
+              f"have more than the forty an 8-wide cell gives")
         check(hbox == hchar + 3,
               f"a box is {hbox} tall, not the cell plus three ({hchar + 3})")
         check(wbox == max(hbox * 372 // 372, wchar + 4),

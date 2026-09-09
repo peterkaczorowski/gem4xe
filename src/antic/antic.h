@@ -105,7 +105,9 @@ void antic_rect_mode(int16_t x1, int16_t y1, int16_t x2, int16_t y2,
 /* One 8x8 glyph of the system font at (x, y), which is the cell's top
  * left.  1bpp into 1bpp with a shift, where the VBXE driver has to keep
  * the same glyph expanded to 4bpp masks in VRAM at both parities. */
-void antic_glyph(uint16_t ch, int16_t x, int16_t y, int16_t mode, uint8_t pen);
+void antic_glyph(uint32_t face, uint16_t ch,
+                 int16_t x, int16_t y, int16_t mode, uint8_t pen,
+                 int16_t w, int16_t h);
 
 /* A PATTERNED run.  `patrow` is one row of a GEM fill pattern: sixteen
  * bits, bit 15 the leftmost pixel of a 16-ALIGNED screen word, which is

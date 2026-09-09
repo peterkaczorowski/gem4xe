@@ -42,8 +42,29 @@
 #  define SCR_W       AN_W
 #  define SCR_H       AN_H
 #  define SCR_STRIDE  AN_STRIDE
+   /* Atari's condensed face (bios/fnt_st_6x6.c), which is what the ST
+    * uses for icon labels in low resolution -- GEM's own answer to a
+    * screen short of pixels.  6 wide is 53 columns here where 8 would be
+    * 40, and 6 tall is 28 rows where 8 would be 21: more of both, and a
+    * face designed to be read at that size rather than one squeezed. */
+#  define FONT_W        6
+#  define FONT_H        6
+#  define FONT_TOP      4     /* Fonthead.top: baseline to top of cell */
+#  define FONT_ASCENT   4
+#  define FONT_HALF     3
+#  define FONT_DESCENT  1
+#  define FONT_BOTTOM   1
+#  define FONT_POINT    8
 #else
 #  include "../vbxe/vbxe.h"
+#  define FONT_W        8
+#  define FONT_H        8
+#  define FONT_TOP      6     /* Fonthead.top: baseline to top of cell */
+#  define FONT_ASCENT   6     /* and the rest of the head EmuTOS records */
+#  define FONT_HALF     4     /* for this face, which vst_alignment needs */
+#  define FONT_DESCENT  1
+#  define FONT_BOTTOM   1
+#  define FONT_POINT    9
 #endif
 
 /* A raster form as the copy sees it: an MFDB resolved, or the screen.

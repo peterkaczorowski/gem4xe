@@ -8,14 +8,24 @@
  * is plain motherboard RAM the accelerator reaches at full speed.
  */
 #include "antic.h"
-#include "../vdi/vdi.h"                 /* the system font, which this
-                                         * driver blits as it stands */
 
-/* Character N's row r of the 8x8 face: the strip is 1bpp already and
- * bit 7 is the leftmost pixel, which is what this device wants too. */
-static uint8_t an_font_row(uint16_t ch, uint16_t row)
+/* Character N's row r of a face.  The strip is one byte per character
+ * per row, 256 of them, the glyph LEFT-ALIGNED in its byte -- which is
+ * the layout every face gem4xe links is repacked into, whatever the
+ * donor's packing was.  WHICH face is the caller's business: this file
+ * used to reach for font8x8 itself, and then quietly went on drawing it
+ * after the VDI had been told to use the condensed one. */
+#define AN_FONT_STRIDE 256
+
+/* The ADDRESS is a uint32_t and the arithmetic is done on it BEFORE the
+ * cast, which is not a style choice: a far pointer indexed by a computed
+ * subscript does not survive cc65816 5.18, and the same idiom is what
+ * vdi_font_expand and draw_glyph_cpu use on the other device. */
+static uint8_t an_font_row(uint32_t face, uint16_t ch, uint16_t row)
 {
-    return font8x8[row * FONT_STRIDE + (ch & 0xFF)];
+    const uint8_t __far *sr =
+        (const uint8_t __far *)(face + (uint32_t)row * AN_FONT_STRIDE);
+    return sr[ch & 0xFF];
 }
 
 #define REG8(a)  (*(volatile uint8_t *)(a))
@@ -332,28 +342,32 @@ void antic_rect_mode(int16_t x1, int16_t y1, int16_t x2, int16_t y2,
  * A cell that runs off an edge is dropped whole rather than clipped:
  * the VDI clips text by the cell, and a partial glyph is not something
  * GEM asks for. */
-void antic_glyph(uint16_t ch, int16_t x, int16_t y, int16_t mode, uint8_t pen)
+void antic_glyph(uint32_t face, uint16_t ch, int16_t x, int16_t y,
+                 int16_t mode, uint8_t pen, int16_t w, int16_t h)
 {
     volatile uint8_t *p;
     uint16_t row;
-    uint8_t shift, g, v;
+    uint8_t shift, g, v, cell;
 
-    if (x < 0 || y < 0 || x + AN_GLYPH_W > AN_W || y + AN_GLYPH_H > AN_H)
+    if (w < 1 || w > 8)
+        return;
+    cell = (uint8_t)(0xFF << (8 - w));  /* the columns the face uses */
+    if (x < 0 || y < 0 || x + w > AN_W || y + h > AN_H)
         return;
     shift = (uint8_t)(x & 7);
     p = SCREEN + (uint16_t)y * AN_STRIDE + ((uint16_t)x >> 3);
 
-    for (row = 0; row < AN_GLYPH_H; row++) {
-        g = an_font_row(ch, row);
+    for (row = 0; row < (uint16_t)h; row++) {
+        g = (uint8_t)(an_font_row(face, ch, row) & cell);
         if (shift == 0) {
             v = *p;
-            v = an_apply(v, g, 0xFF, mode, pen);
+            v = an_apply(v, g, cell, mode, pen);
             *p = v;
         } else {
             uint8_t hi = (uint8_t)(g >> shift);
             uint8_t lo = (uint8_t)(g << (8 - shift));
-            uint8_t mh = (uint8_t)(0xFF >> shift);
-            uint8_t ml = (uint8_t)(0xFF << (8 - shift));
+            uint8_t mh = (uint8_t)(cell >> shift);
+            uint8_t ml = (uint8_t)(cell << (8 - shift));
             v = *p;
             v = an_apply(v, hi, mh, mode, pen);
             *p = v;

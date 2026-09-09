@@ -22,12 +22,14 @@
  *                       usually gets wrong at exactly one offset
  */
 #include "antic/antic.h"
+#include "vdi/vdi.h"      /* the 8x8 face this milestone draws with */
 
 #define STATUS ((volatile unsigned char *) 0x0600)
 
 __task void main(void)
 {
     int16_t i;
+    const uint32_t FACE8 = (uint32_t)(const uint8_t __far *)font8x8;
     /* the same eight rows tools/anticref.py has */
     static const uint16_t patt[8] = {
         0xFF00, 0x8080, 0x8080, 0x8080, 0x0FF0, 0x0808, 0x0808, 0x0808
@@ -89,12 +91,12 @@ __task void main(void)
 
     /* -- text, at every one of the eight shifts ------------------------ */
     for (i = 0; i < 8; i++)                         /* REPLACE on clear */
-        antic_glyph((uint16_t)('A' + i), (int16_t)(20 + i * 9), 50, 1, 1);
+        antic_glyph(FACE8, (uint16_t)('A' + i), (int16_t)(20 + i * 9), 50, 1, 1, 8, 8);
     antic_rect_mode(20, 60, 200, 67, 1, 1);         /* a set ground     */
     for (i = 0; i < 8; i++)                         /* TRANS pen 0      */
-        antic_glyph((uint16_t)('a' + i), (int16_t)(20 + i * 9), 60, 2, 0);
+        antic_glyph(FACE8, (uint16_t)('a' + i), (int16_t)(20 + i * 9), 60, 2, 0, 8, 8);
     for (i = 0; i < 8; i++)                         /* XOR on clear     */
-        antic_glyph((uint16_t)('0' + i), (int16_t)(20 + i * 9), 70, 3, 1);
+        antic_glyph(FACE8, (uint16_t)('0' + i), (int16_t)(20 + i * 9), 70, 3, 1, 8, 8);
 
     /* -- patterned fills, and the styled lines that are the same thing -
      * Two runs side by side: the pattern is aligned to the SCREEN's

@@ -129,19 +129,24 @@ class Antic:
         for y in range(y1, y2 + 1):
             self.span(x1, x2, y, mode, pen)
 
-    def glyph(self, ch, x, y, mode, pen):
-        """A whole cell or none of it, as antic_glyph has it."""
-        if x < 0 or y < 0 or x + AN_GLYPH_W > AN_W or y + AN_GLYPH_H > AN_H:
+    def glyph(self, ch, x, y, mode, pen, w=8, face=None, rows=None):
+        """A whole cell or none of it, as antic_glyph has it.  `w` is the
+        FACE's cell width -- 8 for the 8x8 strip, 6 for the condensed one
+        the ANTIC device carries -- and only those columns are written."""
+        face = FONT if face is None else face
+        rows = AN_GLYPH_H if rows is None else rows
+        cell = (0xFF << (8 - w)) & 0xFF
+        if x < 0 or y < 0 or x + w > AN_W or y + rows > AN_H:
             return
         shift = x & 7
-        for row in range(AN_GLYPH_H):
-            g = FONT[row * FONT_STRIDE + (ch & 0xFF)]
+        for row in range(rows):
+            g = face[row * FONT_STRIDE + (ch & 0xFF)] & cell
             i = (y + row) * AN_STRIDE + (x >> 3)
             if shift == 0:
-                self.mem[i] = apply(self.mem[i], g, 0xFF, mode, pen)
+                self.mem[i] = apply(self.mem[i], g, cell, mode, pen)
             else:
                 hi, lo = g >> shift, (g << (8 - shift)) & 0xFF
-                mh, ml = 0xFF >> shift, (0xFF << (8 - shift)) & 0xFF
+                mh, ml = cell >> shift, (cell << (8 - shift)) & 0xFF
                 self.mem[i] = apply(self.mem[i], hi, mh, mode, pen)
                 self.mem[i + 1] = apply(self.mem[i + 1], lo, ml, mode, pen)
 

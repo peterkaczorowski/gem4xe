@@ -288,15 +288,14 @@ UWORD style_anchor(UWORD mask, WORD from, WORD dir);
 /* GEM 8x8 system font (from EmuTOS bios/fnt_st_8x8.c via tools/fontconv.py).
  * A 1bpp strip: FONT_STRIDE bytes per row, FONT_H rows, character N's byte on
  * row r at r*FONT_STRIDE + N. */
-#define FONT_W        8
-#define FONT_H        8
+/* THE FACE IS THE DEVICE'S, and so are its metrics: a 320-pixel screen
+ * with an 8-wide cell is forty columns, which is half what a GEM screen
+ * is, so the ANTIC device carries Atari's condensed 6x6 instead.  The
+ * numbers are in src/vdi/vdidev.h, beside the geometry, because they are
+ * chosen together.  The STRIDE is not: every face gem4xe links is
+ * repacked into one byte per character per row, whatever the donor's
+ * packing was, which is what lets one glyph blit serve all of them. */
 #define FONT_STRIDE 256
-#define FONT_TOP      6     /* Fonthead.top: baseline to top of cell */
-#define FONT_ASCENT   6     /* and the rest of the head EmuTOS records for */
-#define FONT_HALF     4     /* this face, which vst_alignment needs */
-#define FONT_DESCENT  1
-#define FONT_BOTTOM   1
-#define FONT_POINT    9     /* Fonthead.point, as fnt_st_8x8.c gives it */
 
 /* vst_effects, and the two of them this driver can do: a second blit one
  * pixel right thickens a glyph, and a line under the cell underlines it.
@@ -319,7 +318,9 @@ UWORD style_anchor(UWORD mask, WORD from, WORD dir);
 #define TA_BOTTOM 3
 #define TA_DESCENT 4
 #define TA_TOP 5
-extern const uint8_t __far font8x8[FONT_STRIDE * FONT_H];
+/* The 8x8 face.  Unsized: how tall a face is is the DEVICE's business
+ * now (vdidev.h), and an extern does not need to know. */
+extern const uint8_t __far font8x8[];
 
 void vdi(void);             /* dispatch on contrl[0]; the GSX "SCREEN" entry */
 void vdi_init(void);        /* one-time bring-up of the physical workstation */

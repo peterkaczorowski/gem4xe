@@ -17,6 +17,7 @@
 #include "vdidev.h"
 #include "../antic/antic.h"
 #include "../sys/farmem.h"
+#include "font.h"      /* vdi_font: WHICH face, which is not this file's choice */
 
 void dev_fill_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen)
 {
@@ -145,8 +146,9 @@ void dev_glyph(WORD ch, WORD cx, WORD cy, WORD overlay)
         (cx < vwk.xmn_clip || cy < vwk.ymn_clip ||
          cx + FONT_W - 1 > vwk.xmx_clip || cy + FONT_H - 1 > vwk.ymx_clip))
         return;                             /* the cell, or none of it */
-    antic_glyph((uint16_t)ch, (int16_t)cx, (int16_t)cy, (int16_t)mode,
-                (uint8_t)(vwk.text_color ? 1 : 0));
+    antic_glyph(vdi_font, (uint16_t)ch,
+                (int16_t)cx, (int16_t)cy, (int16_t)mode,
+                (uint8_t)(vwk.text_color ? 1 : 0), FONT_W, FONT_H);
 }
 
 /* vrt_cpyfm: a one-plane source into the screen, pixel by pixel and

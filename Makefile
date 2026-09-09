@@ -57,7 +57,7 @@ M24_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m24_antic.o b
 # side of the seam and linked against dev_antic.o.
 M25_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m25_antic_vdi.o \
              build/vdi_a.o build/dev_antic.o build/antic.o build/pointer_a.o \
-             build/font8x8.o build/fillpat.o build/sintbl.o build/font_a.o \
+             build/font8x8.o build/font6x6.o build/fillpat.o build/sintbl.o build/font_a.o \
              build/farmem.o build/irq.o build/irqs.o build/rapidus.o \
              build/cio.o build/cios.o build/dos.o build/m25_stub.o \
              build/graf.o build/objc.o build/grlib.o build/event.o \
@@ -101,6 +101,13 @@ build/%.o: src/%.c
 build/dev_vbxe.o: src/vdi/dev_vbxe.c src/vdi/vdidev.h src/vdi/vdi.h src/vbxe/vbxe.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -I src/vdi -o $@ $<
+
+build/font6x6.o: src/vdi/font6x6.c
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src/vdi -o $@ $<
+
+src/vdi/font6x6.c: tools/fontconv6.py
+	python3 tools/fontconv6.py "$(EMUTOS)/bios/fnt_st_6x6.c" $@
 
 build/dev_antic.o: src/vdi/dev_antic.c src/vdi/vdidev.h src/vdi/vdi.h src/antic/antic.h
 	@mkdir -p build

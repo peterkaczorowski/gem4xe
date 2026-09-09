@@ -12,6 +12,7 @@
  */
 #include "vdi/vdi.h"
 #include "aes/aes.h"
+#include "vdi/font.h"
 
 #define STATUS ((volatile unsigned char *) 0x0600)
 
@@ -43,6 +44,10 @@ __task void main(void)
     STATUS[1] = 'V';
     STATUS[2] = 0;
 
+    /* The face first, as src/gem.c and src/m3_vdi.c do: vdi_init opens
+     * the workstation but the FONT is the program's to choose, and a
+     * vdi_font of zero is a glyph blit reading address zero. */
+    vdi_font_default();
     vdi_init();                         /* opens the workstation: the
                                          * device's palette call is what
                                          * brings ANTIC up */
