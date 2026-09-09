@@ -119,3 +119,87 @@ void dev_cursor_discard(void)
 {
     antic_cursor_discard();
 }
+
+/* ---- text --------------------------------------------------------------
+ * The font strip is 1bpp and so is this screen, so a glyph goes down as
+ * it stands.  Nothing is derived from it and nothing has to be thrown
+ * away when the face changes.
+ */
+void dev_font_changed(void)
+{
+}
+
+void dev_glyph(WORD ch, WORD cx, WORD cy, WORD overlay)
+{
+    WORD mode = (WORD)(vwk.wrt_mode + 1);
+
+    /* The thickening pass must ADD ink to the letter already there, so a
+     * replace-mode overlay is drawn transparently -- otherwise it would
+     * repaint the cell background and rub out the first pass.  XOR and
+     * erase overlay in their own mode, which is what the other device's
+     * pixel path does. */
+    if (overlay && mode == MD_REPLACE)
+        mode = MD_TRANS;
+    if (vwk.clip &&
+        (cx < vwk.xmn_clip || cy < vwk.ymn_clip ||
+         cx + FONT_W - 1 > vwk.xmx_clip || cy + FONT_H - 1 > vwk.ymx_clip))
+        return;                             /* the cell, or none of it */
+    antic_glyph((uint16_t)ch, (int16_t)cx, (int16_t)cy, (int16_t)mode,
+                (uint8_t)(vwk.text_color ? 1 : 0));
+}
+
+/* vrt_cpyfm: a one-plane source into the screen, pixel by pixel and
+ * clipped to the pixel.  The rules per mode are the VDI's:
+ *
+ *   replace      ink where set, bg where clear
+ *   transparent  ink where set
+ *   XOR          complement where set
+ *   erase        bg where CLEAR
+ */
+void dev_raster_1bpp(const uint8_t *bits, uint16_t stride,
+                     WORD sx, WORD sy, WORD w, WORD h,
+                     WORD dx, WORD dy, WORD mode, WORD ink, WORD bg)
+{
+    uint8_t pen = (uint8_t)(ink ? 1 : 0);
+    uint8_t pap = (uint8_t)(bg ? 1 : 0);
+    WORD r, c;
+
+    for (r = 0; r < h; r++) {
+        WORD y = (WORD)(dy + r);
+        const uint8_t *row = bits + (uint16_t)(sy + r) * stride;
+
+        if (y < 0 || y >= AN_H)
+            continue;
+        if (vwk.clip && (y < vwk.ymn_clip || y > vwk.ymx_clip))
+            continue;
+        for (c = 0; c < w; c++) {
+            WORD x = (WORD)(dx + c);
+            WORD s = (WORD)(sx + c);
+            uint8_t set;
+
+            if (x < 0 || x >= AN_W)
+                continue;
+            if (vwk.clip && (x < vwk.xmn_clip || x > vwk.xmx_clip))
+                continue;
+            set = (uint8_t)((row[(uint16_t)s >> 3] >> (7 - (s & 7))) & 1);
+            switch (mode) {
+            case MD_TRANS:
+                if (set)
+                    antic_plot((int16_t)x, (int16_t)y, pen);
+                break;
+            case MD_XOR:
+                if (set)
+                    antic_plot((int16_t)x, (int16_t)y,
+                               (uint8_t)!antic_get_pixel((int16_t)x, (int16_t)y));
+                break;
+            case MD_ERASE:
+                if (!set)
+                    antic_plot((int16_t)x, (int16_t)y, pap);
+                break;
+            default:
+                antic_plot((int16_t)x, (int16_t)y, set ? pen : pap);
+                break;
+            }
+        }
+    }
+}

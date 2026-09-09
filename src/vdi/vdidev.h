@@ -52,6 +52,30 @@ void dev_patt_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen);
  * both devices draw a dash in the same place.  The device clips it. */
 void dev_style_line(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask);
 
+/* ---- text -------------------------------------------------------------
+ * One glyph of the system font with its top-left at (cx, cy), in the
+ * current writing mode and text colour.  `overlay` is 0 for the letter
+ * itself and 1 for the second pass that thickens it -- which is not the
+ * same as "draw it transparently", because in XOR and erase modes the
+ * overlay is drawn in THAT mode too and the device may take a different
+ * path for it.  The device clips the cell: a partial glyph is not
+ * something GEM asks for, and whether a whole one can be blitted is the
+ * device's question, not the VDI's. */
+void dev_glyph(WORD ch, WORD cx, WORD cy, WORD overlay);
+
+/* The font strip changed (src/vdi/font.c loaded another face).  A device
+ * that keeps the glyphs in some other form re-derives it here: VBXE
+ * expands all 256 into 4bpp masks in VRAM at both x parities, 8 KB of
+ * them; ANTIC blits the strip as it stands and this is empty. */
+void dev_font_changed(void);
+
+/* A ONE-PLANE source expanded into the device's colours -- how the AES
+ * draws icons and glyph masks (vrt_cpyfm).  `ink` and `bg` are VDI pens.
+ * The source is a near pointer because a form lives in bank $00. */
+void dev_raster_1bpp(const uint8_t *bits, uint16_t stride,
+                     WORD sx, WORD sy, WORD w, WORD h,
+                     WORD dx, WORD dy, WORD mode, WORD ink, WORD bg);
+
 /* ---- the pointer -----------------------------------------------------
  * The VDI owns WHERE it is: the hot spot, the nesting count that
  * v_show_c and v_hide_c keep, and whether it is currently drawn.  The

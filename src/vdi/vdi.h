@@ -328,7 +328,6 @@ extern const uint8_t __far font8x8[FONT_STRIDE * FONT_H];
 void vdi(void);             /* dispatch on contrl[0]; the GSX "SCREEN" entry */
 void vdi_init(void);        /* one-time bring-up of the physical workstation */
 void vdi_close_virtuals(void); /* every virtual workstation closed: a program's, at its end */
-void vdi_font_expand(void); /* 1bpp -> 4bpp glyph masks into VRAM; call once */
 
 /* Mouse cursor.  vdi_cursor_move() is what an input poll calls after
  * ptr_poll(): it erases, repositions and redraws only if something changed. */

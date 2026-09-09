@@ -20,6 +20,7 @@
  */
 #include <string.h>
 #include "font.h"
+#include "vdidev.h"
 #include "sys/cio.h"
 #include "sys/farmem.h"
 
@@ -75,7 +76,7 @@ void vdi_font_where(const char *cioname)
 void vdi_font_default(void)
 {
     vdi_font = (uint32_t)(const uint8_t __far *)font8x8;
-    vdi_font_expand();
+    dev_font_changed();
 }
 
 /* The header says whether this file is one we can take. */
@@ -156,7 +157,7 @@ WORD vdi_font_load(void)
     font_loaded_id = (WORD)be16(&hdr[FH_FONT_ID]);
     font_have = 1;
     vdi_font = font_ram;
-    vdi_font_expand();
+    dev_font_changed();
     return 1;
 }
 
@@ -187,7 +188,7 @@ WORD vdi_font_select(WORD id)
 
     if (want != vdi_font) {
         vdi_font = want;
-        vdi_font_expand();
+        dev_font_changed();
     }
     return now;
 }
