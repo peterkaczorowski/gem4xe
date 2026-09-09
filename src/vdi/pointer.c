@@ -1,6 +1,6 @@
 /* pointer.c -- pointing-device back ends behind the seam in pointer.h. */
 #include "pointer.h"
-#include "../vbxe/vbxe.h"
+#include "vdidev.h"          /* the screen's size, from whichever device */
 #include "../sys/irq.h"
 
 PTR_STATE ptr_state;

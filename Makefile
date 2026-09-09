@@ -53,6 +53,13 @@ HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
 M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
 # The ANTIC surface milestone: no VBXE object at all, which is the point
 M24_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m24_antic.o build/antic.o build/font8x8.o
+# The VDI on the ANTIC device: the same vdi.c, compiled for the other
+# side of the seam and linked against dev_antic.o.
+M25_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m25_antic_vdi.o \
+             build/vdi_a.o build/dev_antic.o build/antic.o build/pointer_a.o \
+             build/font8x8.o build/fillpat.o build/sintbl.o build/font_a.o \
+             build/farmem.o build/irq.o build/irqs.o build/rapidus.o \
+             build/cio.o build/cios.o build/dos.o build/m25_stub.o
 M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/dev_vbxe.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
 
 # GEM.COM, the product (src/gem.c): the runner's objects with the runner
@@ -93,7 +100,24 @@ build/dev_vbxe.o: src/vdi/dev_vbxe.c src/vdi/vdidev.h src/vdi/vdi.h src/vbxe/vbx
 
 build/dev_antic.o: src/vdi/dev_antic.c src/vdi/vdidev.h src/vdi/vdi.h src/antic/antic.h
 	@mkdir -p build
-	$(CC) $(CFLAGS) -I src -I src/vdi -o $@ $<
+	$(CC) $(CFLAGS) -DGEM4XE_DEV_ANTIC -I src -I src/vdi -o $@ $<
+
+# The device-independent halves, compiled for the ANTIC side of the seam.
+build/vdi_a.o: src/vdi/vdi.c src/vdi/vdi.h src/vdi/vdidev.h src/vdi/pointer.h src/antic/antic.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -DGEM4XE_DEV_ANTIC -I src -I src/vdi -o $@ $<
+
+build/pointer_a.o: src/vdi/pointer.c src/vdi/pointer.h src/vdi/vdidev.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -DGEM4XE_DEV_ANTIC -I src -I src/vdi -o $@ $<
+
+build/font_a.o: src/vdi/font.c src/vdi/font.h src/vdi/vdi.h src/vdi/vdidev.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -DGEM4XE_DEV_ANTIC -I src -I src/vdi -o $@ $<
+
+build/m25_antic_vdi.o: src/m25_antic_vdi.c src/vdi/vdi.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -DGEM4XE_DEV_ANTIC -I src -I src/vdi -o $@ $<
 
 build/vbxe.o: src/vbxe/vbxe.c src/vbxe/vbxe.h
 	@mkdir -p build
@@ -441,6 +465,17 @@ build/m3.elf: $(M3_OBJS) src/gem4xe.scm
 build/m2.xex: build/m2.elf
 	python3 tools/mkxex.py $< $@ --entry _atari_entry
 
+build/m25.elf: $(M25_OBJS) src/gem4xe.scm
+	$(LD) src/gem4xe.scm $(M25_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/m25.map
+
+build/m25.xex: build/m25.elf
+	python3 tools/mkxex.py $< $@ --entry _atari_entry
+
+build/m25-boot.atr: build/m25.xex
+	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M25.COM $(DISK_DENSITY)
+
 build/m24.elf: $(M24_OBJS) src/gem4xe.scm
 	$(LD) src/gem4xe.scm $(M24_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/m24.map
 
@@ -696,7 +731,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-boot
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-boot
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -884,6 +919,10 @@ test-m23: build/m23-boot.atr build/desktop.g4a build/desktop.sym build/calc.sym
 test-m24: build/m24-boot.atr
 	python3 tests/emu/m24_antic.py
 
+# ...and the VDI itself on it: the same vdi.c, the other side of the seam.
+test-m25: build/m25-boot.atr
+	python3 tests/emu/m25_antic_vdi.py
+
 # The desktop's writes to a disk (phase 14, milestone 7; phase 19): File
 # -> New folder, File -> Delete, and File -> Show info -- which is also
 # the rename -- driven at the mouse and the keyboard against the model,
@@ -957,4 +996,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-boot test-cf demo movie bench emu-stop clean

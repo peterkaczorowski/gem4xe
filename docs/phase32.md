@@ -190,3 +190,45 @@ clip and every stride in a 3,676-line file that 49 conformance cases
 stand on.  One binary that finds no VBXE and falls back is the better
 product and it is the obvious next step after the driver is complete; it
 is deliberately not being done first.
+
+## Phase 33 -- the VDI on it
+
+`src/vdi/vdi.c`, compiled with `GEM4XE_DEV_ANTIC` and linked against
+`dev_antic.c` instead of `dev_vbxe.c`.  **Nothing in the VDI was changed
+to make that work** -- the seam was finished in seven increments with
+`test-m3` green after each, and then the other device was simply linked
+in its place.  It compiled first time.
+
+`test-m25` drives it through the VDI's OWN interface -- `contrl`,
+`intin`, `ptsin` and a call to `vdi()` -- so what is being exercised is
+the dispatcher, the workstation state, the attributes and the clipping,
+on a device they were not written for:
+
+    GEM ON ANTIC
+
+with a filled rectangle in pen 1 and the same rectangle again in XOR so a
+hole appears in it.  53,760 pixels against `tools/anticref.py`.
+
+### The pens came out right on their own
+
+GEM numbers its pens **white 0, black 1**, and the VBXE device needs a
+permutation (`map_col`) to keep that working: XOR mode complements the
+BITS, the AES draws a selected button by XORing its rectangle, and that
+only turns black into white if the two are bitwise complements in the
+hardware.
+
+On one bit they already are.  So ANTIC's pen mapping is no mapping, and
+mode F does the rest by itself -- the background carries the hue and set
+pixels carry COLPF1's luminance, so pen 0 white and pen 1 black comes out
+as **a white screen with black ink** without anything arranging it.  The
+gate asserts that, rather than just that the two colours differ: it is
+the kind of thing that would work by accident and break silently.
+
+### What it cost to link
+
+Two stubs and no more.  `font.c` wants CIO because a face can be loaded
+from disk, and `irq.s` points the native COP vector at the ABI's entry --
+an application's way into the AES, which a VDI milestone has neither of.
+Linking `abi.o` for it would drag in the whole AES, so `gem_cop` is four
+lines of assembly that return: a COP here is a program that has gone
+wrong, and returning is as good an answer as any.
