@@ -10,9 +10,12 @@ to be able to make, and this gate is what makes it checkable.
 The milestone drives the VDI through its own interface (contrl, intin,
 ptsin and a call to vdi()) rather than calling the device: a filled
 rectangle in pen 1, the same rectangle again in XOR so a hole appears in
-it, and a line of text.  The model draws the same three things with
-tools/anticref.py's primitives, and every one of the 53,760 pixels has
-to agree.
+it, and a line of text.  Then it hands an AES OBJECT TREE to ob_draw --
+an outlined dialog box with a title, an edit field and a DEFAULT button
+-- so the object library is on the screen too, and the whole stack from
+objc_draw down through the VDI to the device is what the pixels prove.
+The model draws all of it with tools/anticref.py's primitives, and every
+one of the 53,760 pixels has to agree.
 
 WHAT THE PENS DO HERE IS WORTH READING.  GEM numbers its pens white 0,
 black 1.  The device has two colours and no palette, so pen 0 is the
@@ -29,7 +32,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from a8test.launcher import launch          # noqa: E402
 import anticref                             # noqa: E402
 import fontconv6                            # noqa: E402
-from anticref import AN_W, AN_H, MD_REPLACE, MD_XOR   # noqa: E402
+from anticref import (AN_W, AN_H, MD_REPLACE, MD_TRANS,   # noqa: E402
+                      MD_XOR)                          # noqa: E402
 
 DISK = os.path.abspath(os.path.join(ROOT, "build", "m25-boot.atr"))
 SHOT = os.path.abspath(os.path.join(ROOT, "build", "m25.png"))
@@ -42,8 +46,105 @@ FACE = fontconv6.unpack(fontconv6.parse(
                  "bios", "fnt_st_6x6.c")))
 
 
+BLACK, WHITE = 1, 0             # GEM's pens: white is 0, black is 1
+
+
+def outline(a, x, y, w, h, pen):
+    """gsx_box: a rectangle's perimeter as a five-point v_pline.  The style
+    is solid and the mode MD_REPLACE, so each side lands as a one-pixel
+    span in the pen -- and in the pen 0 case that means CLEARED, because
+    replace mode on one plane writes the complement for colour 0."""
+    x2, y2 = x + w - 1, y + h - 1
+    a.rect_mode(x, y, x2, y, MD_REPLACE, pen)
+    a.rect_mode(x, y2, x2, y2, MD_REPLACE, pen)
+    a.rect_mode(x, y, x, y2, MD_REPLACE, pen)
+    a.rect_mode(x2, y, x2, y2, MD_REPLACE, pen)
+
+
+def gr_box(a, x, y, w, h, th, pen):
+    """src/aes/graf.c gr_box, loop and all: nested perimeters, inward for a
+    positive thickness and outward for a negative one -- including the
+    extra decrement a negative one gets before the loop, which is why a
+    button's -3 draws four rings and not three."""
+    if th == 0:
+        return
+    if th < 0:
+        th -= 1
+    while True:
+        th += -1 if th > 0 else 1
+        outline(a, x + th, y + th, w - 2 * th, h - 2 * th, pen)
+        if th == 0:
+            break
+
+
+def gtext(a, s, x, y):
+    """gsx_tblt: MD_TRANS in BLACK.  It hands the VDI a BASELINE, made by
+    adding the font's top to the cell's y -- and align_y takes exactly
+    that back off again, so the cell lands at y."""
+    for i, ch in enumerate(s):
+        a.glyph(ord(ch), x + i * FONT_W, y, MD_TRANS, BLACK,
+                FONT_W, FACE, FONT_H)
+
+
+def outlined(a, x, y, w, h):
+    """OUTLINED: a black ring three pixels out, and two of white inside it
+    (src/aes/objc.c).  The white one is w+4 by h+4 -- two rings, at the
+    rect and one in -- so together they land entirely OUTSIDE the object
+    and never touch the border it drew for itself."""
+    gr_box(a, x - 3, y - 3, w + 6, h + 6, 1, BLACK)
+    gr_box(a, x - 2, y - 2, w + 4, h + 4, 2, WHITE)
+
+
+def hollow(a, x, y, w, h, th):
+    """gr_rect with IP_HOLLOW inside a border of thickness th.  An inward
+    border eats th pixels off each side (gr_inside); an outward one eats
+    none.  fill_rect() sends a hollow pattern in MD_REPLACE straight to
+    dev_fill_rect in pen 0, so the interior is CLEARED, not stippled."""
+    i = th if th > 0 else 0
+    a.rect(x + i, y + i, x + w - i - 1, y + h - i - 1, False)
+
+
+def dialog(a):
+    """What the object library makes of the milestone's four objects.
+
+    src/aes/objc.c just_draw, in its order: the border, then the interior,
+    then the OUTLINED rings, then the children.  The coordinates are the
+    tree's own, resolved the way ob_draw resolves them -- each child's
+    ob_x/ob_y added to its parent's -- so the root's (30, 100) is what
+    puts the title at (38, 106).
+
+    This is where GEM's colour conventions meet a device with two of them.
+    gr_crack reads $1100 as a BLACK border and a WHITE interior; a button
+    is not cracked at all but forced to the same pair.  Neither the AES
+    nor the VDI was told the screen is monochrome -- pen 1 is simply the
+    only ink there is, and pen 0 the only paper.
+    """
+    # the root: G_BOX, spec $00021100 -- no char, a 2px border, colour
+    # word $1100 -- and OUTLINED
+    bx, by, bw, bh = 30, 100, 160, 46
+    gr_box(a, bx, by, bw, bh, 2, BLACK)
+    hollow(a, bx, by, bw, bh, 2)
+    outlined(a, bx, by, bw, bh)
+
+    gtext(a, "A GEM dialog", bx + 8, by + 6)                # G_STRING
+
+    ex, ey, ew, eh = bx + 8, by + 16, 144, 8                # G_BOX, 1px
+    gr_box(a, ex, ey, ew, eh, 1, BLACK)
+    hollow(a, ex, ey, ew, eh, 1)
+
+    # G_BUTTON: the thickness is -1, one more for EXIT and one more for
+    # DEFAULT, negative meaning outward -- computed, never stored.  The
+    # text is centred in the object, and "  OK  " is exactly six cells
+    # wide, so it starts at the button's own left edge.
+    ok = "  OK  "
+    kx, ky, kw, kh = bx + 56, by + 30, 6 * FONT_W, 10
+    gr_box(a, kx, ky, kw, kh, -3, BLACK)
+    hollow(a, kx, ky, kw, kh, -3)
+    gtext(a, ok, kx + (kw - len(ok) * FONT_W) // 2, ky + (kh - FONT_H) // 2)
+
+
 def model():
-    """The three VDI calls the milestone makes, as the device sees them.
+    """What the milestone draws, as the device sees it.
 
     v_gtext is given a BASELINE and the default vertical alignment puts
     the cell's top FONT_TOP above it (vdi.c align_y), which is the one
@@ -58,6 +159,7 @@ def model():
     for i, ch in enumerate(text):
         a.glyph(ord(ch), 20 + i * FONT_W, 80 - FONT_TOP, MD_REPLACE, 1,
                 FONT_W, FACE, FONT_H)
+    dialog(a)
     return a
 
 

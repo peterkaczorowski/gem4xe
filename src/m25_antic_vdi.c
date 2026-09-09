@@ -92,6 +92,53 @@ __task void main(void)
         g[8] = gl_rmenu.g_h;  g[9] = gl_rfull.g_h;
     }
 
+    /* -- an AES object tree, drawn by the object library --------------
+     * A dialog's shape: an outlined box with a border, a title, and a
+     * button with the DEFAULT ring round it.  ob_draw walks it and
+     * reaches the screen through the VDI and then the device, so what
+     * this shows is the whole stack on a screen none of it was written
+     * for -- and whether GEM's colour conventions survive a device with
+     * two colours, since a box's colour word names a pen and a pattern
+     * and this one has neither to spare. */
+    {
+        static char title[] = "A GEM dialog";
+        static char okstr[] = "  OK  ";
+        static OBJECT tree[4];
+
+        tree[0].ob_next = -1; tree[0].ob_head = 1; tree[0].ob_tail = 3;
+        tree[0].ob_type = G_BOX; tree[0].ob_flags = NONE;
+        tree[0].ob_state = OUTLINED;
+        tree[0].ob_spec = 0x00021100UL;   /* no char, 2px border, white on
+                                           * black -- the donor's DIALERT */
+        tree[0].ob_x = 30; tree[0].ob_y = 100;
+        tree[0].ob_width = 160; tree[0].ob_height = 46;
+
+        tree[1].ob_next = 2; tree[1].ob_head = -1; tree[1].ob_tail = -1;
+        tree[1].ob_type = G_STRING; tree[1].ob_flags = NONE;
+        tree[1].ob_state = NORMAL;
+        tree[1].ob_spec = (uint32_t)(uint16_t)title;
+        tree[1].ob_x = 8; tree[1].ob_y = 6;
+        tree[1].ob_width = 12 * 6; tree[1].ob_height = 6;
+
+        tree[2].ob_next = 3; tree[2].ob_head = -1; tree[2].ob_tail = -1;
+        tree[2].ob_type = G_BOX; tree[2].ob_flags = NONE;
+        tree[2].ob_state = NORMAL;
+        tree[2].ob_spec = 0x00011100UL;   /* one pixel of border */
+        tree[2].ob_x = 8; tree[2].ob_y = 16;
+        tree[2].ob_width = 144; tree[2].ob_height = 8;
+
+        tree[3].ob_next = 0; tree[3].ob_head = -1; tree[3].ob_tail = -1;
+        tree[3].ob_type = G_BUTTON;
+        tree[3].ob_flags = (UWORD)(SELECTABLE | EXIT | DEFAULT | LASTOB);
+        tree[3].ob_state = NORMAL;
+        tree[3].ob_spec = (uint32_t)(uint16_t)okstr;
+        tree[3].ob_x = 56; tree[3].ob_y = 30;
+        tree[3].ob_width = 6 * 6; tree[3].ob_height = 10;
+
+        ob_draw(tree, 0, MAX_DEPTH);
+    }
+
+
     STATUS[2] = 'K';
     for (;;)
         ;
