@@ -1960,21 +1960,14 @@ static void vdi_vswr_mode(void)
  * that moves by an odd number does not.  Snapping window x to even pixels
  * costs nothing visually at 640 wide and keeps every move a pure blit.
  */
-typedef struct {
-    uint32_t base;
-    uint16_t stride;
-    WORD     w, h;
-    WORD     screen;
-} RFORM;
-
 static void rform_of(WORD mfdb_lo, RFORM *f)
 {
     const MFDB *m = (const MFDB *)(uint16_t)mfdb_lo;   /* forms live in bank $00 */
     WORD wdwidth, nplanes;
 
     if (m == 0 || m->fd_addr == 0) {
-        f->base = VR_SCREEN0;  f->stride = SCR_STRIDE;
-        f->w = SCR_W;  f->h = SCR_H;  f->screen = 1;
+        dev_screen_form(f);             /* where the screen is is the
+                                         * device's to say */
         return;
     }
     wdwidth = m->fd_wdwidth;        /* scalars first: never double a load */
@@ -1996,24 +1989,12 @@ static WORD clip_to(WORD *x1, WORD *y1, WORD *x2, WORD *y2, WORD w, WORD h)
     return (*x1 <= *x2 && *y1 <= *y2);
 }
 
-/* One pixel into a form, already known to be inside it. */
-static void rform_plot(const RFORM *f, WORD x, WORD y, WORD hwpen)
-{
-    uint32_t a = f->base + (uint32_t)y * f->stride + (uint32_t)(x >> 1);
-    uint8_t  b = vram_read8(a);
-    if (x & 1)
-        b = (uint8_t)((b & 0xF0) | (hwpen & 0x0F));
-    else
-        b = (uint8_t)((b & 0x0F) | ((hwpen & 0x0F) << 4));
-    vram_write8(a, b);
-}
-
 static void vdi_vro_cpyfm(void)
 {
     WORD sx1 = ptsin[0], sy1 = ptsin[1], sx2 = ptsin[2], sy2 = ptsin[3];
     WORD dx1 = ptsin[4], dy1 = ptsin[5], dx2 = ptsin[6], dy2 = ptsin[7];
     RFORM src, dst;
-    WORD w, h, y;
+    WORD w, h;
 
     order(&sx1, &sx2); order(&sy1, &sy2);
     order(&dx1, &dx2); order(&dy1, &dy2);
@@ -2054,31 +2035,7 @@ static void vdi_vro_cpyfm(void)
         h = (WORD)(cy2 - cy1 + 1);
     }
 
-    if (((sx1 ^ dx1) & 1) == 0 && (sx1 & 1) == 0 && (w & 1) == 0) {
-        /* byte-aligned both ends: one blit, run backwards if the two
-         * overlap that way round */
-        blit_move(src.base + (uint32_t)sy1 * src.stride + (uint32_t)(sx1 >> 1),
-                  src.stride,
-                  dst.base + (uint32_t)dy1 * dst.stride + (uint32_t)(dx1 >> 1),
-                  dst.stride,
-                  (uint16_t)(w >> 1), (uint16_t)h);
-        blit_run();
-        return;
-    }
-    /* Unaligned, or an odd width: pixel by pixel through the window.  Copy in
-     * the direction that keeps an overlapping move safe. */
-    for (y = 0; y < h; y++) {
-        WORD sy = (dy1 > sy1) ? (WORD)(sy1 + h - 1 - y) : (WORD)(sy1 + y);
-        WORD dy = (dy1 > sy1) ? (WORD)(dy1 + h - 1 - y) : (WORD)(dy1 + y);
-        WORD i;
-        for (i = 0; i < w; i++) {
-            WORD sx = (dx1 > sx1) ? (WORD)(sx1 + w - 1 - i) : (WORD)(sx1 + i);
-            WORD dx = (dx1 > sx1) ? (WORD)(dx1 + w - 1 - i) : (WORD)(dx1 + i);
-            uint32_t a = src.base + (uint32_t)sy * src.stride + (uint32_t)(sx >> 1);
-            uint8_t  v = vram_read8(a);
-            rform_plot(&dst, dx, dy, (WORD)((sx & 1) ? (v & 0x0F) : (v >> 4)));
-        }
-    }
+    dev_copy_form(&src, sx1, sy1, &dst, dx1, dy1, w, h);
 }
 
 /* vrt_cpyfm -- transparent raster copy: a ONE-PLANE source expanded into the
@@ -2482,13 +2439,7 @@ static void vdi_vqt_attributes(void)
 
 void vdi_save_form(MFDB *m)
 {
-    m->fd_addr = VR_SAVE;
-    m->fd_w = SCR_W;
-    m->fd_h = SCR_H;
-    m->fd_wdwidth = SCR_W / 16;
-    m->fd_stand = 0;
-    m->fd_nplanes = 4;
-    m->fd_r1 = m->fd_r2 = m->fd_r3 = 0;
+    dev_save_form(m);
 }
 
 /* One pass of the input machinery, from the caller's loop.  The timer

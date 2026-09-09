@@ -32,6 +32,16 @@
 
 #include "vdi.h"
 
+/* A raster form as the copy sees it: an MFDB resolved, or the screen.
+ * `base` is 24-bit because on one device it is a VRAM address and on the
+ * other a bank-$00 one, and the VDI does not care which. */
+typedef struct {
+    uint32_t base;
+    uint16_t stride;
+    WORD     w, h;
+    WORD     screen;
+} RFORM;
+
 /* A solid rectangle in the current pen, corners inclusive, already
  * clipped by the caller.  MD_REPLACE's and MD_ERASE's shape; the mode
  * itself is decided above the seam, because that decision is the same
@@ -112,6 +122,27 @@ void dev_cursor_discard(void);
  * application's path, and it is slow on both devices for different
  * reasons. */
 void dev_line_diag(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask);
+
+/* ---- rasters ----------------------------------------------------------
+ * The screen described as a form: an MFDB with a null address means "the
+ * screen", and only the device knows where that is and how wide a row of
+ * it is. */
+void dev_screen_form(RFORM *f);
+
+/* vro_cpyfm's copy, both rectangles already clipped by the VDI and known
+ * to be inside their forms.  Source and destination may be the same form
+ * and may overlap, so the device picks its direction.  VBXE takes one
+ * blit when the two ends share their alignment and the width is a whole
+ * number of bytes, and falls to pixel-by-pixel otherwise, because its
+ * blitter has no shifter. */
+void dev_copy_form(const RFORM *src, WORD sx, WORD sy,
+                   const RFORM *dst, WORD dx, WORD dy, WORD w, WORD h);
+
+/* The off-screen area the AES saves under menus and dialogs into,
+ * described as an MFDB.  Where it is and what shape it has are entirely
+ * the device's: VRAM on one, and there is no such thing to spare in bank
+ * $00 on the other. */
+void dev_save_form(MFDB *m);
 
 /* Whatever the device precomputed about the current pattern or pen is
  * stale.  The VDI calls this when a workstation is selected or reset or

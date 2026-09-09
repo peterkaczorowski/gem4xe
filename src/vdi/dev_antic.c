@@ -16,6 +16,7 @@
 #include "vdi.h"
 #include "vdidev.h"
 #include "../antic/antic.h"
+#include "../sys/farmem.h"
 
 void dev_fill_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen)
 {
@@ -264,5 +265,102 @@ void dev_line_diag(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask)
         e2 = (WORD)(err << 1);
         if (e2 > (WORD)-dy) { err = (WORD)(err - dy); x = (WORD)(x + sx); }
         if (e2 < dx)        { err = (WORD)(err + dx); y = (WORD)(y + sy); }
+    }
+}
+
+/* ---- rasters -----------------------------------------------------------
+ * WHERE THE SAVE AREA IS, and why it is not in bank $00.  The AES saves
+ * the screen under a menu or a dialog into an off-screen form.  On the
+ * VBXE device that is VRAM, of which there is half a megabyte spare; on
+ * this one a screen is 6,720 bytes and bank $00 has not got them -- the
+ * framebuffer already took the last free region ($8000-$9BFF), which is
+ * the same arithmetic that made the screen 168 lines (src/antic/antic.h).
+ *
+ * So the save area lives in FAR memory, in the accelerator's own SRAM,
+ * taken once from the far allocator.  An MFDB's fd_addr is 24 bits wide
+ * for exactly this reason, and a form here may therefore be near (the
+ * screen, or an application's own form in bank $00) or far (this one) --
+ * which is what form_get and form_put below are for.
+ *
+ * A machine with no accelerator has no far memory and gets no save area;
+ * the AES then draws its menus without saving underneath, which is a
+ * redraw, not a failure.
+ */
+static uint32_t an_save;                /* the far save area, 0 until asked */
+
+void dev_screen_form(RFORM *f)
+{
+    f->base = AN_SCREEN;
+    f->stride = AN_STRIDE;
+    f->w = AN_W;
+    f->h = AN_H;
+    f->screen = 1;
+}
+
+void dev_save_form(MFDB *m)
+{
+    if (!an_save)
+        an_save = far_alloc((uint32_t)AN_STRIDE * AN_H);
+    m->fd_addr = an_save;
+    m->fd_w = AN_W;
+    m->fd_h = AN_H;
+    m->fd_wdwidth = AN_W / 16;
+    m->fd_stand = 0;
+    m->fd_nplanes = 1;
+    m->fd_r1 = m->fd_r2 = m->fd_r3 = 0;
+}
+
+/* A pixel of a form, near or far.  Anything below bank $01 is addressed
+ * directly; anything above goes through the far window. */
+static uint8_t form_get(const RFORM *f, WORD x, WORD y)
+{
+    uint32_t a = f->base + (uint32_t)y * f->stride + ((uint32_t)(UWORD)x >> 3);
+    uint8_t b = (a < 0x10000UL) ? *(const uint8_t *)(uint16_t)a : far_read8(a);
+
+    return (uint8_t)((b >> (7 - (x & 7))) & 1);
+}
+
+static void form_put(const RFORM *f, WORD x, WORD y, uint8_t v)
+{
+    uint32_t a = f->base + (uint32_t)y * f->stride + ((uint32_t)(UWORD)x >> 3);
+    uint8_t bit = (uint8_t)(0x80 >> (x & 7));
+    uint8_t b;
+
+    if (a < 0x10000UL) {
+        uint8_t *p = (uint8_t *)(uint16_t)a;
+        b = *p;
+        b = v ? (uint8_t)(b | bit) : (uint8_t)(b & (uint8_t)~bit);
+        *p = b;
+    } else {
+        b = far_read8(a);
+        b = v ? (uint8_t)(b | bit) : (uint8_t)(b & (uint8_t)~bit);
+        far_write8(a, b);
+    }
+}
+
+void dev_copy_form(const RFORM *src, WORD sx1, WORD sy1,
+                   const RFORM *dst, WORD dx1, WORD dy1, WORD w, WORD h)
+{
+    WORD y, i;
+    WORD back_y, back_x;
+
+    /* screen to screen is the window manager's move, and the surface has
+     * a byte path for it */
+    if (src->screen && dst->screen) {
+        antic_copy((int16_t)sx1, (int16_t)sy1, (int16_t)dx1, (int16_t)dy1,
+                   (int16_t)w, (int16_t)h);
+        return;
+    }
+    back_y = (WORD)(dy1 > sy1);
+    back_x = (WORD)(dx1 > sx1);
+    for (y = 0; y < h; y++) {
+        WORD sy = back_y ? (WORD)(sy1 + h - 1 - y) : (WORD)(sy1 + y);
+        WORD dy = back_y ? (WORD)(dy1 + h - 1 - y) : (WORD)(dy1 + y);
+
+        for (i = 0; i < w; i++) {
+            WORD sx = back_x ? (WORD)(sx1 + w - 1 - i) : (WORD)(sx1 + i);
+            WORD dx = back_x ? (WORD)(dx1 + w - 1 - i) : (WORD)(dx1 + i);
+            form_put(dst, dx, dy, form_get(src, sx, sy));
+        }
     }
 }

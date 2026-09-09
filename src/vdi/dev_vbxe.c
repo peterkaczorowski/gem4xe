@@ -1123,3 +1123,67 @@ void dev_line_diag(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask)
     }
 }
 
+
+/* One pixel into a form, already known to be inside it. */
+static void rform_plot(const RFORM *f, WORD x, WORD y, WORD hwpen)
+{
+    uint32_t a = f->base + (uint32_t)y * f->stride + (uint32_t)(x >> 1);
+    uint8_t  b = vram_read8(a);
+    if (x & 1)
+        b = (uint8_t)((b & 0xF0) | (hwpen & 0x0F));
+    else
+        b = (uint8_t)((b & 0x0F) | ((hwpen & 0x0F) << 4));
+    vram_write8(a, b);
+}
+
+
+void dev_save_form(MFDB *m)
+{
+    m->fd_addr = VR_SAVE;
+    m->fd_w = SCR_W;
+    m->fd_h = SCR_H;
+    m->fd_wdwidth = SCR_W / 16;
+    m->fd_stand = 0;
+    m->fd_nplanes = 4;
+    m->fd_r1 = m->fd_r2 = m->fd_r3 = 0;
+}
+
+/* The screen, as a form. */
+void dev_screen_form(RFORM *f)
+{
+    f->base = VR_SCREEN0;  f->stride = SCR_STRIDE;
+    f->w = SCR_W;  f->h = SCR_H;  f->screen = 1;
+}
+
+/* One blit when both ends share their alignment and the width is a whole
+ * number of bytes; otherwise pixel by pixel through the window, in the
+ * direction that keeps an overlapping move safe.  The blitter has no
+ * shifter, which is why the fast path is so particular -- and why a
+ * window that moves by an EVEN number of pixels stays on it. */
+void dev_copy_form(const RFORM *src, WORD sx1, WORD sy1,
+                   const RFORM *dst, WORD dx1, WORD dy1, WORD w, WORD h)
+{
+    WORD y;
+
+    if (((sx1 ^ dx1) & 1) == 0 && (sx1 & 1) == 0 && (w & 1) == 0) {
+        blit_move(src->base + (uint32_t)sy1 * src->stride + (uint32_t)(sx1 >> 1),
+                  src->stride,
+                  dst->base + (uint32_t)dy1 * dst->stride + (uint32_t)(dx1 >> 1),
+                  dst->stride,
+                  (uint16_t)(w >> 1), (uint16_t)h);
+        blit_run();
+        return;
+    }
+    for (y = 0; y < h; y++) {
+        WORD sy = (dy1 > sy1) ? (WORD)(sy1 + h - 1 - y) : (WORD)(sy1 + y);
+        WORD dy = (dy1 > sy1) ? (WORD)(dy1 + h - 1 - y) : (WORD)(dy1 + y);
+        WORD i;
+        for (i = 0; i < w; i++) {
+            WORD sx = (dx1 > sx1) ? (WORD)(sx1 + w - 1 - i) : (WORD)(sx1 + i);
+            WORD dx = (dx1 > sx1) ? (WORD)(dx1 + w - 1 - i) : (WORD)(dx1 + i);
+            uint32_t a = src->base + (uint32_t)sy * src->stride + (uint32_t)(sx >> 1);
+            uint8_t  v = vram_read8(a);
+            rform_plot(dst, dx, dy, (WORD)((sx & 1) ? (v & 0x0F) : (v >> 4)));
+        }
+    }
+}
