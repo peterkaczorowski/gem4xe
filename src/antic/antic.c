@@ -444,3 +444,144 @@ void antic_vline(int16_t x, int16_t y1, int16_t y2, uint16_t mask,
         antic_patt_span(x, x, y, bit ? 0xFFFF : 0x0000, mode, pen);
     }
 }
+
+/* ---- vro_cpyfm, screen to screen -------------------------------------- */
+
+void antic_copy(int16_t sx, int16_t sy, int16_t dx, int16_t dy,
+                int16_t w, int16_t h)
+{
+    int16_t y, i, n;
+    int16_t back_y, back_x;
+
+    if (w <= 0 || h <= 0)
+        return;
+    back_y = (int16_t)(dy > sy);            /* rows bottom-up */
+    back_x = (int16_t)(dx > sx);            /* and right to left */
+
+    if (((sx ^ dx) & 7) == 0 && (sx & 7) == 0 && (w & 7) == 0) {
+        /* byte aligned at both ends and a whole number of bytes wide */
+        n = (int16_t)((uint16_t)w >> 3);
+        for (y = 0; y < h; y++) {
+            int16_t syy = back_y ? (int16_t)(sy + h - 1 - y) : (int16_t)(sy + y);
+            int16_t dyy = back_y ? (int16_t)(dy + h - 1 - y) : (int16_t)(dy + y);
+            volatile uint8_t *s, *d;
+            uint8_t v;
+
+            if (syy < 0 || syy >= AN_H || dyy < 0 || dyy >= AN_H)
+                continue;
+            s = SCREEN + (uint16_t)syy * AN_STRIDE + ((uint16_t)sx >> 3);
+            d = SCREEN + (uint16_t)dyy * AN_STRIDE + ((uint16_t)dx >> 3);
+            if (back_x) {
+                s += n - 1;
+                d += n - 1;
+                for (i = 0; i < n; i++) {
+                    v = *s;
+                    *d = v;
+                    s--;
+                    d--;
+                }
+            } else {
+                for (i = 0; i < n; i++) {
+                    v = *s;
+                    *d = v;
+                    s++;
+                    d++;
+                }
+            }
+        }
+        return;
+    }
+    /* Unaligned, or a width that is not a whole number of bytes: pixel by
+     * pixel, in the direction that keeps an overlapping move safe.  The
+     * VBXE driver falls back the same way when the blitter's alignment
+     * rules are not met, so the two agree about what a move does. */
+    for (y = 0; y < h; y++) {
+        int16_t syy = back_y ? (int16_t)(sy + h - 1 - y) : (int16_t)(sy + y);
+        int16_t dyy = back_y ? (int16_t)(dy + h - 1 - y) : (int16_t)(dy + y);
+
+        for (i = 0; i < w; i++) {
+            int16_t sxx = back_x ? (int16_t)(sx + w - 1 - i) : (int16_t)(sx + i);
+            int16_t dxx = back_x ? (int16_t)(dx + w - 1 - i) : (int16_t)(dx + i);
+            uint8_t v = antic_get_pixel(sxx, syy);
+            antic_plot(dxx, dyy, v);
+        }
+    }
+}
+
+/* ---- the mouse cursor -------------------------------------------------- */
+
+#define AN_CUR_W  16
+#define AN_CUR_NB 3                     /* 16 pixels at any shift: 3 bytes */
+
+static uint8_t an_cur_buf[AN_CUR_NB * AN_CUR_W];
+static int16_t an_cur_bx, an_cur_y, an_cur_nb, an_cur_nr;
+static uint8_t an_cur_valid;
+
+void antic_cursor_save(int16_t x, int16_t y)
+{
+    int16_t bx0 = (int16_t)((uint16_t)(x < 0 ? 0 : x) >> 3);
+    int16_t bx1 = (int16_t)((uint16_t)(x + AN_CUR_W - 1) >> 3);
+    int16_t y0 = y, y1 = (int16_t)(y + AN_CUR_W - 1);
+    int16_t r, c;
+
+    an_cur_valid = 0;
+    if (x >= AN_W || y >= AN_H || x + AN_CUR_W <= 0 || y + AN_CUR_W <= 0)
+        return;
+    if (bx1 > AN_STRIDE - 1)
+        bx1 = AN_STRIDE - 1;
+    if (y0 < 0)
+        y0 = 0;
+    if (y1 > AN_H - 1)
+        y1 = AN_H - 1;
+    if (bx1 < bx0 || y1 < y0)
+        return;
+    an_cur_bx = bx0;
+    an_cur_y = y0;
+    an_cur_nb = (int16_t)(bx1 - bx0 + 1);
+    an_cur_nr = (int16_t)(y1 - y0 + 1);
+    for (r = 0; r < an_cur_nr; r++) {
+        volatile uint8_t *p = SCREEN + (uint16_t)(y0 + r) * AN_STRIDE
+                              + (uint16_t)bx0;
+        for (c = 0; c < an_cur_nb; c++) {
+            uint8_t v = *p;
+            an_cur_buf[r * AN_CUR_NB + c] = v;
+            p++;
+        }
+    }
+    an_cur_valid = 1;
+}
+
+void antic_cursor_restore(void)
+{
+    int16_t r, c;
+
+    if (!an_cur_valid)
+        return;
+    for (r = 0; r < an_cur_nr; r++) {
+        volatile uint8_t *p = SCREEN + (uint16_t)(an_cur_y + r) * AN_STRIDE
+                              + (uint16_t)an_cur_bx;
+        for (c = 0; c < an_cur_nb; c++) {
+            uint8_t v = an_cur_buf[r * AN_CUR_NB + c];
+            *p = v;
+            p++;
+        }
+    }
+    an_cur_valid = 0;
+}
+
+void antic_cursor_paint(int16_t x, int16_t y, const uint16_t *mask,
+                        const uint16_t *data, uint8_t bg, uint8_t fg)
+{
+    int16_t r, c;
+
+    for (r = 0; r < AN_CUR_W; r++) {
+        uint16_t m = mask[r], d = data[r];
+        for (c = 0; c < AN_CUR_W; c++) {
+            uint16_t bit = (uint16_t)(0x8000u >> c);
+            if (d & bit)
+                antic_plot((int16_t)(x + c), (int16_t)(y + r), fg);
+            else if (m & bit)
+                antic_plot((int16_t)(x + c), (int16_t)(y + r), bg);
+        }
+    }
+}

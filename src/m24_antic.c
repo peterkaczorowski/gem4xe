@@ -32,6 +32,15 @@ __task void main(void)
     static const uint16_t patt[8] = {
         0xFF00, 0x8080, 0x8080, 0x8080, 0x0FF0, 0x0808, 0x0808, 0x0808
     };
+    /* the AES's arrow (tools/gemdata.py), which anticref.py has too */
+    static const uint16_t cur_mask[16] = {
+        0xC000, 0xE000, 0xF000, 0xF800, 0xFC00, 0xFE00, 0xFF00, 0xFF80,
+        0xFFC0, 0xFFE0, 0xFE00, 0xEF00, 0xCF00, 0x8780, 0x0780, 0x0380
+    };
+    static const uint16_t cur_data[16] = {
+        0x0000, 0x4000, 0x6000, 0x7000, 0x7800, 0x7C00, 0x7E00, 0x7F00,
+        0x7F80, 0x7C00, 0x6C00, 0x4600, 0x0600, 0x0300, 0x0300, 0x0000
+    };
 
     STATUS[0] = 'A';
     STATUS[1] = 'N';
@@ -99,6 +108,24 @@ __task void main(void)
     antic_patt_span(30, 269, 162, 0xF0F0, 1, 1);
     antic_vline(24, 150, 165, 0xCCCC, 1, 1);
     antic_vline(275, 150, 165, 0xAAAA, 1, 1);
+
+    /* -- vro_cpyfm: aligned, unaligned, and overlapping both ways ------
+     * The last two move a block onto itself, which is the case that
+     * decides whether the copy picks its direction or eats its own
+     * source; the model does it in the same order for that reason. */
+    antic_copy(200, 20, 8, 96, 64, 8);      /* byte aligned, whole bytes */
+    antic_copy(200, 20, 5, 106, 61, 8);     /* neither                   */
+    antic_copy(8, 96, 11, 116, 64, 8);      /* overlap, right and down   */
+    antic_copy(11, 116, 8, 116, 64, 8);     /* overlap, left             */
+
+    /* -- the pointer: saved, painted, and one of them put back --------- */
+    antic_cursor_save(240, 152);
+    antic_cursor_paint(240, 152, cur_mask, cur_data, 0, 1);
+    antic_cursor_save(60, 152);
+    antic_cursor_paint(60, 152, cur_mask, cur_data, 0, 1);
+    antic_cursor_restore();                 /* this one goes away again */
+    antic_cursor_save(101, 100);            /* an odd x, over the copies */
+    antic_cursor_paint(101, 100, cur_mask, cur_data, 0, 1);
 
     /* -- v_get_pixel, which no picture can check ----------------------- */
     STATUS[4] = antic_get_pixel(0, 0);              /* border: set      */

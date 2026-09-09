@@ -151,9 +151,34 @@ and **the two drivers cannot disagree about the phase** -- which they
 could very easily have done if the ANTIC side had grown its own idea of
 where a dash starts.  A vertical line indexes the same mask by y.
 
+## vro_cpyfm and the pointer
+
+The raster copy takes the VBXE driver's shape deliberately: whole bytes
+when the two ends share their alignment, pixel by pixel otherwise, and
+the direction chosen so an overlapping move does not eat its own source.
+The VBXE one falls back the same way when the blitter's alignment rules
+are not met, so **the two agree about what a move does** rather than
+each having its own idea.  The gate moves a block onto itself in both
+directions for that reason, and the model walks the pixels in the same
+order.
+
+The pointer is painted the GEM way -- the mask in the background colour
+first, the data over it in the foreground, so a mask bit with no data bit
+is the outline and a clear mask bit leaves the screen alone -- and it is
+done **pixel by pixel on purpose**.  On the VBXE side that cost 12 ms a
+show through the MEMAC window and had to become four blitter strips
+(docs/phase8b.md); here the framebuffer is plain motherboard RAM that the
+accelerator writes at full speed, and 256 plots is a quarter of a
+millisecond.  The same decision, read off a different bus.
+
+The gate paints the real arrow at an odd x over the copies, paints a
+second and RESTORES it, and leaves a third over the pattern, so the
+save/restore pair is checked by something being gone as well as by
+something being there.
+
 ## Still to come
 
-`vro_cpyfm` and the mouse cursor, and then
+Wiring the dispatcher, and then
 wiring the dispatcher so that `screen()` reaches these instead of the
 blitter.  `v_opnwk` already answers a device capability array and the AES
 already lays out to whatever it says -- that is what the mechanism is for

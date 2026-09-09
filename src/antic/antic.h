@@ -120,6 +120,30 @@ void antic_patt_span(int16_t x1, int16_t x2, int16_t y, uint16_t patrow,
 void antic_vline(int16_t x, int16_t y1, int16_t y2, uint16_t mask,
                  int16_t mode, uint8_t pen);
 
+/* vro_cpyfm's screen-to-screen case: a rectangle moved, overlapping or
+ * not.  The shape is the VBXE driver's -- whole bytes when the two ends
+ * share their alignment, pixel by pixel otherwise -- and the direction
+ * is chosen so that an overlapping move does not eat its own source. */
+void antic_copy(int16_t sx, int16_t sy, int16_t dx, int16_t dy,
+                int16_t w, int16_t h);
+
+/* ---- the mouse cursor -------------------------------------------------
+ * The GEM rule: the MASK is painted in the background colour first and
+ * the DATA over it in the foreground, so a mask bit with no data bit is
+ * the outline and a clear mask bit leaves the screen alone.  Sixteen
+ * rows of sixteen bits each, bit 15 leftmost, at the cell's top left --
+ * the caller has already taken the hot spot off.
+ *
+ * Pixel by pixel, deliberately.  On the VBXE side that cost 12 ms a show
+ * through the MEMAC window and had to become four blitter strips
+ * (docs/phase8b.md); here the framebuffer is plain motherboard RAM the
+ * accelerator writes at full speed, and 256 plots is a quarter of a
+ * millisecond. */
+void antic_cursor_save(int16_t x, int16_t y);
+void antic_cursor_restore(void);
+void antic_cursor_paint(int16_t x, int16_t y, const uint16_t *mask,
+                        const uint16_t *data, uint8_t bg, uint8_t fg);
+
 /* v_get_pixel: 0 or 1, and 0 for anything off the screen. */
 uint8_t antic_get_pixel(int16_t x, int16_t y);
 
