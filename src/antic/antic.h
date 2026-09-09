@@ -141,6 +141,10 @@ void antic_copy(int16_t sx, int16_t sy, int16_t dx, int16_t dy,
  * millisecond. */
 void antic_cursor_save(int16_t x, int16_t y);
 void antic_cursor_restore(void);
+
+/* ...and forget the saved block WITHOUT putting it back, which is
+ * v_clrwk's case: the screen it belonged to is gone. */
+void antic_cursor_discard(void);
 void antic_cursor_paint(int16_t x, int16_t y, const uint16_t *mask,
                         const uint16_t *data, uint8_t bg, uint8_t fg);
 

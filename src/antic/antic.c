@@ -569,6 +569,11 @@ void antic_cursor_restore(void)
     an_cur_valid = 0;
 }
 
+void antic_cursor_discard(void)
+{
+    an_cur_valid = 0;
+}
+
 void antic_cursor_paint(int16_t x, int16_t y, const uint16_t *mask,
                         const uint16_t *data, uint8_t bg, uint8_t fg)
 {

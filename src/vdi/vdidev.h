@@ -52,6 +52,29 @@ void dev_patt_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen);
  * both devices draw a dash in the same place.  The device clips it. */
 void dev_style_line(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask);
 
+/* ---- the pointer -----------------------------------------------------
+ * The VDI owns WHERE it is: the hot spot, the nesting count that
+ * v_show_c and v_hide_c keep, and whether it is currently drawn.  The
+ * device owns what it is MADE of and what was underneath it.
+ *
+ * `mask` and `data` are the sixteen rows GEM's MFORM carries, bit 15
+ * leftmost; `bg` and `fg` are VDI pens.  A device keeps whatever it
+ * needs of them -- VBXE expands the pair into 4bpp strips in VRAM at
+ * both x parities, which is a kilobyte written once per form; ANTIC
+ * blits the rows as they stand. */
+void dev_cursor_form(WORD bg, WORD fg, const UWORD *mask, const UWORD *data);
+
+/* Save what is under (cx, cy) and paint the form over it, done and on
+ * the screen by the time this returns. */
+void dev_cursor_show(WORD cx, WORD cy);
+
+/* Put back what was under it. */
+void dev_cursor_hide(void);
+
+/* Forget what was under it WITHOUT putting it back -- v_clrwk's case,
+ * where restoring would stamp stale pixels onto a cleared screen. */
+void dev_cursor_discard(void);
+
 /* Whatever the device precomputed about the current pattern or pen is
  * stale.  The VDI calls this when a workstation is selected or reset or
  * when the user pattern is replaced: it cannot know WHETHER a device

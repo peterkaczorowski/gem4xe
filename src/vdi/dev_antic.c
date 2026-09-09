@@ -81,3 +81,41 @@ void dev_style_line(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask)
 void dev_invalidate(void)
 {
 }
+
+/* ---- the pointer ------------------------------------------------------
+ * The form as it stands: this device is 1bpp and so is GEM's MFORM, so
+ * there is nothing to expand.  The VBXE side keeps a kilobyte of 4bpp
+ * strips at both x parities for the same sixteen rows.
+ */
+static UWORD an_cur_mask[16], an_cur_data[16];
+static uint8_t an_cur_bg, an_cur_fg;
+
+void dev_cursor_form(WORD bg_pen, WORD fg_pen, const UWORD *mask,
+                     const UWORD *data)
+{
+    WORD i;
+
+    an_cur_bg = (uint8_t)(bg_pen ? 1 : 0);
+    an_cur_fg = (uint8_t)(fg_pen ? 1 : 0);
+    for (i = 0; i < 16; i++) {
+        an_cur_mask[i] = mask[i];
+        an_cur_data[i] = data[i];
+    }
+}
+
+void dev_cursor_show(WORD cx, WORD cy)
+{
+    antic_cursor_save((int16_t)cx, (int16_t)cy);
+    antic_cursor_paint((int16_t)cx, (int16_t)cy, an_cur_mask, an_cur_data,
+                       an_cur_bg, an_cur_fg);
+}
+
+void dev_cursor_hide(void)
+{
+    antic_cursor_restore();
+}
+
+void dev_cursor_discard(void)
+{
+    antic_cursor_discard();
+}
