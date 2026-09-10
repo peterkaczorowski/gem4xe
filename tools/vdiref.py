@@ -14,8 +14,13 @@ import os
 import re
 import zlib
 
+import devref
 import vbxeref
 
+# THE VBXE's geometry, for the one thing left in this file that is about
+# that device: VramForm, the AES's save buffer in VRAM.  The RASTERISER
+# below does not use them -- it reads self.dev (tools/devref.py), the
+# way src/vdi/vdi.c reads `vdev`.
 SCR_W, SCR_H, STRIDE = vbxeref.SCR_W, vbxeref.SCR_H, vbxeref.STRIDE
 
 # opcodes
@@ -34,9 +39,9 @@ VST_HEIGHT, VQT_ATTRIBUTES, V_ESCAPE = 12, 38, 5
 VST_FONT, VST_LOAD_FONTS, VST_UNLOAD_FONTS, VQT_NAME = 21, 119, 120, 130
 VS_COLOR, VQ_COLOR, VST_ALIGNMENT = 14, 26, 39
 VST_EFFECTS, VST_POINT, VQT_EXTENT, VQT_WIDTH = 106, 107, 116, 117
-# src/vdi/vdi.h: the rest of the font head, and the two effects
-# this device really applies
-FONT_ASCENT, FONT_HALF, FONT_DESCENT, FONT_POINT = 6, 4, 1, 9
+# The two text effects this VDI really applies.  The font's METRICS are
+# the device's now (devref.py), because a screen 320 pixels wide cannot
+# spend eight of them on a character and still be a GEM.
 TXT_THICKEN, TXT_UNDERLINE = 0x01, 0x08
 TXT_DONE = TXT_THICKEN | TXT_UNDERLINE
 TA_LEFT, TA_CENTRE, TA_RIGHT = 0, 1, 2
@@ -89,8 +94,11 @@ VDI_PHYS_HANDLE = 1
 NUM_VWK = 4
 
 # GEM 8x8 system font, read from the SAME generated file the target links, so
-# the reference cannot drift from the device.
-FONT_W, FONT_H, FONT_STRIDE, FONT_TOP = 8, 8, 256, 6
+# the reference cannot drift from the device.  FONT_STRIDE is the STRIP's
+# layout -- 256 bytes a row, character N's byte at r*256 + N -- and is the
+# same for every face; the CELL is the device's.
+FONT_STRIDE = 256
+FONT_H_8X8 = 8
 _FONT_C = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "..", "src", "vdi", "font8x8.c")
 
@@ -99,7 +107,7 @@ def _load_font():
     text = open(_FONT_C).read()
     body = text[text.index("{"):]
     data = [int(v, 16) for v in re.findall(r"0x([0-9A-Fa-f]{2})", body)]
-    want = FONT_STRIDE * FONT_H
+    want = FONT_STRIDE * FONT_H_8X8
     if len(data) < want:
         raise RuntimeError(f"{_FONT_C}: {len(data)} bytes, expected {want}")
     return bytes(data[:want])
@@ -163,14 +171,8 @@ GEM_PAL = bytes((
     0xBB, 0xBB, 0xBB,  0x77, 0x77, 0x77,  0xBB, 0x00, 0x00,  0x00, 0xBB, 0x00,
     0x00, 0x00, 0xBB,  0x00, 0xBB, 0xBB,  0xBB, 0xBB, 0x00,  0xBB, 0x00, 0xBB))
 
-# VDI pen -> hardware pen (map_col[] in src/vdi/vdi.c).  XOR mode complements
-# pixel bits, and the AES needs black <-> white to survive that, so black is
-# stored as 15 and white as 0; the palette is loaded in hardware order.
-MAP_COL = (0, 15, 1, 2, 4, 6, 3, 5, 7, 8, 9, 10, 12, 14, 11, 13)
-HW_PAL = bytearray(48)
-for _pen in range(16):
-    HW_PAL[MAP_COL[_pen] * 3:MAP_COL[_pen] * 3 + 3] = GEM_PAL[_pen * 3:_pen * 3 + 3]
-HW_PAL = bytes(HW_PAL)
+# The VDI pen -> hardware pen permutation moved to the VBXE device with
+# the rest of that screen's business (tools/devref.py, Vbxe.MAP_COL).
 
 
 def col_to_hw(v):
@@ -217,15 +219,20 @@ def decode(blob, n):
 
 
 class VDI:
-    def __init__(self):
-        self.s = vbxeref.Surface()          # all 512 KB: forms live above the screen
-        self.base = 0
+    def __init__(self, dev=None):
+        # THE DEVICE THIS VDI DRAWS ON (tools/devref.py; src/vdi/vdidev.h
+        # on the other side).  Below the seam: the packing, the palette
+        # order, the font's cell, where a form lives.  Above it -- every
+        # line of this file -- none of that is named, which is what lets
+        # the same rasteriser answer for a second screen.
+        self.dev = devref.Vbxe(FONT, GEM_PAL) if dev is None else dev
+        self.font = self.dev.face
         # The input vectors and the button edge detector are the driver's,
         # not the workstation's: v_opnwk does not reset them (vdi.c).
         self.vec_motv = self.vec_butv = self.vec_timv = None
         self.last_buttons = 0
         self.reset()
-        self.s.fill(self.base, STRIDE, STRIDE, SCR_H, 0x00)   # pen 0 = white
+        self.dev.clear()                    # pen 0 = white
 
     # What a workstation carries (vdi.c Vwk): the attributes, the clip,
     # its user pattern and line style.  The driver keeps one set current
@@ -240,7 +247,6 @@ class VDI:
     # The face in use, and the one a .FNT would load: a gate that puts a
     # font on the disk calls load_font() with the same file's bytes, so
     # the two sides draw from the same strip (src/vdi/font.c).
-    font = FONT
     font_file = None            # the loaded strip, or None
     font_name = ""
     font_id = FONT_ID_SYS
@@ -261,7 +267,7 @@ class VDI:
         # The palette, per workstation copy: vs_color changes it, and
         # vq_color answers both what was asked for and what the DAC made
         # of it (src/vdi/vdi.c, pal_req).
-        self.hw_pal = bytearray(HW_PAL)
+        self.dev.palette_all(GEM_PAL)
         self.pal_req = [[hw_to_col(GEM_PAL[p * 3 + k]) for k in range(3)]
                         for p in range(16)]
         self.cur_xhot = self.cur_yhot = 0
@@ -271,7 +277,7 @@ class VDI:
         self.cur_hide = 1          # visible only at 0; starts hidden
         self.cur_drawn = False
         self.cur_lastx = self.cur_lasty = -1
-        self.sv = None             # (bx, y, nb, nr, bytes)
+        self.dev.cursor_discard()  # what was under the pointer: the device's
         self.ptr_x, self.ptr_y = 0, 0
         self.buttons = 0
         # The keyboard: codes waiting to be read one per v_string, and the
@@ -289,83 +295,27 @@ class VDI:
             x1 = max(x1, self.xmn); y1 = max(y1, self.ymn)
             x2 = min(x2, self.xmx); y2 = min(y2, self.ymx)
         x1 = max(x1, 0); y1 = max(y1, 0)
-        x2 = min(x2, SCR_W - 1); y2 = min(y2, SCR_H - 1)
+        x2 = min(x2, self.dev.w - 1); y2 = min(y2, self.dev.h - 1)
         return (x1, y1, x2, y2) if (x1 <= x2 and y1 <= y2) else None
 
-    def _fill_rect_dev(self, x1, y1, x2, y2, hwpen):
-        """Mirrors fill_rect_dev() in src/vdi/vdi.c exactly, edges included.
-        Takes a HARDWARE pen, like the C: callers map through MAP_COL."""
-        base = self.base + y1 * STRIDE
-        rows = y2 - y1 + 1
-        c = ((hwpen & 0x0F) << 4) | (hwpen & 0x0F)
-        bl, br = x1 >> 1, x2 >> 1
-        if bl == br:
-            if (x1 & 1) == 0 and (x2 & 1) == 1:
-                self.s.fill(base + bl, STRIDE, 1, rows, c)
-            elif x1 & 1:
-                self.s.rmw(base + bl, STRIDE, 1, rows, 0xF0, 4)
-                self.s.rmw(base + bl, STRIDE, 1, rows, c & 0x0F, 3)
-            else:
-                self.s.rmw(base + bl, STRIDE, 1, rows, 0x0F, 4)
-                self.s.rmw(base + bl, STRIDE, 1, rows, c & 0xF0, 3)
-            return
-        if x1 & 1:
-            self.s.rmw(base + bl, STRIDE, 1, rows, 0xF0, 4)
-            self.s.rmw(base + bl, STRIDE, 1, rows, c & 0x0F, 3)
-            bl += 1
-        if (x2 & 1) == 0:
-            self.s.rmw(base + br, STRIDE, 1, rows, 0x0F, 4)
-            self.s.rmw(base + br, STRIDE, 1, rows, c & 0xF0, 3)
-            br -= 1
-        if br >= bl:
-            self.s.fill(base + bl, STRIDE, br - bl + 1, rows, c)
-
-    def _xor_rect_dev(self, x1, y1, x2, y2):
-        """Mirrors xor_rect_dev(): complement every pixel, edges by nibble."""
-        base = self.base + y1 * STRIDE
-        rows = y2 - y1 + 1
-        bl, br = x1 >> 1, x2 >> 1
-        if bl == br:
-            m = 0x0F if (x1 & 1) else (0xF0 if (x2 & 1) == 0 else 0xFF)
-            self.s.rmw(base + bl, STRIDE, 1, rows, m, 5)
-            return
-        if x1 & 1:
-            self.s.rmw(base + bl, STRIDE, 1, rows, 0x0F, 5)
-            bl += 1
-        if (x2 & 1) == 0:
-            self.s.rmw(base + br, STRIDE, 1, rows, 0xF0, 5)
-            br -= 1
-        if br >= bl:
-            self.s.rmw(base + bl, STRIDE, br - bl + 1, rows, 0xFF, 5)
-
     def _visible(self, x, y):
+        """Inside the WORKSTATION's clip.  The screen's own edge is the
+        device's business and it checks it again."""
         if self.clip and not (self.xmn <= x <= self.xmx and
                               self.ymn <= y <= self.ymx):
             return False
-        return 0 <= x < SCR_W and 0 <= y < SCR_H
+        return 0 <= x < self.dev.w and 0 <= y < self.dev.h
 
-    def _plot(self, x, y, hwpen):
-        """Write one HARDWARE pen; callers map through MAP_COL."""
+    def _plot(self, x, y, pen):
+        """One pixel in a VDI pen, clipped by the workstation."""
         if not self._visible(x, y):
             return
-        self._plot_raw(x, y, hwpen)
-
-    def _plot_raw(self, x, y, hwpen):
-        """The same, clipped to the screen only -- the pointer."""
-        if not (0 <= x < SCR_W and 0 <= y < SCR_H):
-            return
-        a = self.base + y * STRIDE + (x >> 1)
-        b = self.s.mem[a]
-        if x & 1:
-            self.s.mem[a] = (b & 0xF0) | (hwpen & 0x0F)
-        else:
-            self.s.mem[a] = (b & 0x0F) | ((hwpen & 0x0F) << 4)
+        self.dev.plot(x, y, pen)
 
     def _plot_xor(self, x, y):
         if not self._visible(x, y):
             return
-        a = self.base + y * STRIDE + (x >> 1)
-        self.s.mem[a] ^= 0x0F if (x & 1) else 0xF0
+        self.dev.plot_xor(x, y)
 
     def _init_wk(self, w):
         """init_wk: the attributes a workstation opens with, from work_in,
@@ -376,7 +326,8 @@ class VDI:
         does not reproduce."""
         self.clip = 0
         self.h_align, self.v_align, self.text_effects = TA_LEFT, TA_BASE, 0
-        self.xmn, self.ymn, self.xmx, self.ymx = 0, 0, SCR_W - 1, SCR_H - 1
+        self.xmn, self.ymn = 0, 0
+        self.xmx, self.ymx = self.dev.w - 1, self.dev.h - 1
         self.wrt_mode = 0
         self.line_width = 1
         self.ud_patrn = [0] * 16
@@ -404,25 +355,25 @@ class VDI:
         m = self.wrt_mode + 1
         if m == MD_TRANS:
             if is_set:
-                self._plot(x, y, MAP_COL[pen & 15])
+                self._plot(x, y, pen)
         elif m == MD_XOR:
             if is_set:
                 self._plot_xor(x, y)
         elif m == MD_ERASE:
             if not is_set:
-                self._plot(x, y, MAP_COL[pen & 15])
+                self._plot(x, y, pen)
         else:
-            self._plot(x, y, MAP_COL[pen & 15] if is_set else MAP_COL[0])
+            self._plot(x, y, pen if is_set else 0)
 
     def _paint_rect(self, x1, y1, x2, y2, pen):
         """A solid rectangle in the current writing mode (already clipped)."""
         m = self.wrt_mode + 1
         if m == MD_XOR:
-            self._xor_rect_dev(x1, y1, x2, y2)
+            self.dev.xor_rect(x1, y1, x2, y2)
         elif m == MD_ERASE:
             return
         else:
-            self._fill_rect_dev(x1, y1, x2, y2, MAP_COL[pen & 15])
+            self.dev.fill_rect(x1, y1, x2, y2, pen)
 
     def _fill_pattern(self):
         """st_fl_ptr: what the interior and index resolve to -- the rows of
@@ -457,9 +408,9 @@ class VDI:
         m = self.wrt_mode + 1
         if all(r == 0 for r in rows):
             if m == MD_REPLACE:
-                self._fill_rect_dev(x1, y1, x2, y2, MAP_COL[0])
+                self.dev.fill_rect(x1, y1, x2, y2, 0)
             elif m == MD_ERASE:
-                self._fill_rect_dev(x1, y1, x2, y2, MAP_COL[pen & 15])
+                self.dev.fill_rect(x1, y1, x2, y2, pen)
             return
         for y in range(y1, y2 + 1):
             r = rows[y & msk]
@@ -501,7 +452,7 @@ class VDI:
         """(base, stride, w, h, is_screen) of a raster form: None is the
         screen, otherwise a VramForm (vdi.c rform_of)."""
         if f is None:
-            return self.base, STRIDE, SCR_W, SCR_H, True
+            return self.dev.screen_form()
         return f.addr, f.stride, f.w, f.h, False
 
     @staticmethod
@@ -553,25 +504,7 @@ class VDI:
         dy1 += cy1 - sy1
         sx1, sy1 = cx1, cy1
         w, h = cx2 - cx1 + 1, cy2 - cy1 + 1
-        if ((sx1 ^ dx1) & 1) == 0 and (sx1 & 1) == 0 and (w & 1) == 0:
-            self.s.move(sb + sy1 * ss + (sx1 >> 1), ss,
-                        db + dy1 * ds + (dx1 >> 1), ds,
-                        w >> 1, h)
-            return
-        for y in range(h):
-            sy = (sy1 + h - 1 - y) if dy1 > sy1 else (sy1 + y)
-            dy = (dy1 + h - 1 - y) if dy1 > sy1 else (dy1 + y)
-            for i in range(w):
-                sx = (sx1 + w - 1 - i) if dx1 > sx1 else (sx1 + i)
-                dx = (dx1 + w - 1 - i) if dx1 > sx1 else (dx1 + i)
-                v = self.s.mem[sb + sy * ss + (sx >> 1)]
-                pen = (v & 0x0F) if (sx & 1) else (v >> 4)
-                a = db + dy * ds + (dx >> 1)
-                b = self.s.mem[a]
-                if dx & 1:
-                    self.s.mem[a] = (b & 0xF0) | pen
-                else:
-                    self.s.mem[a] = (b & 0x0F) | (pen << 4)
+        self.dev.copy(sb, ss, sx1, sy1, db, ds, dx1, dy1, w, h)
 
     def _vrt_cpyfm(self, pts, ints, form):
         """Mirrors vdi_vrt_cpyfm(): a 1-plane source expanded into colours.
@@ -581,7 +514,7 @@ class VDI:
         """
         bits, wdwidth = form
         mode = ints[0]
-        fg, bg = MAP_COL[ints[1] & 15], MAP_COL[ints[2] & 15]
+        fg, bg = ints[1] & 15, ints[2] & 15
         sx1, sx2 = sorted((pts[0], pts[2]))
         sy1, sy2 = sorted((pts[1], pts[3]))
         dx1, dy1 = pts[4], pts[5]
@@ -618,15 +551,16 @@ class VDI:
         return x
 
     def _align_y(self, y):
-        return {TA_HALF: y - FONT_HALF, TA_ASCENT: y - FONT_ASCENT,
-                TA_BOTTOM: y - FONT_H + 1,
-                TA_DESCENT: y - FONT_TOP - FONT_DESCENT,
-                TA_TOP: y}.get(self.v_align, y - FONT_TOP)
+        d = self.dev
+        return {TA_HALF: y - d.font_half, TA_ASCENT: y - d.font_ascent,
+                TA_BOTTOM: y - d.font_h + 1,
+                TA_DESCENT: y - d.font_top - d.font_descent,
+                TA_TOP: y}.get(self.v_align, y - d.font_top)
 
     def _glyph(self, code, cx, cy):
-        for row in range(FONT_H):
+        for row in range(self.dev.font_h):
             b = self.font[row * FONT_STRIDE + (code & 0xFF)]
-            for col in range(FONT_W):
+            for col in range(self.dev.font_w):
                 self._paint_pixel(cx + col, cy + row, self.text_color,
                                   b & (0x80 >> col))
 
@@ -635,27 +569,30 @@ class VDI:
         vst_effects asked for it (src/vdi/vdi.c, draw_char).  Each pixel
         goes through the writing-mode rules of _paint_pixel."""
         self._glyph(code, cx, cy)
-        if self.text_effects & TXT_THICKEN and cx + 1 + FONT_W <= SCR_W:
+        if (self.text_effects & TXT_THICKEN
+                and cx + 1 + self.dev.font_w <= self.dev.w):
             self._glyph(code, cx + 1, cy)
 
     def _underline(self, x1, x2, cy):
         """The row under a string: SOLID and clipped, in the text colour,
         because an underline is text and takes no fill pattern."""
-        r = self._clip_rect(x1, cy + FONT_H - 1, x2, cy + FONT_H - 1)
+        b = cy + self.dev.font_h - 1
+        r = self._clip_rect(x1, b, x2, b)
         if r:
             self._paint_rect(*r, self.text_color)
 
     def _gtext(self, pts, ints):
         """Mirrors vdi_v_gtext().  The point given is placed by
         vst_alignment -- left and the BASELINE by default, the cell top
-        then being y - FONT_TOP."""
+        then being y - the font's top."""
         n = len(ints)
-        x = self._align_x(pts[0], n * FONT_W)
+        fw = self.dev.font_w
+        x = self._align_x(pts[0], n * fw)
         cy = self._align_y(pts[1])
         for i, code in enumerate(ints):
-            self._draw_char(code, x + i * FONT_W, cy)
+            self._draw_char(code, x + i * fw, cy)
         if self.text_effects & TXT_UNDERLINE and n:
-            w = n * FONT_W + (1 if self.text_effects & TXT_THICKEN else 0)
+            w = n * fw + (1 if self.text_effects & TXT_THICKEN else 0)
             self._underline(x, x + w - 1, cy)
 
     # -- filled areas ----------------------------------------------------
@@ -693,9 +630,9 @@ class VDI:
                 if x1 > self.xmx:
                     return
                 x2 = self.xmx
-        if x2 < 0 or x1 > SCR_W - 1:
+        if x2 < 0 or x1 > self.dev.w - 1:
             return
-        x1, x2 = max(x1, 0), min(x2, SCR_W - 1)
+        x1, x2 = max(x1, 0), min(x2, self.dev.w - 1)
         self._patt_rect(x1, y, x2, y, self.fill_color)
 
     @staticmethod
@@ -746,9 +683,9 @@ class VDI:
                 return
             miny = max(miny, self.ymn - 1)
             maxy = min(maxy, self.ymx)
-        if maxy < 0 or miny > SCR_H - 1:
+        if maxy < 0 or miny > self.dev.h - 1:
             return
-        miny, maxy = max(miny, -1), min(maxy, SCR_H - 1)
+        miny, maxy = max(miny, -1), min(maxy, self.dev.h - 1)
         pt = list(pt[:n * 2]) + [pt[0], pt[1]]
         self._clc_flit(pt, n, maxy, miny)
         if self.fill_per:
@@ -777,8 +714,10 @@ class VDI:
     # -- v_contourfill, and the arrowheads vsl_ends asks for -------------
 
     def _cf_pixel(self, x, y):
-        b = self.s.mem[self.base + y * STRIDE + (x >> 1)]
-        return (b & 0x0F) if (x & 1) else (b >> 4)
+        """What the device stores at (x, y).  The paint bucket compares
+        DEVICE values, not pens: it is looking for a boundary on the
+        screen, and only the device knows what one looks like."""
+        return self.dev.pixel(x, y)
 
     def _contourfill(self, pts, ints):
         """The paint bucket.  The region is found first and painted after,
@@ -787,14 +726,14 @@ class VDI:
         (src/vdi/vdi.c, vdi_v_contourfill)."""
         x, y = pts[0], pts[1]
         index = ints[0] if ints else -1
-        x0, y0, x1, y1 = 0, 0, SCR_W - 1, SCR_H - 1
+        x0, y0, x1, y1 = 0, 0, self.dev.w - 1, self.dev.h - 1
         if self.clip:
             x0, y0 = max(x0, self.xmn), max(y0, self.ymn)
             x1, y1 = min(x1, self.xmx), min(y1, self.ymx)
         if not (x0 <= x <= x1 and y0 <= y <= y1):
             return
         if index >= 0:
-            search, typ = MAP_COL[index & 15], 0
+            search, typ = self.dev.pen_value(index & 15), 0
         else:
             search, typ = self._cf_pixel(x, y), 1
 
@@ -986,7 +925,7 @@ class VDI:
         if y1 < y2:
             y1, y2 = y2, y1                 # (x1,y1) is the lower left
         # a sixty-fourth of the screen, clamped to half the shorter side
-        xr = min(SCR_W >> 6, (x2 - x1) // 2)
+        xr = min(self.dev.w >> 6, (x2 - x1) // 2)
         yr = min(xr, (y1 - y2) // 2)        # square pixels: the same radius
         xoff = [0,
                 self._mul_div(Icos675, xr, 32767),
@@ -1026,7 +965,8 @@ class VDI:
         interword, interchar, str_ = ints[0], ints[1], ints[2:]
         max_x = pts[2]
         spaces = sum(1 for c in str_ if c == ord(" ")) if interword else 0
-        width = cnt * FONT_W
+        fw = self.dev.font_w
+        width = cnt * fw
         wordx = rmword = rmwordx = 0
         charx = rmchar = rmcharx = 0
         if interword and spaces:
@@ -1037,7 +977,7 @@ class VDI:
             else:
                 rmwordx = 1
             if interchar:
-                expand = FONT_W // 2
+                expand = fw // 2
                 if delword > expand:
                     delword, rmword = expand, 0
                 if delword < -expand:
@@ -1057,7 +997,7 @@ class VDI:
         for c in str_:
             self._draw_char(c, x, cy)
             last = x
-            x += FONT_W + charx
+            x += fw + charx
             if rmchar:
                 x += rmcharx
                 rmchar -= 1
@@ -1067,7 +1007,7 @@ class VDI:
                     x += rmwordx
                     rmword -= 1
         if self.text_effects & TXT_UNDERLINE and cnt > 0:
-            self._underline(x0, last + FONT_W - 1
+            self._underline(x0, last + fw - 1
                             + (1 if self.text_effects & TXT_THICKEN else 0), cy)
 
     @staticmethod
@@ -1093,6 +1033,14 @@ class VDI:
         elif sub == GDP_JUSTIFIED:
             self._gdp_justified(pts, ints)
 
+    def _cell(self):
+        """What vst_height, vqt_attributes and vst_point all answer:
+        char width, char HEIGHT (the font's top, baseline to top of cell,
+        as the ST ROM and EmuTOS both return it), cell width, cell
+        height."""
+        d = self.dev
+        return [d.font_w, d.font_top, d.font_w, d.font_h]
+
     def _workout(self):
         """v_opnwk's work_out, in full: the per-call record carries only the
         first three words of each, but the AES reads further in (pixel size
@@ -1100,19 +1048,20 @@ class VDI:
         layout from them.  Must match fill_workout() in src/vdi/vdi.c."""
         self.intout = [0] * 45
         self.ptsout = [0] * 12
-        self.intout[0:15] = [SCR_W - 1, SCR_H - 1, 0,
+        self.intout[0:15] = [self.dev.w - 1, self.dev.h - 1, 0,
                              372, 372,          # pixel width/height, microns
                              1, 7, 1, 6, 8, 1,  # char heights, line types,
                                                 # widths, marker types/sizes,
                                                 # faces
-                             24, 12, 16, 10]    # patterns, hatches, colours,
-                                                # GDPs
+                             24, 12,            # patterns, hatches
+                             self.dev.colours(), 10]
         # the ten GDPs, then the attribute each draws with (3 fill area,
         # 2 text, 0 polyline)
         self.intout[15:25] = list(range(1, 11))
         self.intout[25:35] = [3, 0, 3, 3, 3, 0, 3, 0, 3, 2]
         self.intout[35:43] = [1, 0, 1, 0, 16, 1, 1, 1]
-        self.ptsout[0:4] = [FONT_W, FONT_H, FONT_W, FONT_H]
+        self.ptsout[0:4] = [self.dev.font_w, self.dev.font_h,
+                            self.dev.font_w, self.dev.font_h]
         self.ptsout[4:8] = [1, 0, 1, 0]         # line width range
         self.ptsout[8:12] = [DEF_MKWD, DEF_MKHT, MAX_MKWD, MAX_MKHT]
         self.contrl2, self.contrl4 = 6, 45
@@ -1123,37 +1072,18 @@ class VDI:
         harness records."""
         self.intout = [0] * 45
         self.ptsout = [0] * 12
-        self.intout[0:7] = [0, 16, TXT_DONE, 0, 4, 1, 1]
+        self.intout[0:7] = [0, self.dev.colours(), TXT_DONE, 0,
+                            self.dev.planes(), 1, 1]
         self.intout[9:12] = [4, 2, 1]           # writing modes, input, align
         self.intout[14:17] = [MAX_POLY, INTIN_SIZE, 2]
         self.intout[19] = self.clip
         self.contrl2, self.contrl4 = 6, 45
 
     # -- cursor ----------------------------------------------------------
-    def _cursor_save(self, cx, cy):
-        bx0, bx1 = cx >> 1, (cx + 15) >> 1
-        y0, y1 = cy, cy + 15
-        bx0 = max(bx0, 0); y0 = max(y0, 0)
-        bx1 = min(bx1, STRIDE - 1); y1 = min(y1, SCR_H - 1)
-        if bx1 < bx0 or y1 < y0:
-            self.sv = None
-            return
-        nb, nr = bx1 - bx0 + 1, y1 - y0 + 1
-        buf = bytearray()
-        for r in range(nr):
-            a = self.base + (y0 + r) * STRIDE + bx0
-            buf += self.s.mem[a:a + nb]
-        self.sv = (bx0, y0, nb, nr, bytes(buf))
-
-    def _cursor_restore(self):
-        if not self.sv:
-            return
-        bx0, y0, nb, nr, buf = self.sv
-        for r in range(nr):
-            a = self.base + (y0 + r) * STRIDE + bx0
-            self.s.mem[a:a + nb] = buf[r * nb:(r + 1) * nb]
-        self.sv = None
-
+    # The VDI owns WHERE the pointer is, the hot spot, and the nesting
+    # v_show_c and v_hide_c keep.  What was UNDER it is the device's:
+    # nine bytes at odd x on one screen and five on the other, and
+    # neither number belongs here.
     def _cursor_paint(self, cx, cy):
         """Data over mask over the screen.  Like real GEM's, the pointer
         ignores vs_clip: it is drawn wherever it is on the screen.  (Both
@@ -1163,19 +1093,19 @@ class VDI:
             for col in range(16):
                 bit = 0x8000 >> col
                 if m & bit:
-                    self._plot_raw(cx + col, cy + row, MAP_COL[self.cur_bg & 15])
+                    self.dev.plot(cx + col, cy + row, self.cur_bg & 15)
                 if d & bit:
-                    self._plot_raw(cx + col, cy + row, MAP_COL[self.cur_fg & 15])
+                    self.dev.plot(cx + col, cy + row, self.cur_fg & 15)
 
     def _cursor_show_now(self):
         cx, cy = self.ptr_x - self.cur_xhot, self.ptr_y - self.cur_yhot
-        self._cursor_save(cx, cy)
+        self.dev.cursor_save(cx, cy)
         self._cursor_paint(cx, cy)
         self.cur_drawn = True
 
     def _cursor_hide_now(self):
         if self.cur_drawn:
-            self._cursor_restore()
+            self.dev.cursor_restore()
             self.cur_drawn = False
 
     def _cursor_move(self):
@@ -1258,7 +1188,7 @@ class VDI:
             if not self._select(self.handle if handle is None else handle):
                 return
         if op == V_CLRWK:
-            self.s.fill(self.base, STRIDE, STRIDE, SCR_H, 0x00)
+            self.dev.clear()
         elif op == V_OPNWK:
             keep = (self.ptr_x, self.ptr_y)
             self.reset()
@@ -1283,7 +1213,7 @@ class VDI:
                 self.xmn, self.ymn, self.xmx, self.ymx = x1, y1, x2, y2
             else:
                 self.xmn, self.ymn = 0, 0
-                self.xmx, self.ymx = SCR_W - 1, SCR_H - 1
+                self.xmx, self.ymx = self.dev.w - 1, self.dev.h - 1
         elif op == VR_RECFL:
             self._recfl(pts)
         elif op == VRO_CPYFM:
@@ -1293,8 +1223,8 @@ class VDI:
                 self._cpyfm(pts)
         elif op == V_LOCATOR:
             if pts:
-                self.ptr_x = max(0, min(pts[0], SCR_W - 1))
-                self.ptr_y = max(0, min(pts[1], SCR_H - 1))
+                self.ptr_x = max(0, min(pts[0], self.dev.w - 1))
+                self.ptr_y = max(0, min(pts[1], self.dev.h - 1))
             self.ptsout[0], self.ptsout[1] = self.ptr_x, self.ptr_y
             self.intout[0] = 0
             self.contrl2, self.contrl4 = 1, 1
@@ -1316,13 +1246,13 @@ class VDI:
             # char w, char h, cell w, cell h -- and "char height" is the
             # font's TOP (baseline to top of cell), as the ST ROM and EmuTOS
             # both return it; the AES adds it to a cell top for v_gtext.
-            self.ptsout = [FONT_W, FONT_TOP, FONT_W, FONT_H]
+            self.ptsout = self._cell()
             self.contrl2 = 2
         elif op == VQT_ATTRIBUTES:
             # font, colour, rotation, h/v alignment (never set here), and
             # the writing mode as vswr_mode numbers it (1 = replace)
             self.intout = [1, self.text_color, 0, 0, 0, self.wrt_mode + 1]
-            self.ptsout = [FONT_W, FONT_TOP, FONT_W, FONT_H]
+            self.ptsout = self._cell()
             self.contrl2, self.contrl4 = 2, 6
         elif op == V_CONTOURFILL:
             self._contourfill(pts, ints)
@@ -1381,11 +1311,8 @@ class VDI:
             self.contrl4 = 1
         elif op == V_GET_PIXEL:
             x, y = pts[0], pts[1]
-            hw = 0
-            if 0 <= x < SCR_W and 0 <= y < SCR_H:
-                b = self.s.mem[self.base + y * STRIDE + (x >> 1)]
-                hw = (b & 0x0F) if (x & 1) else (b >> 4)
-            self.intout = [hw, MAP_COL.index(hw)]
+            hw = self.dev.pixel(x, y)
+            self.intout = [hw, self.dev.pen_of(hw)]
             self.contrl4 = 2
         elif op == VS_COLOR:
             # one palette entry, in the VDI's thousandths
@@ -1394,7 +1321,8 @@ class VDI:
                 for k in range(3):
                     v = ints[k + 1]
                     self.pal_req[i][k] = 0 if v < 0 else 1000 if v > 1000 else v
-                    self.hw_pal[MAP_COL[i] * 3 + k] = col_to_hw(ints[k + 1])
+                self.dev.palette_one(i, [col_to_hw(ints[k + 1])
+                                         for k in range(3)])
         elif op == VQ_COLOR:
             i = ints[0]
             if not 0 <= i <= 15:
@@ -1416,18 +1344,19 @@ class VDI:
             self.intout[0] = self.text_effects
             self.contrl4 = 1
         elif op == VST_POINT:
-            self.intout[0] = FONT_POINT
-            self.ptsout = [FONT_W, FONT_TOP, FONT_W, FONT_H]
+            self.intout[0] = self.dev.font_point
+            self.ptsout = self._cell()
             self.contrl2, self.contrl4 = 2, 1
         elif op == VQT_EXTENT:
-            w = len(ints) * FONT_W + (1 if self.text_effects & TXT_THICKEN else 0)
-            self.ptsout = [0, 0, w, 0, w, FONT_H, 0, FONT_H]
+            w = (len(ints) * self.dev.font_w
+                 + (1 if self.text_effects & TXT_THICKEN else 0))
+            self.ptsout = [0, 0, w, 0, w, self.dev.font_h, 0, self.dev.font_h]
             self.contrl2 = 4
         elif op == VQT_WIDTH:
             # three points, and the deltas are a point apart: [0] the
             # cell, [2] the left delta, [4] the right one
             self.intout[0] = ints[0]
-            self.ptsout = [FONT_W, 0, 0, 0, 0, 0]
+            self.ptsout = [self.dev.font_w, 0, 0, 0, 0, 0]
             self.contrl2, self.contrl4 = 3, 1
         elif op == VST_FONT:
             # the face now drawn with: the system's, or the loaded one when
@@ -1564,12 +1493,12 @@ class VDI:
             self.results.append(self.result())
 
     def to_rgb(self):
-        return self.s.to_rgb(self.base, bytes(self.hw_pal))
+        return self.dev.to_rgb()
 
     def screen_key(self):
         """A fingerprint of the visible screen, for telling whether a turn
         of the AES drew anything (aesref's held-button rule)."""
-        return zlib.crc32(self.s.mem[self.base:self.base + STRIDE * SCR_H])
+        return self.dev.key()
 
 
 _VBXE_H = os.path.join(os.path.dirname(os.path.abspath(__file__)),
