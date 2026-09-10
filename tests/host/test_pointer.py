@@ -25,6 +25,9 @@ import check as ccbug  # noqa: E402  (the simulator driver)
 
 POINTER_C = os.path.join(ROOT, "src", "vdi", "pointer.c")
 IRQ_STUB_C = os.path.join(ROOT, "tests", "host", "irq_stub.c")
+# pointer.c clamps to the screen, and the screen is whatever `vdev`
+# points at now (docs/phase34.md), so a build of it needs a device
+DEV_STUB_C = os.path.join(ROOT, "tests", "host", "dev_stub.c")
 QUAD_SIM_C = os.path.join(ROOT, "tests", "host", "quad_sim.c")
 XEM1_SIM_C = os.path.join(ROOT, "tests", "host", "xem1_sim.c")
 GRAY = (0, 1, 3, 2)          # the quadrature phase order, one full cycle
@@ -53,7 +56,7 @@ def simulate(program, sources, names):
     out = os.path.join(ROOT, "build", program)
     os.makedirs(out, exist_ok=True)
     objs = []
-    for src in (POINTER_C, IRQ_STUB_C) + tuple(sources):
+    for src in (POINTER_C, IRQ_STUB_C, DEV_STUB_C) + tuple(sources):
         obj = os.path.join(out, os.path.basename(src)[:-2] + ".o")
         subprocess.run([cc, "-g", "--code-model=large", "--data-model=small",
                         "-O2", "-I", os.path.join(ROOT, "src"), "-o", obj, src],
