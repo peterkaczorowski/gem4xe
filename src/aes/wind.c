@@ -33,6 +33,7 @@
  * NOT HERE YET: the menu bar.
  */
 #include "aes.h"
+#include "proc.h"
 #include "../sys/zwin.h"
 
 #define DROP_SHADOW_SIZE    2
@@ -594,7 +595,7 @@ static void w_redraw(WORD wh, const GRECT *pt)
     if (rc_intersect(&t, &d) &&
         w_union(gl_win[wh].w_rlist, &d) &&
         rc_intersect(&d, &t)) {
-        ap_sendmsg(wind_msg, WM_REDRAW, wh, t.g_x, t.g_y, t.g_w, t.g_h);
+        ap_sendmsg(proc_app, wind_msg, WM_REDRAW, wh, t.g_x, t.g_y, t.g_w, t.g_h);
     }
 }
 

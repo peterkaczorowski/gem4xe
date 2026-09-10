@@ -38,6 +38,7 @@
  */
 #include "vdi/vdi.h"
 #include "aes/aes.h"
+#include "aes/proc.h"
 #include "sys/abi.h"
 #include "sys/gemdos.h"
 
@@ -158,7 +159,7 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
         for (k = 3; k < 15; k++)
             global[k] = 0;
         global[10] = gl_nplanes;
-        ret = 0;                    /* ap_id */
+        ret = proc_pid(rlr);        /* ap_id */
         break;
     case 12:                        /* appl_write: id, len, buffer */
         {
@@ -166,7 +167,12 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
             WORD msg[8];
             for (k = 0; k < 8; k++)
                 msg[k] = m[k];
-            mq_put(msg);
+            /* The destination was read and thrown away while there was
+             * one process; it is honoured now, and word 1 says who sent
+             * it -- which for appl_write is the only place in gem4xe
+             * where a real sender exists. */
+            msg[1] = proc_pid(rlr);
+            mq_put(proc_of(int_in[0]), msg);
         }
         break;
     case 19:                        /* appl_exit */

@@ -12,6 +12,7 @@
  */
 #include "vdi/vdi.h"
 #include "aes/aes.h"
+#include "aes/proc.h"
 #include "vdi/font.h"
 #include "vdi/vdidev.h"    /* which device this program is about */
 
@@ -86,6 +87,18 @@ __task void main(void)
      * middle of the screen, a dialog's box -- comes off those numbers.
      * It is the whole reason a GEM ports to a second screen at all, so
      * the gate reads them back rather than trusting them. */
+    /* The AES's processes, and the context switch's mark.  This runner
+     * has one process and never switches, but event.c reaches for the
+     * running one and there has to BE one (src/aes/proc.h).  The records
+     * are a static here rather than the pool's, because a VDI milestone
+     * has no loader: that is the whole reason proc.c allocates nothing
+     * itself. */
+    {
+        static char proc_store[PROC_STORE];
+        proc_init(proc_store);
+    }
+    ctx_init(&proc_app->p_ctx);
+
     gsx_start();
     {
         volatile WORD *g = (volatile WORD *)0x0610;

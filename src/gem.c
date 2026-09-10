@@ -34,6 +34,7 @@
 #include "vdi/pointer.h"
 #include "vdi/font.h"
 #include "aes/aes.h"
+#include "aes/proc.h"
 #include "sys/farmem.h"
 #include "sys/rapidus.h"
 #include "sys/irq.h"
@@ -105,6 +106,15 @@ __task void main(void)
                                             : (WORD)config.mouse,
              SCR_W / 2, SCR_H / 2);
     farmem_probe();
+    /* The processes, and the mark the context switch measures from.
+     * ctx_init() MUST be called from here and not from inside
+     * proc_init(): the mark it takes is its own caller's S, and no
+     * context may ever park above it -- src/sys/ctx.h has the argument
+     * and test-m27 caught it being got wrong.  main() is the shallowest
+     * place in gem4xe that can ever change hands. */
+    if (!proc_init(pool_alloc(PROC_STORE, 2)))
+        _sys_exit();
+    ctx_init(&proc_app->p_ctx);
     gemdos_init();              /* its far state below any application's */
     dev_clear_screen();         /* whichever screen it is */
 

@@ -526,17 +526,21 @@ WORD do_chg(OBJECT *tree, WORD iitem, UWORD chgvalue, WORD dochg,
 void mn_text(OBJECT *tree, WORD item, const char *text);
 WORD mn_register(WORD pid, const char *pstr);
 
-/* The message pipe (gemqueue.c, one process).  mq_put is what appl_write
- * and the window manager's ap_sendmsg do; a WM_REDRAW for a handle that
- * already has one waiting is unioned into it, and a WM_ARROWED replaces
- * any WM_ARROWED waiting.  Full pipe: the message is dropped (GEM would
- * block the sender, which here is the one process). */
-void mq_put(const WORD *msg);
-WORD mq_get(WORD *msg);         /* FALSE if empty */
+/* The message pipe (gemqueue.c).  Every process has one -- src/aes/proc.h
+ * -- and mq_put names which; mq_get and mq_count are the running one's.
+ * A WM_REDRAW for a handle that already has one waiting is unioned into
+ * it, and a WM_ARROWED replaces any WM_ARROWED waiting.  Full pipe: the
+ * message is dropped, as GEM would rather block the sender and the
+ * sender here is usually the AES itself. */
+struct PROC;
+void mq_put(struct PROC *to, const WORD *msg);
+WORD mq_get(WORD *msg);         /* the running process's; FALSE if empty */
 WORD mq_count(void);
+WORD *gl_appqueue(WORD *max);   /* the application's, in the banked window */
+WORD ct_idle(void);             /* TRUE when a turn may change hands */
 void ev_mesag(WORD *mebuff);    /* evnt_mesag: wait for one */
-void ap_sendmsg(WORD *ap_msg, WORD type, WORD w3, WORD w4, WORD w5,
-                WORD w6, WORD w7);
+void ap_sendmsg(struct PROC *to, WORD *ap_msg, WORD type, WORD w3, WORD w4,
+                WORD w5, WORD w6, WORD w7);
 
 /* ---- forms: form.c (gemfmlib.c) --------------------------------------- */
 void fm_own(WORD beg_ownit);

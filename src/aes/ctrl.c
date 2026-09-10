@@ -23,6 +23,7 @@
  * are drawn selected while the button is down.
  */
 #include "aes.h"
+#include "proc.h"
 
 WORD gl_ctmown;                 /* the menu has taken the mouse (ct_mouse) */
 static WORD ct_tmpmoff;         /* the hide count the menu found, to put back */
@@ -45,7 +46,7 @@ static void ct_msgup(WORD message, WORD wh, WORD m1, WORD m2, WORD m3,
                      WORD m4)
 {
     if (message)
-        ap_sendmsg(ctl_msg, message, wh, m1, m2, m3, m4);
+        ap_sendmsg(proc_app, ctl_msg, message, wh, m1, m2, m3, m4);
 }
 
 /* An arrow or slide bar pressed: the first WM_ARROWED now, the rest from
@@ -55,7 +56,7 @@ static void handle_arrow_msg(WORD wh, WORD gadget)
 {
     wm_update(END_UPDATE);
     ct_action = gl_wa[gadget - W_UPARROW];
-    ap_sendmsg(ctl_msg, WM_ARROWED, wh, ct_action, 0, 0, 0);
+    ap_sendmsg(proc_app, ctl_msg, WM_ARROWED, wh, ct_action, 0, 0, 0);
     ct_held = TRUE;
     ct_wh = wh;
     ct_tick = gl_ticks;
@@ -72,7 +73,7 @@ void ct_arrow_repeat(void)
     }
     if ((gl_ticks - ct_tick) < (uint32_t)gl_dclick)
         return;
-    ap_sendmsg(ctl_msg, WM_ARROWED, ct_wh, ct_action, 0, 0, 0);
+    ap_sendmsg(proc_app, ctl_msg, WM_ARROWED, ct_wh, ct_action, 0, 0, 0);
 }
 
 void ct_arrow_stop(void)

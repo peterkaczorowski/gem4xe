@@ -39,6 +39,7 @@
  * change the owner (gl_ctmown).
  */
 #include "aes.h"
+#include "proc.h"
 #include "../sys/zwin.h"
 
 /* ---- the pointer as the AES sees it ------------------------------------ */
@@ -60,13 +61,19 @@ static const WORD gl_dcrates[5] = { 450, 330, 275, 220, 165 };
 
 uint32_t gl_ticks;              /* timer ticks seen since ev_init */
 
-/* The one button wait that can be outstanding: whoever is inside
- * ev_multi.  bchange() completes it, ev_multi cancels it. */
-static WORD     bw_active;
-static uint32_t bw_parm;
-static WORD     bw_want;        /* clicks asked for */
-static WORD     bw_done;
-static WORD     bw_clicks;      /* clicks delivered */
+/* The one button wait a process can have outstanding: whoever is inside
+ * ev_multi.  bchange() completes it, ev_multi cancels it.
+ *
+ * These were file statics until the desk accessories, and the comment
+ * said "the one button wait that can be outstanding" because there was
+ * one process to have one.  Two processes can be inside ev_multi at once
+ * now (src/aes/proc.h), so the slot belongs to whoever is running and
+ * the rest of this file does not have to know that it moved. */
+#define bw_active   (rlr->p_bwactive)
+#define bw_parm     (rlr->p_bwparm)
+#define bw_want     (rlr->p_bwwant)
+#define bw_done     (rlr->p_bwdone)
+#define bw_clicks   (rlr->p_bwclicks)
 
 /* ---- ownership (geminput.c) --------------------------------------------
  * ctrl is the application's rectangle.  ct_owns: the last press went to
@@ -92,7 +99,15 @@ static WORD     ct_x, ct_y;     /* where that press was */
  * with).  A full queue drops the message: GEM would block the sender,
  * and here the sender is the process that would have to drain it. */
 ZWIN static WORD gl_queue[NUM_MSGS][8];
-static WORD gl_qcount;
+
+/* The application keeps the queue it always had -- sixteen messages in
+ * the banked window -- and only an accessory pays the pool for one
+ * (src/aes/proc.c).  The COUNT is the process's, not this file's. */
+WORD *gl_appqueue(WORD *max)
+{
+    *max = NUM_MSGS;
+    return &gl_queue[0][0];
+}
 
 /* ---- the button-state test every waiter is phrased in ------------------
  * buparm: bit 24 flag (0 = wait to ENTER the state, 1 = to LEAVE it),
@@ -358,12 +373,25 @@ void ct_poll(void)
     ct_release();
 }
 
-/* One poll of the devices, then the control manager's turn: every wait
- * loop here spins on this. */
+/* TRUE when nothing is mid-gesture, so a turn may change hands here.
+ * The rule is GEM's: the mouse belongs to whoever took the press until
+ * the button comes up (set_mown refuses to transfer with a button down),
+ * and the control manager's own state is the AES's rather than the
+ * process's, so it must be allowed to finish. */
+WORD ct_idle(void)
+{
+    return !ct_inside && !ct_owns && !ct_click && button == 0;
+}
+
+/* One poll of the devices, the control manager's turn, and then somebody
+ * else's turn if anybody else can go: every wait loop here spins on
+ * this, which makes it the one place in gem4xe where a context switch
+ * can happen (src/aes/proc.h). */
 void ev_poll(void)
 {
     vdi_input_poll();
     ct_poll();
+    proc_yield();
 }
 
 /* ---- set-up ------------------------------------------------------------- */
@@ -393,7 +421,8 @@ void ev_init(void)
     gl_bdely = gl_bpend = gl_bclick = 0;
     bw_active = bw_done = FALSE;
     gl_ticks = 0;
-    gl_qcount = 0;      /* the test runner re-inits: no stale messages */
+    rlr->p_qcount = 0;  /* the test runner re-inits: no stale messages */
+    rlr->p_evwait = 0;
     ct_owns = ct_inside = ct_click = FALSE;
     r_set(&ctrl, 0, 0, 0, 0);
     gl_ctmown = FALSE;
@@ -416,14 +445,20 @@ void ev_init(void)
     ev_dclick(3, TRUE);
 }
 
-/* Post a message; see the coalescing rules above. */
-void mq_put(const WORD *msg)
+/* Post a message to `to`; see the coalescing rules above.  A message to
+ * a process that is not there is dropped, which is what GEM does with
+ * one addressed to a pid that has gone. */
+void mq_put(PROC *to, const WORD *msg)
 {
     WORD i, j;
+    WORD *q;
 
+    if (!to)
+        return;
+    q = to->p_queue;
     if (msg[0] == WM_REDRAW || msg[0] == WM_ARROWED) {
-        for (i = 0; i < gl_qcount; i++) {
-            WORD *om = gl_queue[i];
+        for (i = 0; i < to->p_qcount; i++) {
+            WORD *om = q + i * 8;
             if (om[0] != msg[0])
                 continue;
             if (msg[0] == WM_REDRAW) {
@@ -437,38 +472,49 @@ void mq_put(const WORD *msg)
             return;
         }
     }
-    if (gl_qcount >= NUM_MSGS)
+    if (to->p_qcount >= to->p_qmax)
         return;
+    q += to->p_qcount * 8;
     for (j = 0; j < 8; j++)
-        gl_queue[gl_qcount][j] = msg[j];
-    gl_qcount++;
+        q[j] = msg[j];
+    to->p_qcount++;
 }
 
-/* Take the oldest message; FALSE if there is none. */
+/* Take the running process's oldest message; FALSE if there is none. */
 WORD mq_get(WORD *msg)
 {
     WORD i, j;
+    WORD *q = rlr->p_queue;
 
-    if (gl_qcount == 0)
+    if (rlr->p_qcount == 0)
         return FALSE;
     for (j = 0; j < 8; j++)
-        msg[j] = gl_queue[0][j];
-    gl_qcount--;
-    for (i = 0; i < gl_qcount; i++)
+        msg[j] = q[j];
+    rlr->p_qcount--;
+    for (i = 0; i < rlr->p_qcount; i++)
         for (j = 0; j < 8; j++)
-            gl_queue[i][j] = gl_queue[i + 1][j];
+            q[i * 8 + j] = q[(i + 1) * 8 + j];
     return TRUE;
 }
 
 WORD mq_count(void)
 {
-    return gl_qcount;
+    return rlr->p_qcount;
 }
 
-/* The window manager's message: type, sender (the one process, id 0),
- * no extra length, then five words of argument. */
-void ap_sendmsg(WORD *ap_msg, WORD type, WORD w3, WORD w4, WORD w5,
-                WORD w6, WORD w7)
+/* The window manager's message: type, sender, no extra length, then five
+ * words of argument.
+ *
+ * THE SENDER IS 0, and that is a real difference from the donor rather
+ * than an omission.  There the control manager is a PROCESS, SCRENMGR,
+ * and its pid goes in word 1 of every MN_SELECTED and AC_OPEN it sends;
+ * here it is a call nested in the application's wait (docs/phase8.md), so
+ * there is no process to name and the AES's own messages say 0.  Nothing
+ * documented reads word 1 of these -- an accessory is told which item it
+ * was by words 3 and 4 -- and appl_write, which is the one place a real
+ * sender exists, fills it in itself. */
+void ap_sendmsg(PROC *to, WORD *ap_msg, WORD type, WORD w3, WORD w4,
+                WORD w5, WORD w6, WORD w7)
 {
     ap_msg[0] = type;
     ap_msg[1] = 0;
@@ -478,7 +524,7 @@ void ap_sendmsg(WORD *ap_msg, WORD type, WORD w3, WORD w4, WORD w5,
     ap_msg[5] = w5;
     ap_msg[6] = w6;
     ap_msg[7] = w7;
-    mq_put(ap_msg);
+    mq_put(to, ap_msg);
 }
 
 /* evnt_mesag: the oldest message, waiting for one if the queue is empty.
@@ -487,8 +533,10 @@ void ap_sendmsg(WORD *ap_msg, WORD type, WORD w3, WORD w4, WORD w5,
  * never returns, exactly as GEM's would. */
 void ev_mesag(WORD *mebuff)
 {
+    rlr->p_evwait = MU_MESAG;
     while (!mq_get(mebuff))
         ev_poll();
+    rlr->p_evwait = 0;
 }
 
 /* Drain the keyboard queue (gemfmlib.c fq). */
@@ -602,6 +650,12 @@ static WORD ev_wait(WORD flags, const MOBLK *pmo1, const MOBLK *pmo2,
                 twant = tmcount / (uint32_t)gl_ticktime;
             t0 = gl_ticks;
         }
+        /* What this process is parked on, for proc_ready() to test from
+         * another one's poll (src/aes/proc.c).  Only the two conditions
+         * that do not depend on who owns the mouse are recorded: a
+         * message, and a deadline. */
+        rlr->p_evwait = flags;
+        rlr->p_tdead = t0 + twant;
         for (;;) {
             ev_poll();
             if (ct_mine()) {
@@ -626,6 +680,7 @@ static WORD ev_wait(WORD flags, const MOBLK *pmo1, const MOBLK *pmo2,
                 break;
         }
         bw_cancel();
+        rlr->p_evwait = 0;
         what = which;
     }
     return what;
@@ -659,9 +714,12 @@ static void ev_wait_ticks(uint32_t ticks)
     t0 = gl_ticks;
     if (ticks == 0)
         ticks = 1;
+    rlr->p_evwait = MU_TIMER;
+    rlr->p_tdead = t0 + ticks;
     do
         ev_poll();
     while ((gl_ticks - t0) < ticks);
+    rlr->p_evwait = 0;
 }
 
 /* One event, the way ev_block does it: the immediate cases differ a little

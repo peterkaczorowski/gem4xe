@@ -37,6 +37,7 @@
 #include "vdi/font.h"
 #include "vdi/vdidev.h"    /* which device this program is about */
 #include "aes/aes.h"
+#include "aes/proc.h"
 #include "sys/farmem.h"
 #include "sys/rapidus.h"
 #include "sys/irq.h"
@@ -479,7 +480,7 @@ static void run_script(void)
                 fs_start();                 /* the selector's name slots, too */
                 break;
             case 12:                        /* appl_write: id, len, msg[8] */
-                mq_put(&intin[2]);
+                mq_put(proc_app, &intin[2]);
                 intout[0] = 1;
                 c4 = 1;
                 break;
@@ -948,6 +949,15 @@ __task void main(void)
     /* Discover linear RAM above bank $00.  Reported at STATUS[16..23] so the
      * harness can check what was actually found on this machine. */
     farmem_probe();
+    /* The processes, and the mark the context switch measures from.
+     * ctx_init() MUST be called from here and not from inside
+     * proc_init(): the mark it takes is its own caller's S, and no
+     * context may ever park above it -- src/sys/ctx.h has the argument
+     * and test-m27 caught it being got wrong.  main() is the shallowest
+     * place in gem4xe that can ever change hands. */
+    if (!proc_init(pool_alloc(PROC_STORE, 2)))
+        _sys_exit();
+    ctx_init(&proc_app->p_ctx);
     STATUS[16] = farmem.kind;
     STATUS[17] = farmem.first_bank;
     STATUS[18] = farmem.last_bank;
