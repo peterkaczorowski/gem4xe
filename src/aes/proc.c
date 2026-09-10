@@ -102,6 +102,35 @@ WORD proc_ready(const PROC *p)
     return FALSE;
 }
 
+/* Give every other process a turn until none of them has a message left
+ * unread, or until `rounds` turns have gone by -- the donor's
+ * wait_for_accs, which blocks appl_exit until every accessory has taken
+ * its AC_CLOSE out of the queue.
+ *
+ * The bound is what stops an accessory that has stopped reading from
+ * hanging the machine: the donor gives up after 500 dispatcher rounds
+ * and abandons it.  A round here is a context switch and a stack copy
+ * rather than a register swap, so the number is smaller and the reason
+ * is the same. */
+void proc_drain(WORD rounds)
+{
+    WORD i;
+
+    while (rounds-- > 0) {
+        PROC *busy = 0;
+
+        for (i = 1; i < proc_n; i++)
+            if (proc_tab[i].p_stat == P_LIVE && proc_tab[i].p_qcount) {
+                busy = &proc_tab[i];
+                break;
+            }
+        if (!busy)
+            return;
+        proc_turns++;
+        ctx_switch(&busy->p_ctx);
+    }
+}
+
 void proc_yield(void)
 {
     PROC *p;

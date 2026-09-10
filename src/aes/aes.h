@@ -524,9 +524,21 @@ WORD mn_do(WORD *ptitle, WORD *pitem);
 WORD do_chg(OBJECT *tree, WORD iitem, UWORD chgvalue, WORD dochg,
             WORD dodraw, WORD chkdisabled);
 void mn_text(OBJECT *tree, WORD item, const char *text);
+/* The objects every menu tree has in these positions -- the shape the
+ * RCS builds and the AES trusts.  THEDESK is the Desk TITLE, and it is
+ * the word AC_OPEN carries in msg[3]; the control manager and the menu
+ * library both need it, so it is here once rather than twice.  A tree
+ * whose first menu title is not object 3 breaks accessory dispatch in
+ * silence -- the donor carries the same constant with the same warning. */
+#define THESCREEN   0
+#define THEBAR      1
+#define THEACTIVE   2
+#define THEDESK     3
+
 void mn_start(void);             /* once per AES start: the registry cleared */
 WORD mn_register(WORD pid, const char *pstr);
 struct PROC *mn_owner(WORD id);  /* who registered that slot, or 0 */
+void mn_cleanup(void);           /* AC_CLOSE to every registered accessory */
 extern WORD gl_dafirst;          /* where the first accessory name lands */
 extern WORD gl_accreg;           /* names registered in the Desk menu */
 extern const char *gl_acctitle[]; /* by slot; the ACCESSORY's own memory */
@@ -544,7 +556,7 @@ WORD mq_count(void);
 WORD *gl_appqueue(WORD *max);   /* the application's, in the banked window */
 WORD ct_idle(void);             /* TRUE when a turn may change hands */
 void ev_mesag(WORD *mebuff);    /* evnt_mesag: wait for one */
-void ap_sendmsg(struct PROC *to, WORD *ap_msg, WORD type, WORD w3, WORD w4,
+void ap_sendmsg(struct PROC *to, WORD type, WORD w3, WORD w4,
                 WORD w5, WORD w6, WORD w7);
 
 /* ---- forms: form.c (gemfmlib.c) --------------------------------------- */

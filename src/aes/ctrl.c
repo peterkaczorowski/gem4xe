@@ -28,7 +28,6 @@
 WORD gl_ctmown;                 /* the menu has taken the mouse (ct_mouse) */
 static WORD ct_tmpmoff;         /* the hide count the menu found, to put back */
 
-static WORD ctl_msg[8];
 
 /* The WM_ARROWED action for each gadget from W_UPARROW up: the slide
  * bars page, the arrows line, and W_HBAR is not a gadget at all. */
@@ -42,11 +41,11 @@ static WORD     ct_held;
 static WORD     ct_wh, ct_action;
 static uint32_t ct_tick;        /* when the first WM_ARROWED went */
 
-static void ct_msgup(WORD message, WORD wh, WORD m1, WORD m2, WORD m3,
-                     WORD m4)
+static void ct_msgup(PROC *to, WORD message, WORD wh, WORD m1, WORD m2,
+                     WORD m3, WORD m4)
 {
     if (message)
-        ap_sendmsg(proc_app, ctl_msg, message, wh, m1, m2, m3, m4);
+        ap_sendmsg(to, message, wh, m1, m2, m3, m4);
 }
 
 /* An arrow or slide bar pressed: the first WM_ARROWED now, the rest from
@@ -56,7 +55,7 @@ static void handle_arrow_msg(WORD wh, WORD gadget)
 {
     wm_update(END_UPDATE);
     ct_action = gl_wa[gadget - W_UPARROW];
-    ap_sendmsg(proc_app, ctl_msg, WM_ARROWED, wh, ct_action, 0, 0, 0);
+    ap_sendmsg(proc_app, WM_ARROWED, wh, ct_action, 0, 0, 0);
     ct_held = TRUE;
     ct_wh = wh;
     ct_tick = gl_ticks;
@@ -73,7 +72,7 @@ void ct_arrow_repeat(void)
     }
     if ((gl_ticks - ct_tick) < (uint32_t)gl_dclick)
         return;
-    ap_sendmsg(proc_app, ctl_msg, WM_ARROWED, ct_wh, ct_action, 0, 0, 0);
+    ap_sendmsg(proc_app, WM_ARROWED, ct_wh, ct_action, 0, 0, 0);
 }
 
 void ct_arrow_stop(void)
@@ -96,7 +95,7 @@ static void hctl_window(WORD wh, WORD mx, WORD my)
 
     if (wh != gl_wtop) {
         /* went down on an inactive window: tell the owner to top it */
-        ct_msgup(WM_TOPPED, wh, 0, 0, 0, 0);
+        ct_msgup(proc_app, WM_TOPPED, wh, 0, 0, 0, 0);
         return;
     }
 
@@ -179,7 +178,7 @@ static void hctl_window(WORD wh, WORD mx, WORD my)
     if (need_normal)
         ob_change(gl_awind, gadget, NORMAL, TRUE);
 
-    ct_msgup(message, wh, x, y, w, h);
+    ct_msgup(proc_app, message, wh, x, y, w, h);
 }
 
 /* The window manager's press at (mx,my).  The desktop's presses are the
@@ -195,15 +194,43 @@ void hctl_button(WORD mx, WORD my)
 }
 
 /* The pointer has come into the active menu bar with the buttons up: run
- * the menu, and tell the application what was chosen.  MN_SELECTED
- * carries the title in msg[3] and the item in msg[4]; the title is left
- * selected for the application's menu_tnormal. */
+ * the menu, and tell whoever it belongs to what was chosen.
+ *
+ * TWO MESSAGES COME OUT OF ONE GESTURE.  An item in the Desk drop-down
+ * at or below gl_dafirst is an ACCESSORY's, and it gets AC_OPEN with the
+ * menu id menu_register handed out; everything else is the
+ * application's MN_SELECTED.  The word layouts are not the same shape
+ * and the difference is worth writing down, because two pages of the
+ * Compendium get it wrong: AC_OPEN's msg[3] is the DESK TITLE's object
+ * index -- 3 in every tree the RCS builds -- and the menu id is in
+ * msg[4], where MN_SELECTED puts the item.
+ *
+ * The title is left selected for the application's menu_tnormal, except
+ * for an accessory: nobody would ever call it, so the AES puts the
+ * title back itself, which is what the donor does here too.
+ *
+ * And the mouse goes with it.  An accessory that has just been asked to
+ * open is about to put something on the screen and wait for a click, so
+ * it becomes the input owner (src/aes/proc.h); the application gets the
+ * mouse back when the accessory has nothing on the screen any more. */
 void hctl_rect(void)
 {
     WORD title, item;
 
-    if (gl_mntree && mn_do(&title, &item))
-        ct_msgup(MN_SELECTED, title, item, 0, 0, 0);
+    if (!gl_mntree || !mn_do(&title, &item))
+        return;
+    if (title == THEDESK && gl_accreg && item >= gl_dafirst) {
+        WORD  id = (WORD)(item - gl_dafirst);
+        PROC *to = mn_owner(id);
+
+        do_chg(gl_mntree, title, SELECTED, FALSE, TRUE, TRUE);
+        if (to) {
+            proc_input = to;
+            ct_msgup(to, AC_OPEN, title, id, 0, 0, 0);
+        }
+        return;
+    }
+    ct_msgup(proc_app, MN_SELECTED, title, item, 0, 0, 0);
 }
 
 /* The menu taking the mouse (grabit) and giving it back.  While it has

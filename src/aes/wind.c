@@ -101,7 +101,6 @@ static ORECT   gl_olist[NUM_ORECT];
 static ORECT  *gl_rul;              /* the free rectangles */
 static ORECT   gl_mkrect;           /* the rectangle newrect is breaking */
 static TEDINFO gl_aname, gl_ainfo;
-static WORD    wind_msg[8];
 
 OBJECT *gl_wtree;
 OBJECT *gl_awind;
@@ -595,7 +594,7 @@ static void w_redraw(WORD wh, const GRECT *pt)
     if (rc_intersect(&t, &d) &&
         w_union(gl_win[wh].w_rlist, &d) &&
         rc_intersect(&d, &t)) {
-        ap_sendmsg(proc_app, wind_msg, WM_REDRAW, wh, t.g_x, t.g_y, t.g_w, t.g_h);
+        ap_sendmsg(proc_app, WM_REDRAW, wh, t.g_x, t.g_y, t.g_w, t.g_h);
     }
 }
 

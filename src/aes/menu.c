@@ -34,12 +34,6 @@
 #include "aes.h"
 #include "proc.h"
 
-/* the objects every menu tree has in these positions */
-#define THESCREEN   0
-#define THEBAR      1
-#define THEACTIVE   2
-#define THEDESK     3
-
 #define MENU_THICKNESS  1       /* the frame bb_save keeps around a drop-down */
 
 /* The accessories' names and who registered them, by slot; gl_dafirst is
@@ -393,6 +387,31 @@ WORD mn_register(WORD pid, const char *pstr)
     gl_accreg++;
     menu_fixup();
     return slot;
+}
+
+/* AC_CLOSE to every registered accessory, whether it has anything open
+ * or not -- the donor's mn_cleanup, and it goes to all of them for the
+ * reason the donor's does: the message does not mean "the user closed
+ * you".  It means the application that was running has terminated and
+ * its memory is about to be reclaimed, so anything the accessory took
+ * while that application was alive has to go back now.
+ *
+ * The accessory must NOT close its own windows.  The AES does that --
+ * here in the shell loop's wm_init(), which destroys every window
+ * whoever owns it, exactly as the donor's wm_new does -- and a handle
+ * kept across an AC_CLOSE is a handle to a window that no longer
+ * exists.  The Compendium says the same in one line: "Do not close any
+ * windows your accessory had open, the system will do this for you."
+ *
+ * msg[3] is the MENU ID, where AC_OPEN puts it in msg[4].  The asymmetry
+ * is the donor's and both sources agree on it. */
+void mn_cleanup(void)
+{
+    WORD i;
+
+    for (i = 0; i < NUM_ACCS; i++)
+        if (gl_accown[i])
+            ap_sendmsg(gl_accown[i], AC_CLOSE, i, 0, 0, 0, 0);
 }
 
 /* The process that registered slot `id`, and 0 for a slot nobody has. */

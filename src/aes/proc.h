@@ -110,6 +110,12 @@ void  proc_drop(PROC *p);
 /* Somebody else's turn, if anybody else can go.  ev_poll() calls it. */
 void  proc_yield(void);
 
+/* Turns to everybody with a message waiting, until nobody has one or
+ * `rounds` have gone by: the barrier the shell puts between AC_CLOSE and
+ * tearing the windows down. */
+#define ACC_ROUNDS  32
+void  proc_drain(WORD rounds);
+
 /* TRUE when p could run now: it has never had a turn, or what it is
  * waiting for has arrived. */
 WORD  proc_ready(const PROC *p);

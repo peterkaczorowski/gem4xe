@@ -513,9 +513,17 @@ WORD mq_count(void)
  * documented reads word 1 of these -- an accessory is told which item it
  * was by words 3 and 4 -- and appl_write, which is the one place a real
  * sender exists, fills it in itself. */
-void ap_sendmsg(PROC *to, WORD *ap_msg, WORD type, WORD w3, WORD w4,
+void ap_sendmsg(PROC *to, WORD type, WORD w3, WORD w4,
                 WORD w5, WORD w6, WORD w7)
 {
+    /* ONE buffer, not one per caller.  It is filled and handed to
+     * mq_put, which copies it into the destination's queue before this
+     * returns, so it is scratch and never state -- which is why the
+     * donor has a single appl_msg for the whole AES.  Three of these
+     * were three eight-word statics in three files until bank $00 ran
+     * out of room, which is a tidier reason to fix it than tidiness. */
+    static WORD ap_msg[8];
+
     ap_msg[0] = type;
     ap_msg[1] = 0;
     ap_msg[2] = 0;
@@ -533,10 +541,16 @@ void ap_sendmsg(PROC *to, WORD *ap_msg, WORD type, WORD w3, WORD w4,
  * never returns, exactly as GEM's would. */
 void ev_mesag(WORD *mebuff)
 {
+    WORD     s_evwait = rlr->p_evwait;      /* see ev_wait: it may be nested */
+    uint32_t s_tdead = rlr->p_tdead;
+
     rlr->p_evwait = MU_MESAG;
+    if (rlr == proc_input && rlr != proc_app)
+        proc_input = proc_app;      /* see ev_wait: nothing on the screen */
     while (!mq_get(mebuff))
         ev_poll();
-    rlr->p_evwait = 0;
+    rlr->p_evwait = s_evwait;
+    rlr->p_tdead = s_tdead;
 }
 
 /* Drain the keyboard queue (gemfmlib.c fq). */
@@ -609,6 +623,18 @@ static WORD ev_wait(WORD flags, const MOBLK *pmo1, const MOBLK *pmo2,
     WORD what = 0, which = 0;
     WORD k;
     uint32_t t0 = 0, twant = 0;
+    /* What this process was already parked on, because THIS WAIT MAY BE
+     * NESTED INSIDE IT.  The control manager runs as a call inside the
+     * application's wait (docs/phase8.md) and the menu and the gadgets
+     * wait again in there, on the same process; a nested wait that ZEROED
+     * p_evwait on its way out would leave the outer wait invisible to
+     * proc_ready, and the scheduler would never give anybody else a turn
+     * again.  It is the same save-and-restore ct_run already does around
+     * the one button-wait slot, for the same reason, and test-m28 found
+     * it the same way: an accessory stopped being scheduled the moment
+     * the Desk menu had been pulled down once. */
+    WORD     s_evwait = rlr->p_evwait;
+    uint32_t s_tdead = rlr->p_tdead;
 
     /* bring the state up to date (chkkbd + forker) */
     ev_poll();
@@ -656,6 +682,17 @@ static WORD ev_wait(WORD flags, const MOBLK *pmo1, const MOBLK *pmo2,
          * message, and a deadline. */
         rlr->p_evwait = flags;
         rlr->p_tdead = t0 + twant;
+        /* THE MOUSE GOES BACK when an accessory stops asking for it: a
+         * wait with none of the input events in it is an accessory with
+         * nothing on the screen, which is the point at which the donor's
+         * ownership -- recomputed from the window under the pointer --
+         * would have handed it back anyway.  The full rule needs a window
+         * to have an owner, which is a later milestone; this is the half
+         * of it that an accessory without a window needs, and without it
+         * an accessory that finishes a dialog keeps the mouse for ever. */
+        if (rlr == proc_input && rlr != proc_app
+            && !(flags & (MU_KEYBD | MU_BUTTON | MU_M1 | MU_M2)))
+            proc_input = proc_app;
         for (;;) {
             ev_poll();
             if (ct_mine()) {
@@ -680,9 +717,10 @@ static WORD ev_wait(WORD flags, const MOBLK *pmo1, const MOBLK *pmo2,
                 break;
         }
         bw_cancel();
-        rlr->p_evwait = 0;
         what = which;
     }
+    rlr->p_evwait = s_evwait;
+    rlr->p_tdead = s_tdead;
     return what;
 }
 
@@ -708,18 +746,22 @@ WORD ev_multi(WORD flags, const MOBLK *pmo1, const MOBLK *pmo2,
  * where the polled regime could hand over at most one. */
 static void ev_wait_ticks(uint32_t ticks)
 {
-    uint32_t t0;
+    uint32_t t0, s_tdead;
+    WORD     s_evwait;
 
     ev_poll();
     t0 = gl_ticks;
     if (ticks == 0)
         ticks = 1;
+    s_evwait = rlr->p_evwait;               /* see ev_wait: it may be nested */
+    s_tdead = rlr->p_tdead;
     rlr->p_evwait = MU_TIMER;
     rlr->p_tdead = t0 + ticks;
     do
         ev_poll();
     while ((gl_ticks - t0) < ticks);
-    rlr->p_evwait = 0;
+    rlr->p_evwait = s_evwait;
+    rlr->p_tdead = s_tdead;
 }
 
 /* One event, the way ev_block does it: the immediate cases differ a little

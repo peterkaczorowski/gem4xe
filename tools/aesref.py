@@ -88,6 +88,7 @@ UPARROW, DNARROW, VSLIDE, LFARROW, RTARROW, HSLIDE = (0x40, 0x80, 0x100,
 (WM_REDRAW, WM_TOPPED, WM_CLOSED, WM_FULLED, WM_ARROWED, WM_HSLID,
  WM_VSLID, WM_SIZED, WM_MOVED, WM_NEWTOP, WM_UNTOPPED, WM_ONTOP) = range(20, 32)
 MN_SELECTED = 10
+AC_OPEN, AC_CLOSE = 40, 41
 # the menu tree's fixed objects (menu.c), and mn_do's states
 THESCREEN, THEBAR, THEACTIVE, THEDESK = 0, 1, 2, 3
 MENU_THICKNESS = 1
@@ -3025,10 +3026,27 @@ class AES:
             self.hctl_window(wh, mx, my)
 
     def hctl_rect(self):
-        if self.gl_mntree is not None:
-            got = self.mn_do()
-            if got:
-                self.ct_msgup(MN_SELECTED, got[0], got[1], 0, 0, 0)
+        """What was chosen from the bar, and who hears about it.  An item
+        in the Desk drop-down at or below gl_dafirst is an ACCESSORY's and
+        gets AC_OPEN with the menu id in msg[4]; everything else is the
+        application's MN_SELECTED with the item there.  AC_OPEN's msg[3]
+        is the Desk TITLE's object index, which is where two pages of the
+        Compendium have it wrong and both sources have it right.
+
+        The model has one process, so there is nobody else to send an
+        AC_OPEN to -- what it records is that one was sent, and with which
+        words, which is what a gate comparing returned values can check."""
+        if self.gl_mntree is None:
+            return
+        got = self.mn_do()
+        if not got:
+            return
+        title, item = got
+        if title == THEDESK and self.gl_accreg and item >= self.gl_dafirst:
+            self.do_chg(title, SELECTED, False, True, True)
+            self.ct_msgup(AC_OPEN, title, item - self.gl_dafirst, 0, 0, 0)
+            return
+        self.ct_msgup(MN_SELECTED, title, item, 0, 0, 0)
 
     def ct_mouse(self, grabit):
         """The control manager takes the mouse for the menu: the pointer

@@ -327,6 +327,17 @@ static WORD sh_ldapp(void)
     sh_runs++;
     sh_doexec = -1;                 /* what the program asks for */
     sh_lastret = app_exec(&app);
+
+    /* The program has gone.  The mouse comes back here whatever it left
+     * it set to, and every accessory is told -- before app_free takes the
+     * memory back and before the loop's wm_init destroys the windows,
+     * because an accessory that has taken anything while this program was
+     * alive has to be given the chance to give it back.  Then it is given
+     * the TURNS to do that in: the donor blocks appl_exit until every
+     * accessory has read the message, and proc_drain is that barrier. */
+    proc_input = proc_app;
+    mn_cleanup();
+    proc_drain(ACC_ROUNDS);
     app_free(&app);
     /* A desktop that returns without asking for anything has nothing
      * left to do: that is a shutdown, not the desktop again forever. */
