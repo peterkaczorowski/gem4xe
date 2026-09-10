@@ -43,16 +43,20 @@ DISKS = [
     ("gem-sp.atr", "disks/gem-sp.atr", "sdfs",
      "SpartaDOS 3.2 on a 320 KB floppy.  It boots straight into GEM: the "
      "disk carries STARTUP.BAT and AUTOEXEC.BAT, four bytes each, because "
-     "SpartaDOS 3.2 reads the first and SpartaDOS X the second."),
+     "SpartaDOS 3.2 reads the first and SpartaDOS X the second.  The "
+     "desk accessory is on this one: pull down Desk and there is a "
+     "Clock under the About item."),
     ("gem-boot.atr", "disks/gem-boot.atr", "dos2",
      "A double-density DOS 2 floppy, 180 KB.  GEM is AUTORUN.SYS, which "
      "this DOS runs at boot; DUP.SYS is still on it, so there is a DOS to "
-     "come back to.  The system and nothing else: the calculator and the "
-     "clock are on the other two, because 21 KB is what this disk has "
-     "left and it is better spent on a program of yours."),
+     "come back to.  The system and nothing else: the calculator, the "
+     "clock and the desk accessory are on the other two, because 2 KB is "
+     "what this disk has left once GEM's 122 KB and the desktop are on "
+     "it.  The Desk menu here holds only the About item."),
     ("gem-cf.img", "disks/gem-cf.img", None,
      "A 16 MB CF card: an APT partition table and two SDFS partitions, "
-     "with the system in `\\GEM\\` and an application in `\\APPS\\`. "
+     "with the system and the desk accessory in `\\GEM\\` and the "
+     "applications in `\\APPS\\`. "
      "It carries no DOS \u2014 SpartaDOS X and the PBI BIOS that mounts "
      "the partitions both come from Ultimate 1MB flash \u2014 so this "
      "one wants a U1MB machine."),
@@ -71,6 +75,7 @@ SYSTEM = [
     ("calc.rsc", "CALC.RSC"),
     ("clock.g4a", "CLOCK.G4A"),
     ("clock.rsc", "CLOCK.RSC"),
+    ("clockacc.g4a", "CLOCK.ACC"),
 ]
 
 WHAT_IT_IS = {
@@ -92,6 +97,13 @@ WHAT_IT_IS = {
                  "the machine knows",
     "CLOCK.RSC": "its panel, and the templates that decide how a time "
                  "and a date are written",
+    "CLOCK.ACC": "THE SAME CLOCK AS A DESK ACCESSORY.  Put it beside "
+                 "GEM.COM, with CLOCK.RSC, and it appears in the Desk "
+                 "menu: the AES loads it once at start-up and it stays "
+                 "there, ticking, through every program the desktop runs. "
+                 "An accessory goes in the system's own directory, never "
+                 "in \\APPS\\ -- it is not something the desktop "
+                 "launches",
 }
 
 
