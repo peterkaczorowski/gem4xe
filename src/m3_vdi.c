@@ -475,6 +475,7 @@ static void run_script(void)
                 ev_init();
                 wm_init();
                 mn_init();
+                mn_start();                 /* the registry: once per AES start */
                 sh_init();                  /* far buffers: before any app_load */
                 lang_init();                /* LANG.RSC, or the English in the image */
                 fs_start();                 /* the selector's name slots, too */
@@ -955,7 +956,8 @@ __task void main(void)
      * context may ever park above it -- src/sys/ctx.h has the argument
      * and test-m27 caught it being got wrong.  main() is the shallowest
      * place in gem4xe that can ever change hands. */
-    if (!proc_init(pool_alloc(PROC_STORE, 2)))
+    if (!ctx_regs_ok() || !proc_init(pool_alloc(PROC_STORE, 2))
+        || !ctx_make(&proc_app->p_ctx, 0))
         _sys_exit();
     ctx_init(&proc_app->p_ctx);
     STATUS[16] = farmem.kind;

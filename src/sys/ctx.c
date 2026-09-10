@@ -37,17 +37,37 @@ uint16_t  ctx_over;             /* parks refused for want of room: a bug counter
 
 extern uint16_t ctx_sp_in;      /* src/sys/ctx.s: S at the switch */
 
+/* The compiler's register file, from the linker (src/sys/ctx.s), and how
+ * much of the direct page a switch actually carries.  The two are checked
+ * against each other once, at start-up, rather than trusted: a register
+ * file that grew past what travels would corrupt the other context in a
+ * way nothing else here would notice. */
+extern const uint16_t ctx_reg_lo, ctx_reg_hi;
+#define CTX_REGS    32          /* must match src/sys/ctx.s */
+
+uint16_t ctx_regs_want;         /* what the linker says: for the gate */
+
 /* The C half of ctx_init(); src/sys/ctx.s has already marked ctx_base
  * with ITS caller's S, which is the shallowest point that can ever
  * switch.  Everything above that mark belongs to no context and is never
  * copied. */
+int16_t ctx_regs_ok(void)
+{
+    ctx_regs_want = (uint16_t)(ctx_reg_hi - ctx_reg_lo);
+    return ctx_regs_want <= CTX_REGS;
+}
+
 void ctx_start0(CTX *first)
 {
+    /* Everything but the mark is ctx_make()'s: context 0 is a context
+     * like any other and needs somewhere to be parked just as much as
+     * the ones it starts.  It did not have one for the first three runs
+     * of test-m28, and far_put() to address 0 is bank $00's zero page --
+     * the machine survived it in test-m27, which asks the OS for
+     * nothing afterwards, and did not survive it in the shell. */
     ctx_cur = ctx_root = first;
     first->sp = ctx_base;
-    first->save = 0;
-    first->len = first->deep = 0;
-    first->entry = 0;
+    first->len = 0;
     first->live = CTX_LIVE;
 }
 
@@ -80,9 +100,12 @@ uint16_t ctx_park(CTX *to)
     uint16_t len = (uint16_t)(ctx_base - sp);
 
     if (from != to) {
-        if (len > CTX_MAX) {
-            /* Cannot happen from ev_poll, and would corrupt the other
-             * context silently if it did.  Refuse and stay put. */
+        if (!from->save || len > CTX_MAX) {
+            /* Neither can happen from ev_poll, and either would corrupt
+             * something quietly: a context with nowhere to be parked
+             * would write its stack over bank $00's zero page, and one
+             * too deep would write over the other context's.  Refuse and
+             * stay put; ctx_over is the count nobody should ever see. */
             ctx_over++;
             return 0xFFFF;
         }

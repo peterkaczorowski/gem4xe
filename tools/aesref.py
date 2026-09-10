@@ -65,6 +65,7 @@ FMD_START, FMD_GROW, FMD_SHRINK, FMD_FINISH = 0, 1, 2, 3
 FORWARD, BACKWARD, DEFLT = 0, 1, 2
 # -- the window manager (wind.c) ------------------------------------------
 NUM_WIN, NUM_ORECT, NUM_MSGS, NUM_ELEM = 8, 80, 16, 19
+NUM_ACCS = 6                    # the Desk box's slots (src/aes/proc.h)
 DESKWH = 0
 VF_INUSE, VF_BROKEN, VF_ISOPEN = 1, 2, 4
 WS_FULL, WS_CURR, WS_PREV, WS_WORK, WS_TRUE = 0, 1, 2, 3, 4
@@ -1531,6 +1532,13 @@ class AES:
         # menu.c: the bar showing, and the rectangle that wakes the menu
         self.gl_mntree = None
         self.gl_ctwait = MOBLK(False, 0, 0, 0, 0)
+        # The accessories' names, by slot, and where the first of them
+        # lands in the tree.  Registrations outlive every application --
+        # the donor registers once at AES start-up and never clears them
+        # -- so this is set up HERE, in ct_init, and not in mn_init.
+        self.gl_acctitle = [None] * NUM_ACCS
+        self.gl_accreg = 0
+        self.gl_dafirst = 0
 
     def ct_mine(self):
         return self.ct_inside or not self.ct_owns
@@ -3719,17 +3727,36 @@ class AES:
         return imenu
 
     def menu_fixup(self):
-        """The Desk drop-down's chain rebuilt for the accessories -- none,
-        so its one child is the item after it and it is one line high;
-        the separator and the six slots stay in the array, unlinked."""
+        """The Desk drop-down's chain rebuilt for the accessories that
+        have registered a name: the application's item, then -- if there
+        are any -- the separator and one item per name, in slot order.
+        The chain is destroyed and rebuilt BY INDEX over the RCS's own
+        dabox+1..dabox+8, which is why the resource must carry exactly
+        eight children whether they are used or not.  The height is
+        recomputed and the width is not: a title too long for the box the
+        resource drew is clipped, and the resource is where its width was
+        decided."""
         tree = self.gl_mntree
         if tree is None:
             return
         themenus = tree[THESCREEN].ob_tail
         dabox = tree[themenus].ob_head
         tree[dabox].ob_head = tree[dabox].ob_tail = NIL
-        self.ob_add(tree, dabox, dabox + 1)
-        tree[dabox].ob_height = self.gl_hchar
+        self.gl_dafirst = dabox + 3
+        cnt = (2 + self.gl_accreg) if self.gl_accreg else 1
+        slot, height = 0, 0
+        for i in range(1, cnt + 1):
+            ob = dabox + i
+            self.ob_add(tree, dabox, ob)
+            if i > 2:                       # the names, after the separator
+                while slot < NUM_ACCS and self.gl_acctitle[slot] is None:
+                    slot += 1
+                if slot >= NUM_ACCS:
+                    break
+                tree[ob].ob_spec = self.gl_acctitle[slot]
+                slot += 1
+            height += self.gl_hchar
+        tree[dabox].ob_height = height
 
     def rect_change(self, pmo, iob, x):
         pmo.m_gr = self.ob_actxywh(iob)
@@ -3895,9 +3922,24 @@ class AES:
         buffer the caller made long enough."""
         self.mem[self.tree[item].ob_spec].s = self.mem[addr].s
 
-    @staticmethod
-    def mn_register(pid, addr):
-        return -1                               # no accessories
+    def mn_register(self, pid, addr):
+        """A name in the Desk menu, and the menu id an AC_OPEN will carry.
+        The ADDRESS is kept, not the string: the AES puts it straight into
+        an object's ob_spec, which is the donor's own behaviour and the
+        reason an accessory's title has to outlive the accessory's
+        start-up.  The id is the SLOT, found by looking for a free one, so
+        that six ids stay six ids however they were handed out."""
+        if pid < 0 or self.gl_accreg >= NUM_ACCS:
+            return -1
+        for slot in range(NUM_ACCS):
+            if self.gl_acctitle[slot] is None:
+                break
+        else:
+            return -1
+        self.gl_acctitle[slot] = addr
+        self.gl_accreg += 1
+        self.menu_fixup()
+        return slot
 
     # -- the runner's AES ops (src/m3_vdi.c: 1000 + AES function number) --
     def op(self, op, pts=(), ints=()):

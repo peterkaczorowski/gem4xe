@@ -34,6 +34,8 @@
 #include "sys/dos.h"
 #include "sys/gemdos.h"
 #include "sys/farmem.h"
+#include "sys/ctx.h"
+#include "aes/proc.h"
 #include "lang_rsc.h"
 
 #define SH_CMDLEN   128         /* MAXPATHLEN: the command, NUL-terminated */
@@ -183,6 +185,108 @@ WORD sh_find(char *pspec)
 
 /* ---- the shell loop ------------------------------------------------- */
 
+/* ---- the accessories ---------------------------------------------------
+ *
+ * Every *.ACC in the system's own directory, loaded ONCE, before the
+ * first program, and never freed.  Both halves of that sentence are
+ * load-bearing.
+ *
+ * BEFORE THE FIRST PROGRAM, because both allocators are bump allocators
+ * that app_free winds back to where app_load found them (src/sys/app.h:
+ * "applications are released in the reverse order of their loading").
+ * An accessory taken BEFORE the desktop is below the desktop's mark, so
+ * every return to the desktop leaves it standing; one taken after would
+ * be freed underneath itself the first time a program exited.  The same
+ * rule reaches into the accessory: everything it will ever want from
+ * bank $00 -- its resource included -- it must take while it is starting
+ * up, which is what the donor tells an accessory writer for a different
+ * reason (a DA's memory is not freed on a resolution change, so it is
+ * told to embed its resource rather than load one).
+ *
+ * NEVER FREED, so the APP record app_load fills in is not kept: there is
+ * nothing to give back.  What the AES keeps is a process (src/aes/proc.h)
+ * and a context (src/sys/ctx.h).
+ *
+ * HOW MANY.  The Desk box has six slots; bank $00 has room for rather
+ * fewer, the pool being 14 KB and the desktop with its resource most of
+ * it.  So the loop stops when the pool says no and not when a constant
+ * does, which is also what the donor does when its one allocation for
+ * all the accessories fails.
+ *
+ * The directory is read the file selector's way (fs_active, src/aes/fsel.c):
+ * the CIO directory channel, a line at a time, parsed by the DOS seam so
+ * that a SpartaDOS and a DOS 2 list alike.  The names are collected
+ * first and loaded afterwards, because loading reads files too.
+ */
+#define ACC_EXT     "ACC"
+#define ACC_DIRLINE 17                  /* DOS 2's record, less its EOL */
+#define ACC_NAMELEN 13                  /* NAME.EXT and its NUL: dos_dirline's */
+
+WORD sh_naccs;                          /* accessories running */
+WORD sh_accfull;                        /* found, and no room for: for the gate */
+
+/* One accessory: a process, a queue, a context, and its first turn.
+ * The turn is the donor's barrier in the simplest form it can take --
+ * ctx_switch does not come back until the accessory has parked, and an
+ * accessory parks when it reaches its first evnt_ call, which is after
+ * it has registered its name. */
+static WORD sh_ldacc(const char *name)
+{
+    APP   app;
+    PROC *p;
+    WORD *q;
+
+    q = pool_alloc((WORD)(ACC_MSGS * 8 * sizeof(WORD)), 2);
+    if (!q)
+        return FALSE;
+    p = proc_new(q, ACC_MSGS);
+    if (!p)
+        return FALSE;
+    if (app_load_file(name, &app) != APP_OK || !ctx_make(&p->p_ctx, app.entry)) {
+        proc_drop(p);
+        return FALSE;
+    }
+    ctx_switch(&p->p_ctx);              /* runs until it parks */
+    p->p_stat = P_LIVE;                 /* it has had its first turn */
+    sh_naccs++;
+    return TRUE;
+}
+
+static void sh_accs(void)
+{
+    char  names[NUM_PROCS - 1][ACC_NAMELEN];
+    char  cio[CIO_NAME_MAX + 1], line[ACC_DIRLINE + 8], fname[ACC_NAMELEN];
+    WORD  n = 0, i;
+    int16_t fd;
+
+    sh_cioname("*.*", cio);
+    fd = cio_open(cio, CIO_A_DIR, 0);
+    if (fd < 0)
+        return;
+    while (n < NUM_PROCS - 1) {
+        uint16_t got = 0;
+        uint8_t  st = cio_getrec(fd, line, sizeof line, &got);
+
+        /* CIO answers 1 for a record and 3 for the last one, not 0 --
+         * the selector's own test (fs_active), and getting it backwards
+         * is a directory that reads as empty. */
+        if (st != CIO_OK && st != CIO_OK_EOF)
+            break;
+        if ((dos_dirline(line, got, fname, 0) & DOS_ENT_KIND) == DOS_ENT_FILE
+            && dos_wildcmp("*." ACC_EXT, fname)) {
+            strcpy(names[n], fname);
+            n++;
+        }
+        if (st == CIO_OK_EOF)
+            break;
+    }
+    cio_close(fd);
+
+    for (i = 0; i < n; i++)
+        if (!sh_ldacc(names[i]))
+            sh_accfull++;
+}
+
 /* The desktop's file, read once and kept.  The far heap above the
  * shell's own buffers belongs to whichever program is running and is
  * wound back when it exits (app_free), so the desktop's bytes are taken
@@ -250,6 +354,7 @@ WORD sh_main(void)
         if (!sh_desk_blob)
             return APP_E_FILE;
     }
+    sh_accs();                  /* before the first program: see above */
     sh_runs = 0;
     sh_lastret = 0;
     sh_lastrc = 0;

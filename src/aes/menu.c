@@ -32,6 +32,7 @@
  * unrestored, not a crash.
  */
 #include "aes.h"
+#include "proc.h"
 
 /* the objects every menu tree has in these positions */
 #define THESCREEN   0
@@ -40,6 +41,16 @@
 #define THEDESK     3
 
 #define MENU_THICKNESS  1       /* the frame bb_save keeps around a drop-down */
+
+/* The accessories' names and who registered them, by slot; gl_dafirst is
+ * where the first of them lands in the tree, which is what makes a click
+ * on one into a menu id.  Registrations outlive every application: the
+ * donor's mn_init runs once at AES start-up, before the accessories are
+ * loaded, and never again. */
+const char *gl_acctitle[NUM_ACCS];
+PROC       *gl_accown[NUM_ACCS];
+WORD        gl_accreg;
+WORD        gl_dafirst;
 
 /* mn_do's states: where the pointer is */
 #define START_STATE     1       /* in the bar, off the titles */
@@ -67,22 +78,49 @@ static WORD menu_sub(OBJECT *tree, WORD ititle)
     return imenu;
 }
 
-/* Rebuild the Desk drop-down's chain for the accessories: none, so the
- * one child is the application's "About" item, and the box is one line
- * high.  The separator and the six accessory slots are unlinked, not
- * moved: they stay where the RCS put them, at dabox+2..dabox+8. */
+/* Rebuild the Desk drop-down's chain for the accessories that have
+ * registered a name: the application's "About" item, then -- if there
+ * are any -- the separator and one item per name, in slot order.  The
+ * items are the RCS's own, at dabox+1..dabox+8, and the chain is
+ * destroyed and rebuilt BY INDEX, which is why the resource must carry
+ * exactly eight children of the Desk box whether they are used or not
+ * (tools/deskrsc.py; the invariant is the donor's, and one child short
+ * makes the sixth accessory's ob_add walk into the File drop-down).
+ *
+ * The height is recomputed and the WIDTH IS NOT, which is the donor's
+ * behaviour and not an omission: a title too long for the box the
+ * resource drew is clipped, and the resource is where its width is
+ * decided.  gl_dafirst is the object index the first name landed on,
+ * which is what turns a click into a menu id (ctrl.c). */
 static void menu_fixup(void)
 {
     OBJECT *tree = gl_mntree;
-    WORD themenus, dabox;
+    WORD themenus, dabox, cnt, i, slot, ob, height;
 
     if (tree == 0)
         return;
     themenus = tree[THESCREEN].ob_tail;
     dabox = tree[themenus].ob_head;
     tree[dabox].ob_head = tree[dabox].ob_tail = NIL;
-    ob_add(tree, dabox, dabox + 1);
-    tree[dabox].ob_height = gl_hchar;
+    gl_dafirst = dabox + 3;
+
+    cnt = gl_accreg ? (WORD)(2 + gl_accreg) : 1;
+    slot = 0;
+    height = 0;
+    for (i = 1; i <= cnt; i++) {
+        ob = dabox + i;
+        ob_add(tree, dabox, ob);
+        if (i > 2) {                    /* the names, after the separator */
+            while (slot < NUM_ACCS && !gl_acctitle[slot])
+                slot++;
+            if (slot >= NUM_ACCS)
+                break;
+            tree[ob].ob_spec = (int32_t)(uint16_t)gl_acctitle[slot];
+            slot++;
+        }
+        height += gl_hchar;
+    }
+    tree[dabox].ob_height = height;
 }
 
 /* A mouse rectangle wait on an object: leave it if x, else enter it. */
@@ -322,13 +360,72 @@ void mn_text(OBJECT *tree, WORD item, const char *text)
         ;
 }
 
-/* menu_register: no accessories, so no menu id -- -1, as the AES answers
- * when the Desk menu is full. */
+/* menu_register: a name in the Desk menu, and the menu id that will come
+ * back in the AC_OPEN when it is chosen.  -1 when the slots are full,
+ * which is also what a caller that is not a process gets.
+ *
+ * THE STRING IS NOT COPIED.  The pointer is kept and goes straight into
+ * an object's ob_spec, which is what the donor does and says so ("save
+ * pointer, like Atari TOS"): an accessory's title has to be in memory
+ * that lives as long as the accessory, and an accessory that frees it
+ * has put a dangling pointer in the menu.  Since an accessory takes all
+ * its bank $00 memory before the first program is loaded (src/aes/shel.c)
+ * and never gives it back, that is a rule it cannot easily break here.
+ *
+ * The id is the SLOT, found by looking for a free one rather than by
+ * counting registrations, so that six ids stay six ids however they were
+ * handed out.  The owner recorded is the CALLER, not the pid it names --
+ * again the donor's: pid is a sanity check and nothing more, since the
+ * only process that can ask is the one running. */
 WORD mn_register(WORD pid, const char *pstr)
 {
-    (void)pid;
-    (void)pstr;
-    return -1;
+    WORD slot;
+
+    if (pid < 0 || gl_accreg >= NUM_ACCS)
+        return -1;
+    for (slot = 0; slot < NUM_ACCS; slot++)
+        if (!gl_acctitle[slot])
+            break;
+    if (slot >= NUM_ACCS)
+        return -1;
+    gl_acctitle[slot] = pstr;
+    gl_accown[slot] = rlr;
+    gl_accreg++;
+    menu_fixup();
+    return slot;
+}
+
+/* The process that registered slot `id`, and 0 for a slot nobody has. */
+PROC *mn_owner(WORD id)
+{
+    if (id < 0 || id >= NUM_ACCS)
+        return 0;
+    return gl_accown[id];
+}
+
+/* Once per AES start-up, before any accessory is loaded: the Desk menu's
+ * registrations, forgotten.
+ *
+ * This is a SPLIT the donor does not need and gem4xe does.  There,
+ * mn_init() is called once, from geminit, and the registry is simply
+ * part of it; here mn_init() is called again by the shell loop between
+ * every two programs (src/aes/shel.c), because the window and menu state
+ * of the program that has just gone has to go with it.  An accessory's
+ * name must NOT go with it -- the accessory is still there -- so the
+ * registry moved to the half that happens once.  The gate said so before
+ * the reasoning did: test-m9 runs four cases against one live AES, and
+ * the target kept case 0's registration into case 1 while the model,
+ * built fresh per case, did not. */
+void mn_start(void)
+{
+    WORD i;
+
+    for (i = 0; i < NUM_ACCS; i++) {
+        gl_acctitle[i] = 0;
+        gl_accown[i] = 0;
+    }
+    gl_accreg = 0;
+    gl_dafirst = 0;
 }
 
 /* No bar; the wake rectangle is the menu bar's row, after gsx_start has

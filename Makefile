@@ -409,6 +409,13 @@ $(eval $(call g4a,m11_app,$(APP_OBJS),$(APP_BSS),$(APP_BITS),$(APP_STACK),--c-ar
 build/app_blob.o: build/app_blob.c
 	$(CC) $(CFLAGS) -o $@ $<
 
+# The gate accessory (src/m28_acc.c): a .G4A like any other program, on
+# the disk with the extension the AES looks for.  Its near region is the
+# smallest of anything here -- it draws nothing and owns no window -- so
+# what test-m28 measures is close to the floor an accessory costs.
+ACC_OBJS   = $(G4A_LIB) build/app/m28_acc.o
+$(eval $(call g4a,m28_acc,$(ACC_OBJS),768,192,384,,))
+
 # The two accessories (src/apps): the first programs written to the
 # application ABI that are not tests.  Each is one C file, one resource
 # built on the host, and the same three-way link every .g4a takes.
@@ -627,6 +634,12 @@ APP_FILES = --mkdir APPS \
             --add build/calc.g4a "APPS>CALC.G4A" --add build/calc.rsc "APPS>CALC.RSC" \
             --add build/clock.g4a "APPS>CLOCK.G4A" --add build/clock.rsc "APPS>CLOCK.RSC"
 APP_DEPS  = build/calc.g4a build/calc.rsc build/clock.g4a build/clock.rsc
+# The gate accessory (src/m28_acc.c), in the system's own directory with
+# the extension the AES looks for there: an accessory is not in \APPS\
+# with the programs, because it is not one -- it is loaded once at
+# start-up and outlives every program (src/aes/shel.c).
+ACC_FILES = --add build/m28_acc.g4a M28.ACC
+ACC_DEPS  = build/m28_acc.g4a
 
 build/test.rsc: tools/mkrsc.py tools/rsc.py tools/aesref.py
 	@mkdir -p build
@@ -791,6 +804,13 @@ build/m17-boot.atr: build/m3desk.xex tests/fixtures/test.txt tests/fixtures/out.
 # two accessories in \APPS\ as the product media carries them.  This is
 # the disk that reproduces the user's own layout -- the real desktop, a
 # folder, and an application inside it that waits for the mouse.
+# The accessories gate's disk (test-m28): test-m17's, with one accessory
+# in the system's directory, which is where the AES looks for *.ACC.
+build/m28-boot.atr: build/m3desk.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) $(ACC_DEPS) tools/mkspdisk.py tools/atr.py
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(DESK_FILES) $(ACC_FILES)
+
 build/m23-boot.atr: build/m3desk.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) $(APP_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
@@ -835,7 +855,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-boot
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-boot
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -1026,6 +1046,9 @@ test-m24: build/m24-boot.atr
 test-m27: build/m27-boot.atr
 	python3 tests/emu/m27_ctx.py
 
+test-m28: build/m28-boot.atr
+	python3 tests/emu/m28_acc.py
+
 # ...and the VDI itself on it: the same vdi.c, the other side of the seam.
 test-m25: build/m25-boot.atr
 	python3 tests/emu/m25_antic_vdi.py
@@ -1110,4 +1133,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-boot test-cf demo movie bench emu-stop clean

@@ -74,6 +74,12 @@ extern uint16_t  ctx_over;      /* parks refused for want of room -- a bug */
  * mark -- src/sys/ctx.s says what happens if one tries. */
 __attribute__((simple_call)) void ctx_init(CTX *first);
 
+/* FALSE when the compiler's register file has outgrown what a switch
+ * carries -- see src/sys/ctx.s.  Ask before ctx_init and refuse to run;
+ * ctx_regs_want is what the linker says it is. */
+int16_t ctx_regs_ok(void);
+extern uint16_t ctx_regs_want;
+
 /* Room in far memory for one context's extent, and the record zeroed.
  * FALSE if the far heap has none.  `entry` is the program it runs the
  * first time it is resumed; it is expected never to return. */

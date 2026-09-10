@@ -67,6 +67,7 @@ typedef struct PROC {
 
 extern PROC *proc_tab;          /* NUM_PROCS records, the caller's memory */
 extern WORD  proc_n;            /* records in use: 1 until an accessory loads */
+extern WORD  proc_turns;        /* turns handed over since start-up */
 
 /* Who the mouse and the keyboard belong to.  GEM keeps one gl_mowner and
  * hands it about as the pointer crosses windows (geminput.c); here it
@@ -101,6 +102,10 @@ PROC *proc_of(WORD pid);
 /* A record for a program about to be loaded, taking the queue the caller
  * has found room for.  0 when there is no record left. */
 PROC *proc_new(WORD *queue, WORD qmax);
+
+/* Give back the record proc_new() handed out, when the load it was for
+ * did not happen. */
+void  proc_drop(PROC *p);
 
 /* Somebody else's turn, if anybody else can go.  ev_poll() calls it. */
 void  proc_yield(void);

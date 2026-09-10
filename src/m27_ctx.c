@@ -128,6 +128,15 @@ __task void main(void)
             ;
     }
 
+    /* The root gets a save area like any other context: without one its
+     * parked stack goes to far address 0, which is bank $00's zero page.
+     * This gate did not notice for three runs, because a runner that
+     * spins in a loop afterwards never asks the OS for anything. */
+    if (!ctx_make(&c_root, 0)) {
+        STATUS[2] = 0xFE;
+        for (;;)
+            ;
+    }
     ctx_init(&c_root);
     if (!ctx_make(&c_a, (uint32_t)proc_a) ||
         !ctx_make(&c_b, (uint32_t)proc_b)) {

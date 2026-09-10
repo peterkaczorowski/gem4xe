@@ -12,6 +12,7 @@
 PROC *proc_tab;
 PROC *proc_input;
 WORD  proc_n;
+WORD  proc_turns;   /* turns handed over: a measurement, not a gate */
 
 /* event.c's, so that the application keeps the queue it always had --
  * sixteen messages in the banked window -- and only an accessory pays
@@ -71,6 +72,19 @@ PROC *proc_new(WORD *queue, WORD qmax)
     return p;
 }
 
+/* Give back the record proc_new() just handed out, when the load it was
+ * for did not happen.  Only the last one: the table is filled in order
+ * and nothing has a pointer to this record yet. */
+void proc_drop(PROC *p)
+{
+    if (p == &proc_tab[proc_n - 1] && proc_n > 1) {
+        p->p_stat = P_FREE;
+        p->p_queue = 0;
+        p->p_qmax = p->p_qcount = 0;
+        proc_n--;
+    }
+}
+
 WORD proc_ready(const PROC *p)
 {
     if (p->p_stat == P_NEW)
@@ -110,6 +124,7 @@ void proc_yield(void)
     for (i = 1; i < proc_n; i++) {
         p = &proc_tab[(here + i) % proc_n];
         if (p != rlr && proc_ready(p)) {
+            proc_turns++;
             ctx_switch(&p->p_ctx);
             return;
         }

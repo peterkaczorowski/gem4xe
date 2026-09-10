@@ -97,6 +97,7 @@ __task void main(void)
         static char proc_store[PROC_STORE];
         proc_init(proc_store);
     }
+    ctx_make(&proc_app->p_ctx, 0);      /* somewhere to be parked, if ever */
     ctx_init(&proc_app->p_ctx);
 
     gsx_start();

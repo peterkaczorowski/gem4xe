@@ -524,7 +524,12 @@ WORD mn_do(WORD *ptitle, WORD *pitem);
 WORD do_chg(OBJECT *tree, WORD iitem, UWORD chgvalue, WORD dochg,
             WORD dodraw, WORD chkdisabled);
 void mn_text(OBJECT *tree, WORD item, const char *text);
+void mn_start(void);             /* once per AES start: the registry cleared */
 WORD mn_register(WORD pid, const char *pstr);
+struct PROC *mn_owner(WORD id);  /* who registered that slot, or 0 */
+extern WORD gl_dafirst;          /* where the first accessory name lands */
+extern WORD gl_accreg;           /* names registered in the Desk menu */
+extern const char *gl_acctitle[]; /* by slot; the ACCESSORY's own memory */
 
 /* The message pipe (gemqueue.c).  Every process has one -- src/aes/proc.h
  * -- and mq_put names which; mq_get and mq_count are the running one's.
