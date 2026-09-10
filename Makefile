@@ -62,6 +62,11 @@ SRC_U1MB ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures
 
 HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
 M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
+# The context switch on its own: farmem for the parked extents, app_run
+# out of abi.s for the way a context enters its program, and the runner's
+# own stubs for the engine that is deliberately not linked.
+M27_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m27_ctx.o \
+             build/ctx.o build/ctxs.o build/farmem.o build/abis.o
 # The ANTIC surface milestone: no VBXE object at all, which is the point
 M24_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m24_antic.o build/antic.o build/font8x8.o
 # The VDI on the ANTIC device: the same vdi.c, compiled for the other
@@ -233,6 +238,20 @@ build/abi.o: src/sys/abi.c src/sys/abi.h src/vdi/vdi.h src/aes/aes.h src/sys/gem
 build/abis.o: src/sys/abi.s
 	@mkdir -p build
 	$(AS) -o $@ $<
+
+# The context switch: the bookkeeping in C, the three instructions C
+# cannot write in assembly (src/sys/ctx.h).
+build/ctx.o: src/sys/ctx.c src/sys/ctx.h src/sys/abi.h src/sys/farmem.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/ctxs.o: src/sys/ctx.s
+	@mkdir -p build
+	$(AS) -o $@ $<
+
+build/m27_ctx.o: src/m27_ctx.c src/sys/ctx.h src/sys/farmem.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
 
 build/app.o: src/sys/app.c src/sys/app.h src/sys/abi.h src/sys/cio.h src/sys/dos.h src/sys/farmem.h src/sys/gemdos.h
 	@mkdir -p build
@@ -512,6 +531,12 @@ build/m25-boot.atr: build/m25.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M25.COM $(DISK_DENSITY)
 
+build/m27.elf: $(M27_OBJS) src/gem4xe.scm
+	$(LD) src/gem4xe.scm $(M27_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/m27.map
+
+build/m27.xex: build/m27.elf
+	python3 tools/mkxex.py $< $@ --entry _atari_entry --syms build/m27.sym
+
 build/m24.elf: $(M24_OBJS) src/gem4xe.scm
 	$(LD) src/gem4xe.scm $(M24_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/m24.map
 
@@ -790,6 +815,11 @@ build/m2-boot.atr: build/m2.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M2.COM $(DISK_DENSITY)
 
+build/m27-boot.atr: build/m27.xex
+	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M27.COM $(DISK_DENSITY)
+
 build/m24-boot.atr: build/m24.xex
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
@@ -800,7 +830,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-boot
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-boot
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -988,6 +1018,9 @@ test-m23: build/m23-boot.atr build/desktop.g4a build/desktop.sym build/calc.sym
 test-m24: build/m24-boot.atr
 	python3 tests/emu/m24_antic.py
 
+test-m27: build/m27-boot.atr
+	python3 tests/emu/m27_ctx.py
+
 # ...and the VDI itself on it: the same vdi.c, the other side of the seam.
 test-m25: build/m25-boot.atr
 	python3 tests/emu/m25_antic_vdi.py
@@ -1072,4 +1105,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-boot test-cf demo movie bench emu-stop clean
