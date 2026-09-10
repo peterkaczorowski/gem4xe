@@ -95,12 +95,17 @@ PRODUCTS = [
 ]
 
 
-def desk_model(mark, brk, pointer, drvmap, dirs):
+def desk_model(mark, brk, pointer, drvmap, dirs, dev=None):
     """The desktop against the model, up to its first wait: the same
     prelude and the same sh_main the desktop gates run (m17_desktop), and
     then one step producer, which photographs the desk and chooses
-    File -> Quit so the model's session ends there."""
-    v, a, _ = aesref.run(PRELUDE, [], {}, pointer=pointer, pool=mark)
+    File -> Quit so the model's session ends there.
+
+    `dev` is the screen (tools/devref.py).  None is the VBXE, which is
+    what these two product disks come up on; tests/emu/m26_fallback.py
+    hands in an ANTIC one and gets the same desktop laid out for 320x168,
+    which is the whole point of the seam."""
+    v, a, _ = aesref.run(PRELUDE, [], {}, pointer=pointer, pool=mark, dev=dev)
     v.close_virtuals()
     a.wm_init()
     a.mn_init()

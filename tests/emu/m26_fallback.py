@@ -41,22 +41,22 @@ What is checked, in the order it is worth checking:
   came up on ANTIC because the parser silently failed and something else
   fell back cannot pass as a safe-mode boot that worked;
 
-  THE SCREEN: two colours on ANTIC, sixteen available on the VBXE, and
-  ink on both -- a desk that drew nothing is not a desk;
+  THE DESK ITSELF, pixel for pixel against tools/deskref.py -- the
+  desktop's own model, run on tools/devref.py's ANTIC device.  It is the
+  same model test-boot compares the VBXE desks against and the same one
+  test-m17 drives through a whole session; what changes is one argument.
+  Neither deskref, aesref nor vdiref was written for a 320x168 screen
+  with two colours and neither was edited for one: they ask the VDI what
+  the device is, the way src/aes/graf.c's gsx_start does, and lay out on
+  the answer;
 
   and the two ANTIC screens AGAINST EACH OTHER, pixel for pixel.  Same
   binary, same disk, same device, reached two different ways: if the
   override is really just "pick the other table", they are identical,
   and any difference is the override doing something else as well.
 
-There is no pixel model here, and that is deliberate rather than an
-omission: tools/deskref.py draws through tools/vdiref.py, which is
-written to a 4bpp VBXE surface, so a modelled ANTIC desk is the whole
-VDI model ported and belongs in its own phase.  What this gate can
-establish without one -- the device, the geometry, the config, and that
-the two ways of reaching ANTIC agree exactly -- is what the fallback
-claim actually consists of.  test-m25 already holds the ANTIC VDI and
-the object library on it to the pixel.
+The VBXE case is not compared here -- tests/emu/product_boot.py already
+does that, against the same model, on the same disk.
 
   python3 tests/emu/m26_fallback.py [--shot]
 """
@@ -67,8 +67,10 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from a8test.launcher import launch          # noqa: E402
-import symfile                              # noqa: E402
+import atr, devref, symfile                 # noqa: E402
 from anticref import AN_W, AN_H             # noqa: E402
+from product_boot import (desk_model, dos2_listing,   # noqa: E402
+                          DRVBYT, DOS_2, FARMEM_BRK)
 from vbxeref import (SCR_W as VB_W, SCR_H as VB_H,   # noqa: E402
                      SHOT_X0 as VB_X0, SHOT_Y0 as VB_Y0)
 
@@ -188,6 +190,39 @@ def one(tag, disk, has_vbxe, want_cfg, want_dev, geom, syms, keep, check):
         print(f"  the AES laid out on {aes[0]}x{aes[1]}, {aes[2]} plane(s), "
               f"cell {aes[3]}x{aes[4]}")
 
+        # -- the desk against its own model -------------------------------
+        # Everything the model needs that is not on the disk is read off
+        # the machine, the way tests/emu/product_boot.py reads it: the
+        # model has to hand the desktop's Malloc a real address and put
+        # its tree where the loader put the target's.
+        if want_dev == "antic":
+            calls = syms["gem_calls"]
+            kind = b.peek(syms["dos"])
+            drvmap = 0x03 if kind != DOS_2 else (b.peek(DRVBYT) or 1)
+            mark = b.peek16(syms["app_pool_lo"])
+            brk = int.from_bytes(
+                bytes(b.memdump(syms["farmem"] + FARMEM_BRK, 4)), "little")
+            pointer = (b.peek16(syms["ptr_state"]),
+                       b.peek16(syms["ptr_state"] + 2))
+            fs = atr.open_fs(atr.ATRImage.load(path))
+            ref_v, ref_a, d = desk_model(mark, brk, pointer, drvmap,
+                                         dos2_listing(fs),
+                                         dev=devref.Antic())
+            check(len(ref_a.shots) == 1,
+                  f"{tag}: the model took {len(ref_a.shots)} shots")
+            # The ABI's counter is the desktop's own, so the call the
+            # target is sitting in must be the model's first wait.
+            got = (b.peek16(calls) - 1) & 0xFFFF
+            check(got == d.waits[0],
+                  f"{tag}: the desktop is in call {got}, not its first wait "
+                  f"{d.waits[0]}")
+            print(f"  the model laid out on {ref_a.gl_width}x{ref_a.gl_height}, "
+                  f"cell {ref_a.gl_wchar}x{ref_a.gl_hchar}, box "
+                  f"{ref_a.gl_wbox}x{ref_a.gl_hbox}; {len(d.script)} calls to "
+                  f"its first wait at {d.waits[0]}")
+        else:
+            ref_a = None
+
         # -- the screen ---------------------------------------------------
         os.makedirs(SHOTDIR, exist_ok=True)
         shot = os.path.join(SHOTDIR, f"m26-{tag}.png")
@@ -211,6 +246,27 @@ def one(tag, disk, has_vbxe, want_cfg, want_dev, geom, syms, keep, check):
             shape = None
         ink = min(seen, key=sum) if seen else None
         count = sum(1 for p in pixels(px, x0, y0, w, h, step) if p == ink)
+        if ref_a is not None:
+            # The model's picture is bits; the screenshot's two colours
+            # are the machine's and are read off the shot rather than
+            # assumed, because what a luminance comes out as is between
+            # ANTIC and the monitor (tools/devref.py, Antic.PAPER).
+            paper = max(seen, key=sum)
+            bad, shown = 0, []
+            want = ref_a.shots[0]
+            for yy in range(h):
+                for xx in range(w):
+                    got = px[x0 + xx * step, y0 + yy] != paper
+                    exp = tuple(want[yy][xx]) == devref.Antic.INK
+                    if got != exp:
+                        bad += 1
+                        if len(shown) < 4:
+                            shown.append((xx, yy, "ink" if exp else "paper"))
+            check(not bad,
+                  f"{tag}: the desk, {bad} of {w * h:,} pixels differ from "
+                  f"deskref on the ANTIC device; first (x, y, wanted) {shown}")
+            if not bad:
+                print(f"  the desk is the model's, all {w * h:,} pixels")
         check(0 < count < w * h,
               f"{tag}: {count} ink pixels on a {w}x{h} desk -- one that drew "
               f"nothing, or one that drew everything")

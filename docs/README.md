@@ -52,6 +52,7 @@ Read in order if you want the argument; jump if you want an answer.
 | [phase32.md](phase32.md) | The ANTIC surface: the second display gem4xe can draw on, 320x168 in one bit, in the region the VBXE's MEMAC window would have had. Proof the driver seam is real. |
 | [phase33.md](phase33.md) | The VDI on it — the same `vdi.c`, extracted onto a device seam in seven increments with the 86-case gate run after each — and Atari's condensed 6x6 face, because 320 pixels and an 8-wide cell is forty columns and forty columns is not a desktop. |
 | [phase34.md](phase34.md) | One binary, two screens: the device chosen when the program starts, and `GEM4XE.CFG` to overrule it from a DOS prompt when the screen is the broken thing. Carries the build lesson — a hand-written prerequisite list is a list that can be wrong, and when it is wrong the compiler is not. |
+| [phase35.md](phase35.md) | The model's side of the seam: `vdiref` stops being written to one surface, `devref` grows an ANTIC device beside the VBXE one, and `aesref` takes a `dev` argument — after which the object library and the whole GEM Desktop model run on 320x168 with nothing else edited. Carries the refactoring gate that made it safe: 99 model cases hashed in 2.6 seconds, one digest, unmoved throughout. |
 
 ## Across the phases
 
