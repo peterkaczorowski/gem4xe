@@ -35,7 +35,12 @@ extern uint8_t  gem_which;     /* the signature byte after the COP opcode */
 extern uint16_t gem_api_sp;
 extern uint8_t  gem_depth;
 
-extern uint16_t gem_calls;     /* COPs served */
+extern uint16_t gem_calls;     /* COPs served, every process's */
+/* Of those, the ones the APPLICATION made.  A gate that wants to know
+ * where a program has got to has to count only that program's calls, and
+ * gem_calls stopped being that the moment a desk accessory could be
+ * resident beside it (src/aes/proc.h). */
+extern uint16_t app_calls;
 extern uint16_t gem_bad;       /* COPs refused: signature, opcode, bank */
 
 void gem_entry(void);          /* the C side of the handler */

@@ -147,7 +147,7 @@ def main(argv):
     syms = symfile.load(SYMS)
     ptr = syms["ptr_state"]
     runs, lastret, lastrc = syms["sh_runs"], syms["sh_lastret"], syms["sh_lastrc"]
-    calls = syms["gem_calls"]
+    calls = syms["app_calls"]
     os.makedirs(SHOTDIR, exist_ok=True)
     shots = []
 

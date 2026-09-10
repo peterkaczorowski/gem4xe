@@ -182,7 +182,7 @@ def main(argv):
             fails.append(msg)
             print(f"  FAIL: {msg}")
 
-    calls, ptr = syms["gem_calls"], syms["ptr_state"]
+    calls, ptr = syms["app_calls"], syms["ptr_state"]
     runs, lastret, lastrc = syms["sh_runs"], syms["sh_lastret"], syms["sh_lastrc"]
     for addr in (calls, ptr, runs, lastret, lastrc):
         assert not 0x4000 <= addr < 0x8000, hex(addr)

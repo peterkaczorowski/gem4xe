@@ -265,7 +265,7 @@ def one(name, progname, how, keep, check):
               f"{t + STEP} frames in, with nothing typed")
 
         # -- 3. the desktop, and the model it must match --------------------
-        calls = syms["gem_calls"]
+        calls = syms["app_calls"]
         n, still = b.peek16(calls), 0
         for t in range(0, 20000, 250):
             b.frames(250)
@@ -294,7 +294,11 @@ def one(name, progname, how, keep, check):
 
         kind = b.peek(syms["dos"])          # DOS_INFO.kind (src/sys/dos.h)
         drvmap = 0x03 if kind != DOS_2 else (b.peek(DRVBYT) or 1)
-        mark = b.peek16(syms["app_pool_lo"])
+        # Where the DESKTOP's near region actually is, not where the pool
+        # starts: an accessory is loaded before the first program and sits
+        # below it (docs/phase36.md), so app_pool_lo stopped being the
+        # answer the moment the product shipped one.
+        mark = b.peek16(syms["app_near"])
         brk = int.from_bytes(bytes(b.memdump(syms["farmem"] + FARMEM_BRK, 4)), "little")
         pointer = (b.peek16(syms["ptr_state"]), b.peek16(syms["ptr_state"] + 2))
         print(f"  DOS kind {kind}, drive map {drvmap:#04x}, pool ${mark:04X}, "

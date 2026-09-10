@@ -408,7 +408,7 @@ def main(argv):
             fails.append(msg)
             print(f"  FAIL: {msg}")
 
-    calls, ptr = syms["gem_calls"], syms["ptr_state"]
+    calls, ptr = syms["app_calls"], syms["ptr_state"]
     desk_len = (os.path.getsize(DESKTOP) + 3) & ~3
     os.makedirs(SHOTDIR, exist_ok=True)
     shots = []

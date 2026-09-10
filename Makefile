@@ -432,9 +432,18 @@ build/clock.rsc build/clockrsc.h: tools/clockrsc.py tools/rsc.py tools/aesref.py
 	python3 tools/clockrsc.py build/clock.rsc build/clockrsc.h
 
 CALC_OBJS  = $(G4A_LIB) build/apps/calc.o
-CLOCK_OBJS = $(G4A_LIB) build/apps/clock.o
+CLOCK_OBJS = $(G4A_LIB) build/apps/clock.o build/apps/clockapp.o
 $(eval $(call g4a,calc,$(CALC_OBJS),1536,256,512,,))
 $(eval $(call g4a,clock,$(CLOCK_OBJS),1536,256,512,,))
+
+# The clock AS AN ACCESSORY (src/apps/clockacc.c): the same clock.o, a
+# different main, and the extension the AES looks for in the system's own
+# directory.  The reservations are what the map says it uses rather than
+# round numbers, because an accessory is charged to the application pool
+# for as long as the machine is on -- 14 KB for the desktop, its resource
+# and everything resident beside it (docs/phase36.md).
+CLOCKACC_OBJS = $(G4A_LIB) build/apps/clock.o build/apps/clockacc.o
+$(eval $(call g4a,clockacc,$(CLOCKACC_OBJS),1152,128,384,,))
 
 # The desktop (src/desk): a bigger near region than the gate application's,
 # for the object trees a desktop keeps in bank $00, and DESKTOP.RSC beside
@@ -640,6 +649,11 @@ APP_DEPS  = build/calc.g4a build/calc.rsc build/clock.g4a build/clock.rsc
 # start-up and outlives every program (src/aes/shel.c).
 ACC_FILES = --add build/m28_acc.g4a M28.ACC
 ACC_DEPS  = build/m28_acc.g4a
+# The accessory the PRODUCT ships: the clock, in the system's own
+# directory rather than \APPS\, because an accessory is not a program the
+# desktop launches -- the AES loads it once at start-up and it outlives
+# every program (src/aes/shel.c).
+ACCP_DEPS = build/clockacc.g4a build/clock.rsc
 
 build/test.rsc: tools/mkrsc.py tools/rsc.py tools/aesref.py
 	@mkdir -p build
@@ -724,6 +738,13 @@ build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_
 	    --add build/lang.rsc LANG.RSC --add build/816.com 816.COM \
 	    --add build/gem4xe.cfg GEM4XE.CFG
 
+# NO ACCESSORY ON THIS DISK, and it is not a choice: a double-density DOS
+# 2 floppy is 184 KB and GEM.COM is 122 KB of it, which leaves eleven
+# sectors after the desktop and its resource.  CLOCK.ACC wants twenty.
+# The accessory ships on the install disk and the CF card, which is where
+# docs/shipping.md sends anybody who wants to use the thing rather than
+# just see it boot.
+#
 # The product's SpartaDOS floppy is an INSTALL disk: the same \GEM\ and
 # \APPS\ layout the card has, so copying it onto an APT hard drive is a
 # directory copy and not a decision, and none of the file layer's
@@ -739,7 +760,7 @@ build/gem-antic.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11
 	    --add build/lang.rsc LANG.RSC --add build/816.com 816.COM \
 	    --add build/safe.cfg GEM4XE.CFG
 
-build/gem-sp.atr: build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg $(DESK_DEPS) $(APP_DEPS) tools/mkspdisk.py tools/atr.py
+build/gem-sp.atr: build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg $(DESK_DEPS) $(APP_DEPS) $(ACCP_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) \
@@ -749,6 +770,8 @@ build/gem-sp.atr: build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg $(
 	    --add build/lang.rsc "GEM>LANG.RSC" \
 	    --add build/816.com "GEM>816.COM" \
 	    --add build/gem4xe.cfg "GEM>GEM4XE.CFG" \
+	    --add build/clockacc.g4a "GEM>CLOCK.ACC" \
+	    --add build/clock.rsc "GEM>CLOCK.RSC" \
 	    --add build/m11_app.g4a "APPS>M11.G4A" \
 	    --add build/calc.g4a "APPS>CALC.G4A" --add build/calc.rsc "APPS>CALC.RSC" \
 	    --add build/clock.g4a "APPS>CLOCK.G4A" --add build/clock.rsc "APPS>CLOCK.RSC"
@@ -763,7 +786,7 @@ build/gem-sp.atr: build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg $(
 # tools/apt.py writes the table, tests/host/test_apt.py checks it against
 # the rules Altirra's own parser applies, and test-cf boots it.
 build/gem-cf.img: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a \
-                  build/lang.rsc build/gem4xe.cfg $(APP_DEPS) tools/mkcf.py tools/apt.py tools/atr.py
+                  build/lang.rsc build/gem4xe.cfg $(APP_DEPS) $(ACCP_DEPS) tools/mkcf.py tools/apt.py tools/atr.py
 	@rm -f $@
 	python3 tools/mkcf.py $@
 

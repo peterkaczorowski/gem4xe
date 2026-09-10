@@ -47,6 +47,7 @@ uint8_t  gem_which;
 uint16_t gem_api_sp;
 uint8_t  gem_depth;
 uint16_t gem_calls;
+uint16_t app_calls;             /* of those, the application's: see abi.h */
 uint16_t gem_bad;
 
 /* The parameter blocks as they lie in the caller's memory: 32-bit
@@ -433,11 +434,11 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
         const char *name = near_of(addr_in[0]);
         ret = name ? rs_load(name) : 0;
         if (ret) {
-            global[5] = (WORD)((uint16_t)rs_hdr + rs_hdr->rsh_trindex);
+            global[5] = (WORD)((uint16_t)rs_loaded() + rs_loaded()->rsh_trindex);
             global[6] = 0;
-            global[7] = (WORD)(uint16_t)rs_hdr;
+            global[7] = (WORD)(uint16_t)rs_loaded();
             global[8] = 0;
-            global[9] = (WORD)rs_hdr->rsh_rssize;
+            global[9] = (WORD)rs_loaded()->rsh_rssize;
         }
         break;
     }
@@ -563,6 +564,14 @@ static void aes_entry(const AESPB_IMG __far *pb)
 void gem_entry(void)
 {
     gem_calls++;
+    /* ...and the application's own count, which is what a gate means when
+     * it asks "which call is the desktop inside".  gem_calls counts every
+     * process's, and the moment an accessory was resident that stopped
+     * identifying anybody's progress: test-boot put the desktop five
+     * calls past its first wait, which is exactly the accessory's
+     * appl_init, rsrc_load, rsrc_gaddr, menu_register and evnt_mesag. */
+    if (rlr == proc_app)
+        app_calls++;
     switch (gem_which) {
     case ABI_VDI:
         vdi_entry((const VDIPB_IMG __far *)gem_pb);

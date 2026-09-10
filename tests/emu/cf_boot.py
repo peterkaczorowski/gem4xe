@@ -222,7 +222,7 @@ def main(argv):
               f"{mode} by itself, {t + 100} frames in")
 
         # -- 4. the desktop ------------------------------------------------
-        calls = syms["gem_calls"]
+        calls = syms["app_calls"]
         n, still = b.peek16(calls), 0
         for t in range(0, 30000, 250):
             keep_switch(b, 250)

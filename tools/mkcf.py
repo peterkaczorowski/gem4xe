@@ -38,6 +38,10 @@ SYSTEM = [("build/gem.xex", "GEM>GEM.COM"),
           ("build/desktop.rsc", "GEM>DESKTOP.RSC"),
           ("build/lang.rsc", "GEM>LANG.RSC"),
           ("build/gem4xe.cfg", "GEM>GEM4XE.CFG"),
+          # the desk accessory: in the system's directory, which is where
+          # the AES looks for *.ACC, and not in \APPS\ with the programs
+          ("build/clockacc.g4a", "GEM>CLOCK.ACC"),
+          ("build/clock.rsc", "GEM>CLOCK.RSC"),
           ("build/m11_app.g4a", "APPS>M11.G4A"),
           ("build/calc.g4a", "APPS>CALC.G4A"),
           ("build/calc.rsc", "APPS>CALC.RSC"),

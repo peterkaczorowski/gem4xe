@@ -109,19 +109,32 @@ static void tick(void)
     hour = 0;
 }
 
-int main(void)
+/* The resource, once.  It is a separate call from the panel because the
+ * two happen at different times in an accessory: src/apps/clockacc.c
+ * takes the resource while the AES is starting up -- before the first
+ * program, which is the only time an accessory may take anything from
+ * bank $00 -- and opens the panel later, whenever somebody chooses it
+ * from the Desk menu. */
+WORD clock_start(void)
+{
+    if (!rsrc_load("CLOCK.RSC"))
+        return FALSE;
+    rsrc_gaddr(R_TREE, ADCLOCK, (void **)&tree);
+    return TRUE;
+}
+
+/* The panel, and the loop it runs until a key or Quit.  Returns when the
+ * clock has been put away again and the screen given back; the workstation
+ * is opened and closed around it rather than held, because
+ * vdi_close_virtuals() still wipes every virtual workstation when any
+ * program exits (docs/phase36.md) and an accessory's would go with it. */
+void clock_panel(void)
 {
     WORD handle, wchar, hchar, wbox, hbox, done = FALSE, ticks = 0;
     WORD x, y, w, h, ev, mx, my, mb, ks, kr, br, msg[8];
 
-    appl_init();
     handle = graf_handle(&wchar, &hchar, &wbox, &hbox);
     v_opnvwk(work_in, &handle, work_out);
-    if (!handle || !rsrc_load("CLOCK.RSC")) {
-        appl_exit();
-        return 1;
-    }
-    rsrc_gaddr(R_TREE, ADCLOCK, (void **)&tree);
     ask_gemdos();
 
     form_center(tree, &x, &y, &w, &h);
@@ -155,8 +168,5 @@ int main(void)
 
     form_dial(FMD_SHRINK, 0, 0, 0, 0, x, y, w, h);
     form_dial(FMD_FINISH, 0, 0, 0, 0, x, y, w, h);
-    rsrc_free();
     v_clsvwk(handle);
-    appl_exit();
-    return 0;
 }

@@ -275,9 +275,29 @@ With a volume that has room, the system stops being one lump:
     \GEM\DESKTOP.G4A     the desktop
     \GEM\DESKTOP.RSC     its resource (its own strings, its own layout)
     \GEM\LANG.RSC        the system's strings -- see below
+    \GEM\*.ACC           desk accessories, with their resources
     \GEM\*.FNT           fonts, when they are loadable
     \APPS\...            applications, one directory each
     \...                 the user's documents
+
+**The accessories are in `\GEM\`, not `\APPS\`, and the distinction is
+not filing.**  An application is something the desktop launches: the AES
+loads it, runs it, frees it, and the desktop comes back.  An accessory is
+loaded once, by the AES itself, before the first program -- and it stays,
+through every program that runs afterwards, which is why it appears in
+the Desk menu rather than as an icon.  So the AES looks for `*.ACC`
+in its OWN directory, the one `GEM.COM` was started from, and never in
+`\APPS\`.  `docs/phase36.md` has the reason it must be loaded first: both
+allocators are bump allocators, and anything taken after a program has
+loaded is freed underneath it when that program exits.
+
+`CLOCK.ACC` is the first one shipped.  It is the same `src/apps/clock.c`
+as `\APPS\CLOCK.G4A`, with a different `main`: the program opens its
+panel once and exits, the accessory registers "Clock" in the Desk menu
+and waits to be asked.  **It is not on the DOS 2 floppy**, and that is
+arithmetic rather than a decision -- a double-density disk is 184 KB,
+`GEM.COM` is 122 KB of it, and after the desktop and its resource there
+are eleven sectors left where the accessory wants twenty.
 
 `build/gem-cf.img` is that layout, less the two files that do not exist
 yet (section 5's `LANG.RSC` and a font).  The desktop opens a folder in

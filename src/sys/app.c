@@ -13,6 +13,15 @@ extern const uint16_t app_pool_lo, app_pool_hi;
 
 static uint16_t pool_brk;       /* 0 until the first take: then the cursor */
 
+/* Where the last program's near region went.  A gate that wants to read a
+ * program's own variables has to know where the loader put them, and it
+ * used to be able to assume the bottom of the pool -- the first thing
+ * loaded was the first program.  An accessory is loaded before it
+ * (src/aes/shel.c), so the assumption became quietly wrong: test-boot's
+ * model placed the desktop on top of the accessory and still matched,
+ * because a picture does not depend on where the bss is. */
+uint16_t app_near;
+
 uint16_t pool_mark(void)
 {
     if (!pool_brk)
@@ -91,6 +100,7 @@ int16_t app_load(const uint8_t __far *blob, uint32_t len, APP *app)
     if (!near)
         return APP_E_POOL;
     app->near_base = (uint16_t)near;
+    app_near = app->near_base;      /* for a gate to find it: see above */
     app->near_size = near_size;
     bank = far_alloc_banks(far_banks);
     if (!bank) {

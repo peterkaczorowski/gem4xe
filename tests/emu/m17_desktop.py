@@ -322,7 +322,7 @@ def main(argv):
             fails.append(msg)
             print(f"  FAIL: {msg}")
 
-    calls, ptr = syms["gem_calls"], syms["ptr_state"]
+    calls, ptr = syms["app_calls"], syms["ptr_state"]
     for addr in (calls, ptr, syms["sh_runs"]):
         assert not 0x4000 <= addr < 0x8000, hex(addr)
     desk_len = (os.path.getsize(DESKTOP) + 3) & ~3   # far_alloc's rounding

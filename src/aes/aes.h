@@ -628,7 +628,10 @@ void wm_calc(WORD wtype, UWORD kind, WORD x, WORD y, WORD w, WORD h,
 
 /* ---- the resource library: rsrc.c (gemrslib.c) ------------------------
  * One resource loaded at a time, into the bank-$00 pool (src/sys/app.h). */
-extern RSHDR *rs_hdr;               /* the loaded resource, or 0 */
+/* The RUNNING process's loaded resource, or 0 (src/aes/rsrc.c): a macro
+ * over its process record, not a global, so that an accessory holding one
+ * does not stop an application loading one. */
+RSHDR *rs_loaded(void);
 WORD rs_load(const char *name);
 WORD rs_free(void);
 WORD rs_gaddr(UWORD rtype, UWORD rindex, uint32_t *paddr);

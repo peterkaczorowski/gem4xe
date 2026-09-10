@@ -49,7 +49,12 @@ typedef struct {
 uint16_t pool_mark(void);                          /* the cursor         */
 void    *pool_alloc(uint16_t size, uint16_t align); /* 0 when it will not fit */
 void     pool_release(uint16_t mark);
-uint16_t pool_room(void);                          /* bytes left          */
+uint16_t pool_room(void);
+
+/* Where the last program app_load() placed its near region.  Only a
+ * diagnostic -- nothing in the engine reads it -- but the gates need it
+ * now that an accessory is loaded before the first program. */
+extern uint16_t app_near;                          /* bytes left          */
 
 int16_t app_load(const uint8_t __far *blob, uint32_t len, APP *app);
 int16_t app_exec(const APP *app);

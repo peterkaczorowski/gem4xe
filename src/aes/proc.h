@@ -63,6 +63,15 @@ typedef struct PROC {
      * is: two of them can be inside ev_multi at once now. */
     WORD     p_bwactive, p_bwwant, p_bwdone, p_bwclicks;
     uint32_t p_bwparm;
+    /* Its loaded resource.  This has to be per process or an accessory
+     * that keeps one -- which it must, since it takes all its bank $00
+     * memory before the first program and never gives it back -- would
+     * stop every application from loading one.  The pool's rule survives:
+     * the accessory's resource is taken first and never freed, the
+     * application's is taken above it and wound back on exit, so the
+     * releases are still in the reverse of the takes. */
+    void    *p_rsc;             /* RSHDR *, or 0 */
+    uint16_t p_rscmark;         /* the pool before its load */
 } PROC;
 
 extern PROC *proc_tab;          /* NUM_PROCS records, the caller's memory */

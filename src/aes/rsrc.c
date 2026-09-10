@@ -29,11 +29,15 @@
  */
 #include <string.h>
 #include "aes/aes.h"
+#include "aes/proc.h"
 #include "sys/app.h"
 #include "sys/cio.h"
 
-RSHDR *rs_hdr;
-static uint16_t rs_mark;            /* the pool before the load */
+/* The running process's resource and the pool mark before it: see
+ * src/aes/proc.h for why these belong to a process and not to this file.
+ * rs_hdr stays the name the rest of the engine knows it by. */
+#define rs_hdr      (*(RSHDR **)&rlr->p_rsc)
+#define rs_mark     (rlr->p_rscmark)
 
 static void swap_words(void *p, uint16_t n)
 {
@@ -273,6 +277,11 @@ WORD rs_load(const char *name)
     rs_hdr = (RSHDR *)mem;
     rs_fixit(rs_hdr);
     return 1;
+}
+
+RSHDR *rs_loaded(void)
+{
+    return rs_hdr;
 }
 
 WORD rs_free(void)

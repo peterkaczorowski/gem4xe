@@ -309,7 +309,7 @@ static void sys_op(WORD op)
     case 4: {
         APP app;
         int16_t st, ret = 0;
-        gem_calls = gem_bad = 0;
+        gem_calls = app_calls = gem_bad = 0;
         st = app_load(app_blob, app_blob_len, &app);
         if (st == APP_OK) {
             ret = app_exec(&app);
@@ -404,7 +404,7 @@ static void sys_op(WORD op)
      * [8] the last program's main() result, [9] the last load status,
      * [10] and [11] the ABI's calls taken and refused, over all of it. */
     case 16:
-        gem_calls = gem_bad = 0;
+        gem_calls = app_calls = gem_bad = 0;
         intout[6]  = sh_main();
         intout[7]  = sh_runs;
         intout[8]  = sh_lastret;
@@ -765,10 +765,10 @@ static void run_script(void)
              * bank $00 and compare it with the host's, whole. */
             case 110:                       /* rsrc_load: name */
                 intout[0] = rs_load((const char *)(uint16_t)contrl[7]);
-                intout[1] = (WORD)(uint16_t)rs_hdr;
-                intout[2] = rs_hdr ? (WORD)rs_hdr->rsh_rssize : 0;
+                intout[1] = (WORD)(uint16_t)rs_loaded();
+                intout[2] = rs_loaded() ? (WORD)rs_loaded()->rsh_rssize : 0;
                 intout[3] = (WORD)pool_room();
-                intout[4] = rs_hdr ? (WORD)((uint16_t)rs_hdr + rs_hdr->rsh_trindex) : 0;
+                intout[4] = rs_loaded() ? (WORD)((uint16_t)rs_loaded() + rs_loaded()->rsh_trindex) : 0;
                 c4 = 5;
                 break;
             case 111:                       /* rsrc_free */
