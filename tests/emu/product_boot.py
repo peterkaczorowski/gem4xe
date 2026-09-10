@@ -203,12 +203,24 @@ def one(name, progname, how, keep, check):
     else:
         check("DUP.SYS" in listed, f"{name}: no DUP.SYS -- nowhere to return to")
         free = fs.free_count() * fs.data_bytes
-        print(f"  {fs.free_count()} sectors free, {free // 1024} KB for applications")
-        # Room for a program beside the system, on the disk that has the
-        # least of it.  Eighty sectors is 20 KB: M11.G4A is 6 KB and
-        # GACS's engine wants 24 of code, so this is the floor at which
-        # the floppy stops being a place to put an application at all.
-        check(fs.free_count() > 80, f"{name}: only {fs.free_count()} sectors free")
+        print(f"  {fs.free_count()} sectors free, {free // 1024} KB -- this "
+              f"disk is the system and nothing else")
+        # THIS DISK IS THE SYSTEM AND NOTHING ELSE, and the number is
+        # here to say so rather than to leave room.  The floor used to be
+        # eighty sectors -- 20 KB, enough for GACS's engine beside the
+        # system -- and one binary carrying both display drivers
+        # (docs/phase34.md) took it below that: GEM.COM is 477 of the
+        # disk's 707 sectors and the desktop is another 133.  A
+        # double-density DOS 2 floppy holds a GEM that boots into its
+        # desktop, and an application goes on the SpartaDOS install disk
+        # (989 sectors free) or the card.  See docs/shipping.md section 1.
+        #
+        # What is still checked is that the disk is not FULL: a disk with
+        # nothing free cannot take a DESKTOP.INF, and Options -> Save
+        # desktop is the first thing a user does.
+        check(fs.free_count() > 8,
+              f"{name}: {fs.free_count()} sectors free -- not even room for "
+              f"a DESKTOP.INF")
 
     emu = launch(tag="product", memsize="1088K", extra_args=["--disk", disk])
     b = emu.bridge

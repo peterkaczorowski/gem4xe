@@ -53,7 +53,7 @@ full-screen repaints.
 | `make test-m24` | PASS | the ANTIC surface: mode F at 320×168 in the region the VBXE's MEMAC window would have had, 53,760/53,760 pixels against `tools/anticref.py`, two colours and no palette hardcoded |
 | `make test-m25` | PASS | the VDI **and the AES object library** on that surface — the same `src/vdi/vdi.c` the VBXE build links, on Atari's condensed 6×6 face, with an OUTLINED dialog and its DEFAULT button drawn by `ob_draw`: 53,760/53,760 pixels, and the geometry `gsx_start` derived checked by doing the AES's own arithmetic rather than by comparing numbers somebody wrote down |
 | `make test-m26` | PASS | **one binary, two screens**: the shipped `GEM.COM` booted three ways with nothing typed — with a VBXE, without one, and with `VIDEO=ANTIC` in `GEM4XE.CFG` against a VBXE that works — checking which device the VDI ended on, what the AES laid out for, what the file parsed to, and that the two routes to ANTIC give the same desk to the pixel |
-| `make test-boot` | PASS | both product disks booting into the desktop with **nothing typed and nothing poked** — the loader finds the Rapidus behind the 6502 the machine came up as and switches it itself: `build/gem-sp.atr` (SpartaDOS, `STARTUP.BAT` for 3.2 and `AUTOEXEC.BAT` for X) and `build/gem-boot.atr` (a double-density DOS 2, the system named `AUTORUN.SYS`, `DUP.SYS` still on it and 42 KB free); the 6502 boot runs GEM by itself and ends in the loader's refusal; `COLDST` and the Rapidus switch bring the machine up cold as a 65C816, the DOS starts GEM again, and the far image is spot-checked against the linker's output before the desk is compared pixel for pixel with the desktop model at its first wait |
+| `make test-boot` | PASS | both product disks booting into the desktop with **nothing typed and nothing poked** — the loader finds the Rapidus behind the 6502 the machine came up as and switches it itself: `build/gem-sp.atr` (SpartaDOS, `STARTUP.BAT` for 3.2 and `AUTOEXEC.BAT` for X) and `build/gem-boot.atr` (a double-density DOS 2, the system named `AUTORUN.SYS`, `DUP.SYS` still on it and 6 KB free -- the system fills it now); the 6502 boot runs GEM by itself and ends in the loader's refusal; `COLDST` and the Rapidus switch bring the machine up cold as a 65C816, the DOS starts GEM again, and the far image is spot-checked against the linker's output before the desk is compared pixel for pixel with the desktop model at its first wait |
 | `make test-cf` | PASS | the product **CF card** booting into the desktop: `build/gem-cf.img`, an APT table and two SDFS partitions, on a SIDE 2's IDE bus, with SpartaDOS X *and* the PBI BIOS that mounts those partitions coming from a real Ultimate 1MB flash image. The gate walks the U1MB BIOS setup itself (PBI BIOS on, hard disk on, an ID that is not the Rapidus's) from a fresh profile of its own, keeps the SIDE's SDX bank unmapped so the PBI BIOS will touch the disk, and then runs the same boot as `test-boot` -- refusal, switch, desk against the model. Needs the U1MB fixture and the patched emulator, so not in `make test` |
 | `make test-m14u` `test-m15u` | PASS | the same two on SpartaDOS X 4.49b booted from a real Ultimate 1MB flash image, U1MB switched on -- needs the patched emulator in `tools/altirra/`, so not in `make test` |
 | `make check-cc` | PASS | the ten compiler bugs worked around, in the vendor's simulator |
@@ -333,9 +333,12 @@ that was read back.
 (`docs/shipping.md`). The system is 121 KB — more than a single-density
 floppy holds, and an enhanced-density one leaves it three sectors of
 room. **Double density** is where the DOS 2 product disk lives now, and
-`tools/atr.py` writes it: 253-byte sectors leave 42 KB free with the
-DOS, its shell and a demonstration program beside GEM — a few programs,
-not a library. The volume gem4xe belongs on is a CF card or a hard disk with APT
+`tools/atr.py` writes it: 253-byte sectors take the DOS, its shell, GEM
+and the desktop with **6 KB to spare** — enough for a `DESKTOP.INF` and
+not for a program.  Since GEM.COM carries both display drivers
+(`docs/phase34.md`) that floppy is the system and nothing else; an
+application goes on the SpartaDOS install disk, which has 123 KB free,
+or on the card. The volume gem4xe belongs on is a CF card or a hard disk with APT
 partitions, and `make` writes one: `build/gem-cf.img` is a 16 MB image
 with an APT table, two 8 MB SDFS partitions and the install layout on
 the first — the system in `\GEM\`, an application in `\APPS\`, an

@@ -167,6 +167,22 @@ ANTIC desk is the whole VDI model ported and belongs in its own phase.
 test-m25 already holds the ANTIC VDI, and the AES's object library on it,
 to the pixel.
 
+## What it cost the floppy
+
+One binary that carries both drivers is 10 KB bigger, and the
+double-density DOS 2 product disk had 42 KB free.  It has **6** now: 477
+of its 707 sectors are GEM.COM and another 133 are the desktop.
+
+That is a product decision rather than a bug, and it was taken
+deliberately: **the DOS 2 floppy is the system and nothing else.**  An
+application goes on the SpartaDOS install disk, which has 989 sectors
+(123 KB) free and is laid out exactly as the card is, or on the card.
+`tests/emu/product_boot.py`'s floor moved from "room for a program" (80
+sectors, sized from GACS's engine) to "not full" -- 6 KB is still room
+for the `DESKTOP.INF` that Options -> Save desktop writes, which is the
+first thing a user puts on the disk and the only thing that has to fit.
+`docs/shipping.md` section 1 has the arithmetic.
+
 ## ⚠ The lesson of this phase is a build one
 
 Ten of the 86 VDI conformance cases went red the moment `vdev` became a

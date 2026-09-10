@@ -94,7 +94,7 @@ Under SpartaDOS that is two commands and no decisions:
     COPY D1:>APPS>*.* D2:>APPS>*.*
 
 ...and an `AUTOEXEC.BAT` on the drive holding the same two lines the
-floppy's holds, `CD >GEM` and `GEM`.  The floppy keeps 1114 sectors
+floppy's holds, `CD >GEM` and `GEM`.  The floppy keeps 989 sectors
 free, so it is also somewhere to put a program of your own on the way
 past.
 

@@ -22,22 +22,38 @@ against what the formats hold, in bytes a file system can actually use:
 
     single density    707 x 125 =  88,375   less than GEM.COM alone
     enhanced          1009 x 125 = 126,125  the system, and 5 KB over
-    double density     707 x 253 = 178,871  the system, and 57 KB over
-    SDFS, our gates   2048 x 128 = 262,144  the system, and 140 KB over
+    double density     707 x 253 = 178,871  the system, and 15 KB over
+    SDFS, our gates   2048 x 128 = 262,144  the system, and 96 KB over
+
+(The system is **159 KB** now, not 121: GEM.COM carries BOTH display
+drivers since `phase34.md`, which cost it 10 KB, and the desktop has
+grown besides.  The DOS and its `DUP.SYS` take 9 KB of the 15 that are
+left on the double-density disk, which is where the 6 KB below comes
+from.)
 
 Enhanced density is where the DOS 2 product disk used to live, and it
 was too tight to be a product: the system left **three sectors free**,
 which is no room for the applications a desktop exists to launch -- and
 none for the DOS's own shell either, which is worse (section 2).
-**Double density is where it lives now**: the system, the DOS, its
-`DUP.SYS` and a demonstration application, with 42 KB still free.
+**Double density is where it lives now**: the system, the DOS and its
+`DUP.SYS`, with **26 sectors -- 6 KB -- still free**.
 
-Forty-two kilobytes is room for a few programs, not for a library, and
-that is the honest shape of the thing: a 640x240 GUI with a resident AES
-belongs on a volume measured in megabytes, and the machine this project
-targets (Rapidus, VBXE, U1MB) is a machine that has one.  The floppy is
-a *bootstrap* -- enough to start the system, and to carry it to the real
-volume.
+That was 42 KB when this section was written, and it is 6 now.  One
+binary that carries both display drivers took 10 KB of it and the
+desktop took the rest, and the conclusion the paragraph was already
+drawing has simply arrived: **the DOS 2 floppy is the system and
+nothing else.**  What 6 KB is still enough for is the thing a user
+writes on the first day -- `DESKTOP.INF`, from Options -> Save desktop
+-- and that is what `tests/emu/product_boot.py` now checks for instead
+of room for a program.
+
+That is the honest shape of the thing rather than a regression to be
+fixed: a 640x240 GUI with a resident AES belongs on a volume measured in
+megabytes, and the machine this project targets (Rapidus, VBXE, U1MB) is
+a machine that has one.  The floppy is a *bootstrap* -- enough to start
+the system, and to carry it to the real volume.  **An application goes
+on the SpartaDOS install disk**, which has 989 sectors (123 KB) free and
+is laid out exactly as the card is (section 4), **or on the card.**
 
 ## 2. Booting straight into the desktop
 
@@ -84,7 +100,7 @@ not both** -- which is the argument for the density above it.
 
 A double-density disk is the same DOS 2 file system with 253 data bytes
 to a sector instead of 125: 707 sectors, 174 KB, room for the system and
-the DOS and 42 KB besides.  `tools/atr.py` writes it now.  The format is
+the DOS and a few kilobytes besides.  `tools/atr.py` writes it now.  The format is
 Altirra's `ATDiskFSDOS2` (`diskfsdos2.cpp`), read rather than
 remembered, and the one thing that is genuinely different is the byte
 count in the sector link: **a whole byte in double density**, because
@@ -289,6 +305,14 @@ way out.
 
 **The mouse**, because a user whose pointer does not move cannot reach a
 dialog either.
+
+`VIDEO` names a **screen**, not a resolution, because there is one VBXE
+mode today: 640x240 in sixteen colours.  VBXE HR can also be 512 or 672
+pixels wide, but those change how much of the line is drawn, not the
+timing a monitor has to lock to, so they are not the answer to "my
+monitor will not show this" -- ANTIC is.  If more modes are ever added
+they get names in this key and old files keep working, because a value
+gem4xe does not know is ignored.
 
 The file ships with every setting commented out, so finding it is finding
 its documentation.  A missing file means the same thing.  An unknown key

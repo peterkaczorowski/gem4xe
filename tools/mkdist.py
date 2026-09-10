@@ -65,6 +65,7 @@ SYSTEM = [
     ("desktop.rsc", "DESKTOP.RSC"),
     ("lang.rsc", "LANG.RSC"),
     ("816.com", "816.COM"),
+    ("gem4xe.cfg", "GEM4XE.CFG"),
     ("m11_app.g4a", "M11.G4A"),
     ("calc.g4a", "CALC.G4A"),
     ("calc.rsc", "CALC.RSC"),
@@ -79,6 +80,9 @@ WHAT_IT_IS = {
     "LANG.RSC": "what the system says, so a translation is a file",
     "816.COM": "puts a Rapidus into 65C816 mode by hand, if the loader "
                "somehow does not",
+    "GEM4XE.CFG": "the screen and the mouse, in plain text -- edit it from "
+                  "the DOS prompt if the display comes up wrong.  Ships "
+                  "with everything commented out and documented",
     "M11.G4A": "a small program, to have something to double-click",
     "CALC.G4A": "a calculator: whole numbers, and a division that "
                 "truncates rather than pretending otherwise",
