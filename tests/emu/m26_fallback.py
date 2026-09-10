@@ -138,6 +138,11 @@ def one(tag, disk, has_vbxe, want_cfg, want_dev, geom, syms, keep, check):
         # The disk boots on the 6502, the DOS starts GEM, and the loader
         # switches the CPU and lets the machine come up again
         # (src/farload.s; tests/emu/product_boot.py has the long version).
+        # The machine runs free until the bridge connects -- some 50 to
+        # 100 frames, on the phase of a 300 ms poll -- and the switch
+        # comes about 100 frames in, so the first look is taken from a
+        # cold reset, which the Rapidus always comes out of as a 6502.
+        b.ok("COLD_RESET")
         was = b.cmd("HWSTATE").get("cpu", {}).get("mode")
         check(was == "6502", f"{tag}: the machine did not start as a 6502 ({was})")
         for t in range(0, 20000, STEP):

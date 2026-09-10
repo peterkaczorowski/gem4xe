@@ -150,8 +150,13 @@ def inputs(memo):
 
     def exists(d):
         # the alert, whose text is a free string of DESKTOP.RSC
-        # (STFOFAIL): RETURN takes its default button
-        return [F(3), SHOT, K("RETURN", RETURN)]
+        # (STFOFAIL): RETURN takes its default button.  The call is
+        # counted as form_alert is ENTERED, and the alert -- parsed,
+        # built, its background saved, drawn -- takes it four frames to
+        # reach its wait; a key sent before that is typeahead, which
+        # fm_do flushes, and the target then waits for a RETURN that
+        # never comes.  Ten frames, as m17 gives its about box.
+        return [F(10), SHOT, K("RETURN", RETURN)]
 
     def picked(d):
         # SUB pressed and HELD: the AES waits out the double-click

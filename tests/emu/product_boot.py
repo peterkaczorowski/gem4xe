@@ -242,6 +242,11 @@ def one(name, progname, how, keep, check):
         #
         # What says it happened: the CPU.  The screen is a poor witness
         # here, because both passes look the same until the desk appears.
+        # And the first look is taken from a cold reset: the machine runs
+        # free until the bridge connects, 50 to 100 frames on the phase
+        # of a 300 ms poll, and the switch comes about 100 frames in --
+        # test-m26 went red on exactly that in the 10 September audit.
+        b.ok("COLD_RESET")
         was = b.cmd("HWSTATE").get("cpu", {}).get("mode")
         check(was == "6502", f"{name}: the machine did not start as a 6502 "
                              f"(it is {was})")
