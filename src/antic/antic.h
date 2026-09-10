@@ -74,6 +74,15 @@ void antic_recolour(int16_t pen, uint8_t value);
 /* The screen off again, and the OS's own display list back. */
 void antic_off(void);
 
+/* For the OTHER device.  The VBXE overlay hides ANTIC's picture and not
+ * its DMA: a GR.0 text screen, which is what DOS leaves behind, halts
+ * the CPU for some 8,500 of a PAL frame's 35,568 cycles, and every byte
+ * the VDI writes through the MEMAC window and every VBXE register it
+ * touches waits on that same bus.  The playfield goes off under the
+ * overlay and comes back, as DOS had it, on the way out. */
+void antic_suspend(void);
+void antic_resume(void);
+
 /* Every byte of the framebuffer to `value`. */
 void antic_clear(uint8_t value);
 

@@ -46,6 +46,7 @@
 #include "sys/dos.h"
 #include "sys/gemdos.h"
 #include "vbxe/vbxe.h"
+#include "antic/antic.h"   /* the other chip's DMA, off under the overlay */
 
 #define STATUS ((volatile unsigned char *) 0x0600)
 
@@ -935,6 +936,7 @@ __task void main(void)
      * "next" bit is always set.  Clear the control region before first use. */
     vram_fill(VR_XDL, 0x00, 0x1000);
     vbxe_xdl_hr(VR_SCREEN0);
+    antic_suspend();                /* DOS's text screen off the bus: antic.h */
     vdev = &vdev_vbxe;              /* the conformance runner is about the VBXE device, and says so */
     vdi_font_default();         /* the linked 8x8 into VRAM */
     vdi_init();
@@ -1004,6 +1006,7 @@ __task void main(void)
                  * stack as DOS had them. */
                 irq_remove();
                 vbxe_off();
+                antic_resume();
                 rapidus_restore();
                 _sys_exit();
             }

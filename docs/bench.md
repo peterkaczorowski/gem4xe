@@ -48,11 +48,14 @@ scanlines, 0.13 ms:
 - an empty script costs 203 cycles (125 µs) and comes off every row.
 
 One correction that cost a run to find: the cycle counter Altirra exposes
-leaves out the cycles ANTIC halts the CPU for — 32,520 a PAL frame, not
-35,568 — so converting cycles to milliseconds through the clock rate
-under-reports by 8.6%. Cycles become milliseconds through the frame
-instead: a frame is `period` ticks of two 114-cycle lines at the machine
-clock, 20.06 ms, and `ms = cycles / cycles_per_frame × frame_ms`.
+leaves out the cycles ANTIC halts the CPU for — 32,520 a PAL frame on
+2 September, not 35,568 — so converting cycles to milliseconds through
+the clock rate under-reports. Cycles become milliseconds through the
+frame instead: a frame is `period` ticks of two 114-cycle lines at the
+machine clock, 20.06 ms, and `ms = cycles / cycles_per_frame × frame_ms`.
+The bench prints the figure it measured as its `clock:` line, and how
+much that figure moved between runs turned out to be the third run's
+whole story (below): 32,520 was not a text screen's number.
 
 Each row is repeated until its measured total reaches 300 ms or 40
 runs, so the tick's resolution does not show in the ms column.
@@ -200,8 +203,103 @@ Rule 7 in `tools/ccbug/README.md`: never `sizeof` a struct where a
 constant expression is required; write the byte count out. `BCB_SIZE`
 is 21 by name and the assertion is gone.
 
+## The third run, 10 September: the display list under the runner
+
+The suite had grown eight phases since the table above, and the audit
+re-ran the benchmark to see what they cost. Every drawing row was a
+quarter to a third slower, and the clock line was the clue:
+
+    2 September   clock: 32520 cycles per frame
+    9 September   clock: 24280 cycles per frame
+
+Altirra's counter leaves out the cycles ANTIC halts the CPU for, so a
+frame with fewer counted cycles is a frame with more DMA in it. 24,280
+is a PAL frame with a 40-column GR.0 text screen on it — DOS's screen,
+which the runner never turns off because the VBXE overlay hides it. And
+32,520 is a frame with almost nothing on it: on 2 September the runner's
+staging buffers (`teststage`, then at `$A800-$BFFB`) sat on top of the
+OS display list at `$BC20`, and a display list of zeros is 240 halted
+cycles a frame. Phase 14 moved the buffers into the U1MB window on
+4 September, the display list survived from then on, and every run since
+has drawn under a text screen it could not see. `scratchpad`'s probe
+confirmed it on the bridge: DMACTL `$22`, DLIST `$BC20`, and `HWPOKE
+$D400 $00` takes the clock straight to 32,760.
+
+Which is a bus finding, not a counting one. On Altirra's Rapidus the
+fast-bus CPU runs on through a halt, so counted cycles per unit fell
+while wall time rose; but every byte the VDI writes through the MEMAC
+window and every VBXE register it touches waits on the chip bus, and a
+text screen takes some 8,500 of that bus's 35,568 cycles a frame. The
+overlay is opaque and ANTIC's picture is under it, so the picture was
+buying nothing.
+
+**The remedy is in the product, not the bench:** `antic_suspend()` and
+`antic_resume()` (`src/antic/antic.c`). When the VBXE surface comes up,
+`gem.c` and the runner save `SDMCTL` and write zero to it and to
+`DMACTL` — the shadow, because the OS VBI writes the shadow back every
+frame — and put both back on the way out, so DOS gets its screen as it
+left it. The ANTIC device does not go through this: its playfield *is*
+the screen. Whether the real VBXE overlay is as content with the
+playfield off as Altirra's is has not been tried on hardware; it is
+assumed from the overlay being a thing of VBXE's own, and from the whole
+of the first suite having run that way by accident for two weeks.
+
+Like for like — DMA off, or as good as, both times — the three columns are:
+
+| Row | 2 Sep | 9 Sep, DMA on | 10 Sep, DMA off | 10 vs 2 |
+|---|---:|---:|---:|---:|
+| form_dial START, objc_draw, FINISH | 50.7 ms | 64.4 | **60.0** | +18% |
+| objc_draw of the dialog alone | 41.0 | 53.5 | **49.2** | +20% |
+| v_gtext, 40 characters, even x | 15.4 | 20.8 | **19.0** | +24% |
+| v_gtext, 40 characters, odd x | 15.8 | 21.1 | **19.3** | +22% |
+| vr_recfl 100×50, solid | 0.70 | 0.84 | **0.79** | +12% |
+| vr_recfl 100×50, pattern 4 | 3.18 | 3.65 | **3.44** | +8% |
+| box 100×50 as a 5-point v_pline | 1.63 | 2.06 | **1.88** | +15% |
+| diagonal 100×100 v_pline | 2.31 | 2.70 | **2.42** | +5% |
+| wind_create, open, close, delete | 80.8 | 101.7 | **94.0** | +16% |
+| read, bank $00 (fast SRAM) | 0.376 | 0.402 | **0.392** | +4% |
+| write, bank $00 | 0.469 | 0.526 | **0.488** | +4% |
+| read, VRAM through the window | 0.554 | 0.687 | **0.576** | +4% |
+| write, VRAM through the window | 0.687 | 0.809 | **0.716** | +4% |
+| vram_write, the driver's upload | 0.69 | 0.83 | **0.72** | +4% |
+| vro_cpyfm 320×100 aligned | 2.15 | 2.26 | **2.23** | +4% |
+| vrt_cpyfm 32×24 icon, transparent | 1.49 | 1.71 | **1.52** | +2% |
+
+The display list was a third of the drawing rows' loss. The rest is
+three things that arrived since 2 September, and the table separates
+them by where they show:
+
+- **Interrupts, about 4% of everything.** The 2 September run predates
+  Phase 9 by ten hours; there were no handlers then. Now a VBI and the
+  pointer's IRQ take their share of every frame, and every row — the
+  memory rows included, which touch nothing the phases changed — is 4%
+  slower. That is the price of a live pointer, and it is paid.
+- **The blit list lives in the write-through window.** Phase 14 moved
+  the 252-byte BCB stage (`bcb[]`, `src/vbxe/vbxe.c`) out of bank `$00`'s
+  data into `zwin`, `$4000-$47FF`, to give the stack its 2 KB; the map's
+  own note says what moved there "is read far more than written, and a
+  write costs one bus cycle". True of the window trees and the message
+  queue. Not true of the blit list, which is *built* — 21 stores a
+  block, two blocks a glyph — and read once. Yesterday's profile has
+  `bcb_common` at 1.3 counted cycles an instruction against 0.4 for the
+  fast-bus code around it, and 1,680 write-through stores a 40-character
+  line is a good part of what separates 19.0 ms from 15.4. The fix is a
+  placement, not a rewrite, and it is the first item below.
+- **The device seam** (Phases 33–35): `v_gtext` executes 12% more
+  instructions a line than it did (77,860 a unit against ~69,200), and
+  the VDI now reaches its device through `vdev->` for every raster
+  operation. Not separated from the other two by measurement yet; the
+  profile after the blit list moves will say.
+
 ## What is left, in order
 
+- **The blit list out of the write-through window.** 252 bytes that
+  want a home in window 0, which runs at full speed both ways. In
+  GEM.COM's map `LoRAM` has 47 bytes free and `Near` 324, so either the
+  boundary between them moves and leaves the near code with seventy, or
+  the stage shrinks — and a shorter list is not free, because a full
+  list drops the blit (`bcb_new` returns 0) and the callers' longest
+  chains would need counting first.
 - **`_Mul16`, eight a glyph.** The row base (`y × stride`) is computed
   per glyph in `v_gtext` and again in `blit_mask`; hoisting it to once a
   string and stepping by the stride would take ~300 instructions off each

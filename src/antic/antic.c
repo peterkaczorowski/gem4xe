@@ -118,6 +118,28 @@ void antic_off(void)
     REG8(AN_SDMCTL) = 0;
 }
 
+/* The shadow is what is kept, not the register: DOS runs with the OS VBI
+ * on, and the VBI writes the shadow to DMACTL every frame, so the shadow
+ * is what DOS will see again -- and the register is written too, for
+ * the frames until then.  Measured in docs/bench.md: the September 2
+ * figures were taken with the OS's display list under the runner's
+ * buffers, which is this switch thrown by accident; with the list intact
+ * every VRAM-bound row ran a quarter slower, and this is the remedy. */
+static uint8_t an_saved_dmactl;
+
+void antic_suspend(void)
+{
+    an_saved_dmactl = REG8(AN_SDMCTL);
+    REG8(AN_DMACTL) = 0;
+    REG8(AN_SDMCTL) = 0;
+}
+
+void antic_resume(void)
+{
+    REG8(AN_SDMCTL) = an_saved_dmactl;
+    REG8(AN_DMACTL) = an_saved_dmactl;
+}
+
 void antic_clear(uint8_t value)
 {
     volatile uint8_t *p = SCREEN;

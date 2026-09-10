@@ -75,7 +75,7 @@ M25_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m25_antic_vdi
              build/wind.o build/ctrl.o build/menu.o build/form.o \
              build/alert.o build/gemdata.o build/lang.o build/lang_rsc.o \
              build/rsrc.o build/apppool.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/dev_vbxe.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/dev_vbxe.o build/pointer.o build/objc.o build/graf.o build/event.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/antic.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
 
 # GEM.COM, the product (src/gem.c): the runner's objects with the runner
 # itself and its compiled-in test application taken out, linked on the
@@ -84,7 +84,7 @@ M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o buil
 # GEM.COM links BOTH devices and chooses at start-up, so the ANTIC
 # surface, its driver and its face come in on top of the runner's set.
 GEM_OBJS   = $(filter-out build/m3_vdi.o build/app_blob.o,$(M3_OBJS)) \
-             build/dev_antic.o build/antic.o build/font6x6.o \
+             build/dev_antic.o build/font6x6.o \
              build/config.o build/gem.o
 
 # A gem4xe application: its own C startup and bindings (src/app), linked
@@ -155,7 +155,7 @@ build/m24_antic.o: src/m24_antic.c src/antic/antic.h
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
 build/m2_vbxe.o: src/m2_vbxe.c src/vbxe/vbxe.h
-build/m3_vdi.o:  src/m3_vdi.c  src/vbxe/vbxe.h src/vdi/vdi.h src/vdi/vdidev.h src/sys/irq.h src/sys/abi.h src/sys/app.h src/sys/cio.h src/sys/dos.h
+build/m3_vdi.o:  src/m3_vdi.c  src/vbxe/vbxe.h src/antic/antic.h src/vdi/vdi.h src/vdi/vdidev.h src/sys/irq.h src/sys/abi.h src/sys/app.h src/sys/cio.h src/sys/dos.h
 
 build/vdi.o: src/vdi/vdi.c src/vdi/vdi.h src/vdi/vdidev.h src/vdi/pointer.h src/sys/irq.h
 	@mkdir -p build

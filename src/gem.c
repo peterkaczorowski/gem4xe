@@ -93,6 +93,7 @@ __task void main(void)
          * region first. */
         vram_fill(VR_XDL, 0x00, 0x1000);
         vbxe_xdl_hr(VR_SCREEN0);
+        antic_suspend();            /* its DMA off the bus: antic.h */
     } else {
         vdev = &vdev_antic;
         antic_init(AN_INK, AN_PAPER);       /* builds the list and clears */
@@ -120,9 +121,10 @@ __task void main(void)
      * ROM in, the screen off, the accelerator's windows written back and
      * slow, then the CPU and the stack as DOS had them. */
     irq_remove();
-    if (video == CFG_VIDEO_VBXE)
+    if (video == CFG_VIDEO_VBXE) {
         vbxe_off();
-    else
+        antic_resume();
+    } else
         antic_off();
     rapidus_restore();
     _sys_exit();

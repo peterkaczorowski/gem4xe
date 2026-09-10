@@ -356,8 +356,16 @@ def main(argv):
             b.key(k)
             b.frames(10)
         b.frames(200)
+        # Ready is STATUS[2] == 1, not the signature, as m3_vdi waits for
+        # it: the runner raises 'VD' early and finishes starting up some
+        # frames later, and how many moves with the size of the image.
+        for _ in range(200):
+            tag = bytes(b.memdump(STATUS, 3))
+            if tag[:2] == b"VD" and tag[2] == 1:
+                break
+            b.frames(4)
         st = bytes(b.memdump(STATUS, 32))
-        if st[:2] != b"VD":
+        if st[:2] != b"VD" or st[2] != 1:
             print("FAIL: runner did not come up")
             return 1
         print("rapidus: present %d  MCR %02x -> %02x  CMCR %02x  synced %02x" % tuple(st[25:30]))
