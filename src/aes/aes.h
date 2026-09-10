@@ -376,8 +376,8 @@ typedef struct {
 /* A window's visible-rectangle list: what an application may draw into
  * without touching the windows above it.  The pool is gl_olist[]. */
 typedef struct orect {
-    struct orect *o_link;
-    GRECT         o_gr;
+    struct orect __far *o_link;
+    GRECT               o_gr;
 } ORECT;
 
 /* One window (gemlib.h's WINDOW), less the multitasking owner and the
@@ -393,8 +393,9 @@ typedef struct {
     GRECT       w_prev;
     WORD        w_hslide, w_vslide;     /* 0..1000 */
     WORD        w_hslsiz, w_vslsiz;     /* 0..1000, -1 = the default */
-    ORECT      *w_rlist;    /* the visible rectangles */
-    ORECT      *w_rnext;    /* the WF_NEXTXYWH cursor */
+    /* Far, because the rectangle pool is (src/aes/wind.c says why). */
+    ORECT __far *w_rlist;   /* the visible rectangles */
+    ORECT __far *w_rnext;   /* the WF_NEXTXYWH cursor */
 } WINDOW;
 
 /* ---- AES-wide screen geometry (gemgraf.c's gl_* globals) ---------------

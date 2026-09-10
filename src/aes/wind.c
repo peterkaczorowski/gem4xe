@@ -34,6 +34,7 @@
  */
 #include "aes.h"
 #include "proc.h"
+#include "../sys/farmem.h"
 #include "../sys/zwin.h"
 
 #define DROP_SHADOW_SIZE    2
@@ -97,9 +98,25 @@ static const TEDINFO gl_asamp = {
 ZWIN static OBJECT  W_TREE[NUM_WIN];
 ZWIN static OBJECT  W_ACTIVE[NUM_ELEM];
 WINDOW         gl_win[NUM_WIN];
-static ORECT   gl_olist[NUM_ORECT];
-static ORECT  *gl_rul;              /* the free rectangles */
-static ORECT   gl_mkrect;           /* the rectangle newrect is breaking */
+/* THE RECTANGLE POOL IS IN FAR MEMORY, and it is the one AES structure
+ * that could go there.  Bank $00 is 5.5 KB of data for the whole engine
+ * and the window manager's tables are most of a third of it (the Phase 0
+ * note said they would be); of the four, W_TREE and W_ACTIVE are OBJECT
+ * trees that objc_draw walks through a near pointer, and gl_win is a
+ * WINDOW array the whole library indexes -- but gl_olist is eighty
+ * ten-byte nodes reached only through o_link, from nineteen places, all
+ * of them in this file.  So it moves, and bank $00 gets 800 bytes back.
+ *
+ * It comes from the far heap rather than a section of its own, which is
+ * what the shell's buffers and GEMDOS's state already do: there is no far
+ * bss in src/gem4xe.scm and adding one to hold a single array would be a
+ * second way of doing the same thing.  It is taken ONCE, at AES start-up,
+ * because far_alloc is a bump allocator that app_free winds back -- the
+ * same rule the shell and the accessories live by. */
+static ORECT __far *gl_olist;
+static ORECT __far *gl_rul;         /* the free rectangles */
+static ORECT   gl_mkrect;           /* the rectangle newrect is breaking:
+                                     * a value, near, passed by address */
 static TEDINFO gl_aname, gl_ainfo;
 
 OBJECT *gl_wtree;
@@ -115,6 +132,18 @@ static void or_start(void)
 {
     WORD i;
 
+    if (!gl_olist) {
+        /* Once, at AES start-up: see the note on gl_olist.  A machine
+         * whose far heap cannot spare 800 bytes has already failed the
+         * far-code load, so this cannot fail in practice -- and if it
+         * did, get_orect answers 0 and the window manager behaves as it
+         * does when the pool is empty, which is a documented limit
+         * rather than a crash. */
+        gl_olist = (ORECT __far *)far_alloc(
+                        (uint32_t)NUM_ORECT * sizeof(ORECT));
+        if (!gl_olist)
+            return;
+    }
     gl_rul = 0;
     for (i = 0; i < NUM_ORECT; i++) {
         gl_olist[i].o_link = gl_rul;
@@ -122,9 +151,9 @@ static void or_start(void)
     }
 }
 
-static ORECT *get_orect(void)
+static ORECT __far *get_orect(void)
 {
-    ORECT *po = gl_rul;
+    ORECT __far *po = gl_rul;
 
     if (po)
         gl_rul = po->o_link;
@@ -140,9 +169,10 @@ static ORECT *get_orect(void)
  * linked in front of `old`.  NULL if the pool is empty: that piece is then
  * simply not in the list and never drawn into -- the documented limit of
  * NUM_ORECT (the reference raises instead, so a case that hits it fails). */
-static ORECT *mkpiece(WORD tlrb, const ORECT *new, ORECT *old)
+static ORECT __far *mkpiece(WORD tlrb, const ORECT __far *new,
+                            ORECT __far *old)
 {
-    ORECT *rl = get_orect();
+    ORECT __far *rl = get_orect();
     WORD x, y, w, h;
     WORD oy2, ny2;
 
@@ -172,17 +202,31 @@ static ORECT *mkpiece(WORD tlrb, const ORECT *new, ORECT *old)
         h = (WORD)(oy2 - ny2);
         break;
     }
-    r_set(&rl->o_gr, x, y, w, h);
+    /* THROUGH A NEAR LOCAL, and not r_set(&rl->o_gr, ...).  rl is far
+     * and r_set takes a GRECT *, so handing it &rl->o_gr truncates the
+     * far address to sixteen bits and writes that rectangle into bank
+     * $00 at the node's offset-within-bank -- and cc65816 5.18 does it
+     * SILENTLY, with no diagnostic at any warning level.  That cost the
+     * window manager every one of its twelve gate cases the first time
+     * the rectangle pool moved far, and it is the Phase 2 MFDB bug by
+     * another road: a far address in a near slot. */
+    {
+        GRECT g;
+
+        r_set(&g, x, y, w, h);
+        rl->o_gr = g;
+    }
     return rl;
 }
 
 /* Break r around new: the pieces of r not under new replace r in the
  * list after p.  Returns the last piece, or NULL if they do not overlap. */
-static ORECT *brkrct(const ORECT *new, ORECT *r, ORECT *p)
+static ORECT __far *brkrct(const ORECT __far *new, ORECT __far *r,
+                           ORECT __far *p)
 {
     WORD have_piece[4];
     WORD i;
-    ORECT *piece;
+    ORECT __far *piece;
 
     if (new->o_gr.g_x < r->o_gr.g_x + r->o_gr.g_w &&
         new->o_gr.g_x + new->o_gr.g_w > r->o_gr.g_x &&
@@ -214,10 +258,24 @@ static ORECT *brkrct(const ORECT *new, ORECT *r, ORECT *p)
 static void mkrect(OBJECT *tree, WORD wh, WORD sx, WORD sy)
 {
     WINDOW *pwin = &gl_win[wh];
-    ORECT *p, *r;
+    ORECT __far *p, *r;
 
     (void)tree; (void)sx; (void)sy;
-    p = (ORECT *)&pwin->w_rlist;    /* o_link is the first field */
+    /* o_link is the first field, so the window's own list head can be
+     * walked as if it were a node -- the donor's idiom, and it survives
+     * the pool moving far because the POINTERS are what became far, not
+     * the window: this is a far pointer AT a bank-$00 address, which is
+     * what a far pointer with bank 0 is.  The compiler emits `ldx ##0`
+     * for the bank and is right to.
+     *
+     * CAST THE POINTER, NOT AN INTEGER.  Writing the same thing as
+     * `uint32_t a = (uint16_t)&pwin->w_rlist; (ORECT __far *)a` crashes
+     * cc65816 5.18 outright -- "internal error:
+     * Translator/Compiler/IL/Evaluate.hs:370: Irrefutable pattern failed"
+     * -- and it was the first thing tried here.  Converting a near
+     * POINTER to a far one is fine; converting an integer VARIABLE to one
+     * is what it cannot do. */
+    p = (ORECT __far *)&pwin->w_rlist;
     r = p->o_link;
     while (r) {
         p = brkrct(&gl_mkrect, r, p);
@@ -238,13 +296,13 @@ static void mkrect(OBJECT *tree, WORD wh, WORD sx, WORD sy)
 static void newrect(OBJECT *tree, WORD wh, WORD sx, WORD sy)
 {
     WINDOW *pwin = &gl_win[wh];
-    ORECT *r, *new;
+    ORECT __far *r, *new;
 
     (void)sx; (void)sy;
     /* free the old list */
     r = pwin->w_rlist;
     while (r) {
-        ORECT *next = r->o_link;
+        ORECT __far *next = r->o_link;
         r->o_link = gl_rul;
         gl_rul = r;
         r = next;
@@ -331,7 +389,7 @@ static void w_adjust(WORD parent, WORD obj, WORD x, WORD y, WORD w, WORD h)
  * that meets pc (the screen if NULL), with the clip set to the piece. */
 static void do_walk(WORD wh, OBJECT *tree, WORD obj, WORD depth, GRECT *pc)
 {
-    ORECT *po;
+    ORECT __far *po;
     GRECT t;
 
     if (wh == NIL)
@@ -573,13 +631,16 @@ void w_cpwalk(WORD wh, WORD obj, WORD depth, WORD usetrue)
 /* ---- redraw messages ------------------------------------------------------ */
 
 /* pt = the bounding box of window wh's rectangle list; FALSE if empty. */
-static WORD w_union(const ORECT *po, GRECT *pt)
+static WORD w_union(const ORECT __far *po, GRECT *pt)
 {
     if (!po)
         return FALSE;
     *pt = po->o_gr;
-    for (po = po->o_link; po; po = po->o_link)
-        rc_union(&po->o_gr, pt);
+    for (po = po->o_link; po; po = po->o_link) {
+        GRECT g = po->o_gr;         /* near: see mkpiece */
+
+        rc_union(&g, pt);
+    }
     return TRUE;
 }
 
@@ -812,7 +873,7 @@ static void w_snap(GRECT *pt)
 void wm_init(void)
 {
     WORD i;
-    ORECT *po;
+    ORECT __far *po;
 
     or_start();
     for (i = 0; i < NUM_WIN; i++) {
@@ -946,7 +1007,8 @@ WORD wm_delete(WORD w_handle)
 /* The rectangle list walk of WF_FIRSTXYWH/WF_NEXTXYWH: the next piece
  * of the list from po that meets pt, into pout, leaving the cursor after
  * it; an empty rectangle when the list is done. */
-static void w_owns(WINDOW *pwin, ORECT *po, const GRECT *pt, GRECT *pout)
+static void w_owns(WINDOW *pwin, ORECT __far *po, const GRECT *pt,
+                   GRECT *pout)
 {
     while (po) {
         *pout = po->o_gr;
