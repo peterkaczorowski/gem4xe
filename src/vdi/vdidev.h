@@ -14,12 +14,24 @@
  *                        primitive writes BYTES and there is nothing to
  *                        flush.
  *
- * The two are chosen at LINK time, not at run time.  The geometry is
- * still compile-time (SCR_W and friends), and making it a variable would
- * touch every clip and every stride in a 3,676-line file that 49
- * conformance cases stand on; one binary that finds no VBXE and falls
- * back is the better product and is the step after this one, not
- * instead of it (docs/phase32.md).
+ * BOTH ARE LINKED, and which one draws is decided when the program
+ * starts: a machine with a VBXE gets the VBXE, one without gets ANTIC,
+ * and a line in GEM4XE.CFG can override either way.  That is why the
+ * geometry and the calls below are a POINTER to a table rather than
+ * constants and direct calls -- `vdev` is set once, before v_opnwk, and
+ * never moves again.
+ *
+ * NOTHING ABOVE THE SEAM CHANGED to make that so.  The names SCR_W,
+ * FONT_H, dev_fill_rect and the rest still mean what they meant; they
+ * are macros onto the table now, so src/vdi/vdi.c reads exactly as it
+ * did when there was one device compiled in.  The cost is an indirect
+ * call, which on a 65816 in the large code model is a jsl through a
+ * pointer and no trampoline (docs/phase32.md).
+ *
+ * A DEVICE'S OWN FILE does not see those macros: it defines
+ * GEM4XE_DEV_IMPL first, keeps its geometry as compile-time constants --
+ * they are constants, for it -- and names its functions with its own
+ * prefix.  The table at the end of the file is where the two meet.
  *
  * THE PEN IS THE VDI'S, not the hardware's.  A caller passes the pen it
  * was given and the device maps it -- through map_col on VBXE, and to
@@ -32,11 +44,12 @@
 
 #include "vdi.h"
 
-/* THE GEOMETRY COMES FROM THE DEVICE.  vdi.c used to include vbxe.h for
- * SCR_W, SCR_H and SCR_STRIDE, which is the last place the VBXE leaked
- * into code that is meant to be portable.  Now the device that is being
- * linked says what they are, and the names stay so that nothing else has
- * to change. */
+/* ---- a device's own geometry -----------------------------------------
+ * Compiled ONLY into the two device files, which define GEM4XE_DEV_IMPL
+ * and are each built for one device: there, the numbers really are
+ * constants and the code should be able to fold them.  Portable code
+ * gets the same names below, off `vdev`, and never sees these. */
+#ifdef GEM4XE_DEV_IMPL
 #ifdef GEM4XE_DEV_ANTIC
 #  include "../antic/antic.h"
 #  define SCR_W       AN_W
@@ -57,6 +70,9 @@
 #  define FONT_POINT    8
 #else
 #  include "../vbxe/vbxe.h"
+#  define SCR_W       VB_W
+#  define SCR_H       VB_H
+#  define SCR_STRIDE  VB_STRIDE
 #  define FONT_W        8
 #  define FONT_H        8
 #  define FONT_TOP      6     /* Fonthead.top: baseline to top of cell */
@@ -66,6 +82,7 @@
 #  define FONT_BOTTOM   1
 #  define FONT_POINT    9
 #endif
+#endif /* GEM4XE_DEV_IMPL */
 
 /* A raster form as the copy sees it: an MFDB resolved, or the screen.
  * `base` is 24-bit because on one device it is a VRAM address and on the
@@ -77,160 +94,301 @@ typedef struct {
     WORD     screen;
 } RFORM;
 
-/* A solid rectangle in the current pen, corners inclusive, already
- * clipped by the caller.  MD_REPLACE's and MD_ERASE's shape; the mode
- * itself is decided above the seam, because that decision is the same
- * whatever the pixels are made of. */
-void dev_fill_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen);
-
-/* ...and the same rectangle inverted, which is MD_XOR. */
-void dev_xor_rect(WORD x1, WORD y1, WORD x2, WORD y2);
-
-/* A rectangle in the current fill pattern and writing mode, corners
- * inclusive and already clipped.  The pattern's ROWS come from the VDI
- * (pat_bits) because which table they are in is the workstation's
- * business; how they reach the screen is the device's. */
-void dev_patt_rect(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen);
-
-/* A horizontal or vertical line in the current pen and mode, styled by
- * `mask` -- already anchored to the screen's grid by style_anchor, so
- * both devices draw a dash in the same place.  The device clips it. */
-void dev_style_line(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask);
-
-/* ---- text -------------------------------------------------------------
- * One glyph of the system font with its top-left at (cx, cy), in the
- * current writing mode and text colour.  `overlay` is 0 for the letter
- * itself and 1 for the second pass that thickens it -- which is not the
- * same as "draw it transparently", because in XOR and erase modes the
- * overlay is drawn in THAT mode too and the device may take a different
- * path for it.  The device clips the cell: a partial glyph is not
- * something GEM asks for, and whether a whole one can be blitted is the
- * device's question, not the VDI's. */
-void dev_glyph(WORD ch, WORD cx, WORD cy, WORD overlay);
-
-/* The font strip changed (src/vdi/font.c loaded another face).  A device
- * that keeps the glyphs in some other form re-derives it here: VBXE
- * expands all 256 into 4bpp masks in VRAM at both x parities, 8 KB of
- * them; ANTIC blits the strip as it stands and this is empty. */
-void dev_font_changed(void);
-
-/* A ONE-PLANE source expanded into the device's colours -- how the AES
- * draws icons and glyph masks (vrt_cpyfm).  `ink` and `bg` are VDI pens.
- * The source is a near pointer because a form lives in bank $00. */
-void dev_raster_1bpp(const uint8_t *bits, uint16_t stride,
-                     WORD sx, WORD sy, WORD w, WORD h,
-                     WORD dx, WORD dy, WORD mode, WORD ink, WORD bg);
-
-/* ---- the pointer -----------------------------------------------------
- * The VDI owns WHERE it is: the hot spot, the nesting count that
- * v_show_c and v_hide_c keep, and whether it is currently drawn.  The
- * device owns what it is MADE of and what was underneath it.
- *
- * `mask` and `data` are the sixteen rows GEM's MFORM carries, bit 15
- * leftmost; `bg` and `fg` are VDI pens.  A device keeps whatever it
- * needs of them -- VBXE expands the pair into 4bpp strips in VRAM at
- * both x parities, which is a kilobyte written once per form; ANTIC
- * blits the rows as they stand. */
-void dev_cursor_form(WORD bg, WORD fg, const UWORD *mask, const UWORD *data);
-
-/* Save what is under (cx, cy) and paint the form over it, done and on
- * the screen by the time this returns. */
-void dev_cursor_show(WORD cx, WORD cy);
-
-/* Put back what was under it. */
-void dev_cursor_hide(void);
-
-/* Forget what was under it WITHOUT putting it back -- v_clrwk's case,
- * where restoring would stamp stale pixels onto a cleared screen. */
-void dev_cursor_discard(void);
-
-/* A DIAGONAL line, styled the same way.  It is separate from
- * dev_style_line because on one device the two could not be less alike:
- * a horizontal run is a single patterned blit and a diagonal is the one
- * primitive the blitter cannot accelerate at all, so it goes pixel by
- * pixel through the MEMAC window.  The VDI decides which it is -- that
- * is geometry, and the same either way -- and the device decides what
- * that costs.
- *
- * The AES never draws one: every box and frame it makes is axis-aligned
- * (it calls neither the GDPs nor v_fillarea), so this is an
- * application's path, and it is slow on both devices for different
- * reasons. */
-void dev_line_diag(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask);
-
-/* ---- rasters ----------------------------------------------------------
- * The screen described as a form: an MFDB with a null address means "the
- * screen", and only the device knows where that is and how wide a row of
- * it is. */
-void dev_screen_form(RFORM *f);
-
-/* vro_cpyfm's copy, both rectangles already clipped by the VDI and known
- * to be inside their forms.  Source and destination may be the same form
- * and may overlap, so the device picks its direction.  VBXE takes one
- * blit when the two ends share their alignment and the width is a whole
- * number of bytes, and falls to pixel-by-pixel otherwise, because its
- * blitter has no shifter. */
-void dev_copy_form(const RFORM *src, WORD sx, WORD sy,
-                   const RFORM *dst, WORD dx, WORD dy, WORD w, WORD h);
-
-/* The off-screen area the AES saves under menus and dialogs into,
- * described as an MFDB.  Where it is and what shape it has are entirely
- * the device's: VRAM on one, and there is no such thing to spare in bank
- * $00 on the other. */
-void dev_save_form(MFDB *m);
-
-/* ---- the rest ---------------------------------------------------------
- * The screen, cleared.  The pointer is the VDI's to put back afterwards.
+/* ---- the table --------------------------------------------------------
+ * One of these per device, built at the end of the device's own file and
+ * pointed at by `vdev` when the program has decided which screen it has.
+ * The comments below are the seam's contract and are why this is a
+ * struct of pointers rather than a jump table: each entry says what it
+ * promises, and the two devices are held to the same promise.
  */
-void dev_clear_screen(void);
+typedef struct {
+    /* ---- the surface ------------------------------------------------
+     * What v_opnwk reports and every clip in the VDI is bounded by.  The
+     * portable code reads them as SCR_W, SCR_H and SCR_STRIDE, which is
+     * what they were called when they were constants. */
+    WORD w, h;
+    WORD stride;                /* bytes per row, in the DEVICE's packing */
 
-/* One pixel read back: `value` is what the device stores there and is
- * what v_get_pixel reports as intout[0], `pen` the VDI pen it maps to.
- * Both, because the VDI's contract asks for both and only the device can
- * answer either. */
-void dev_get_pixel(WORD x, WORD y, WORD *value, WORD *pen);
+    /* ---- the system font's metrics ----------------------------------
+     * The face itself is the VDI's business (src/vdi/font.c); its SHAPE
+     * is the device's, because a screen 320 pixels wide cannot spend
+     * eight of them on a character and still be a GEM.  Read above the
+     * seam as FONT_W, FONT_H, FONT_TOP and the rest. */
+    WORD font_w, font_h;
+    WORD font_top, font_ascent, font_half, font_descent, font_bottom;
+    WORD font_point;
+    /* The face itself: the 1bpp strip vdi_font starts out pointing at
+     * (src/vdi/font.h).  A device that has 53 columns and one that has
+     * 80 do not want the same one, and a .FNT loaded later replaces it
+     * for whichever is running. */
+    const uint8_t __far *font_face;
 
-/* The value this device stores for a VDI pen -- the units dev_get_pixel
- * and dev_row_pixel answer in. */
-WORD dev_pen_value(WORD pen);
+    /* A solid rectangle in the current pen, corners inclusive, already
+     * clipped by the caller.  MD_REPLACE's and MD_ERASE's shape; the mode
+     * itself is decided above the seam, because that decision is the same
+     * whatever the pixels are made of. */
+    void (*fill_rect)(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen);
 
-/* One screen row into SCR_STRIDE bytes, and a pixel out of it.  This is
- * the paint bucket's, and it is the one primitive that has to look at
- * what is already on the screen a whole row at a time; keeping the row
- * in the DEVICE's packed form and asking for pixels out of it is what
- * stops a 640-pixel row costing 640 bytes of a 2 KB stack. */
-void dev_read_row(WORD y, uint8_t *px);
-WORD dev_row_pixel(const uint8_t *px, WORD x);
+    /* ...and the same rectangle inverted, which is MD_XOR. */
+    void (*xor_rect)(WORD x1, WORD y1, WORD x2, WORD y2);
 
-/* How many colours the device can show at once.  v_opnwk reports it, so
- * it is what the AES and every application lay themselves out for -- and
- * it is why this is a device question and not a constant: a two-colour
- * workstation also has to say it cannot do colour at all, the way the
- * ST's monochrome one does. */
-WORD dev_colours(void);
+    /* A rectangle in the current fill pattern and writing mode, corners
+     * inclusive and already clipped.  The pattern's ROWS come from the VDI
+     * (pat_bits) because which table they are in is the workstation's
+     * business; how they reach the screen is the device's. */
+    void (*patt_rect)(WORD x1, WORD y1, WORD x2, WORD y2, WORD pen);
 
-/* ...and how many PLANES that is.  The AES reads it out of vq_extnd and
- * sizes its menu save buffer from it, so a device that lies here wastes
- * memory or loses part of a menu. */
-WORD dev_planes(void);
+    /* A horizontal or vertical line in the current pen and mode, styled by
+     * `mask` -- already anchored to the screen's grid by style_anchor, so
+     * both devices draw a dash in the same place.  The device clips it. */
+    void (*style_line)(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask);
 
-/* The palette: sixteen VDI pens' worth of 8-bit RGB, or one of them.
- * The device permutes into whatever order its hardware wants -- and a
- * device with two colours takes what it can of it. */
-void dev_palette_all(const uint8_t *rgb);
-void dev_palette_one(WORD pen, const uint8_t *rgb);
+    /* ---- text -------------------------------------------------------------
+     * One glyph of the system font with its top-left at (cx, cy), in the
+     * current writing mode and text colour.  `overlay` is 0 for the letter
+     * itself and 1 for the second pass that thickens it -- which is not the
+     * same as "draw it transparently", because in XOR and erase modes the
+     * overlay is drawn in THAT mode too and the device may take a different
+     * path for it.  The device clips the cell: a partial glyph is not
+     * something GEM asks for, and whether a whole one can be blitted is the
+     * device's question, not the VDI's. */
+    void (*glyph)(WORD ch, WORD cx, WORD cy, WORD overlay);
 
-/* Whatever the device precomputed about the current pattern or pen is
- * stale.  The VDI calls this when a workstation is selected or reset or
- * when the user pattern is replaced: it cannot know WHETHER a device
- * caches anything, only that the ground has moved.  VBXE keeps the
- * pattern expanded to 4bpp in VRAM with a line's strip beside it and
- * throws both away; ANTIC caches nothing and this is empty. */
-void dev_invalidate(void);
+    /* The font strip changed (src/vdi/font.c loaded another face).  A device
+     * that keeps the glyphs in some other form re-derives it here: VBXE
+     * expands all 256 into 4bpp masks in VRAM at both x parities, 8 KB of
+     * them; ANTIC blits the strip as it stands and this is empty. */
+    void (*font_changed)(void);
 
-/* Whatever the device has queued, done and on the screen.  A blit list
- * started and waited for on VBXE; nothing at all on ANTIC, where the
- * write WAS the drawing. */
-void dev_flush(void);
+    /* A ONE-PLANE source expanded into the device's colours -- how the AES
+     * draws icons and glyph masks (vrt_cpyfm).  `ink` and `bg` are VDI pens.
+     * The source is a near pointer because a form lives in bank $00. */
+    void (*raster_1bpp)(const uint8_t *bits, uint16_t stride,
+                        WORD sx, WORD sy, WORD w, WORD h,
+                        WORD dx, WORD dy, WORD mode, WORD ink, WORD bg);
+
+    /* ---- the pointer -----------------------------------------------------
+     * The VDI owns WHERE it is: the hot spot, the nesting count that
+     * v_show_c and v_hide_c keep, and whether it is currently drawn.  The
+     * device owns what it is MADE of and what was underneath it.
+     *
+     * `mask` and `data` are the sixteen rows GEM's MFORM carries, bit 15
+     * leftmost; `bg` and `fg` are VDI pens.  A device keeps whatever it
+     * needs of them -- VBXE expands the pair into 4bpp strips in VRAM at
+     * both x parities, which is a kilobyte written once per form; ANTIC
+     * blits the rows as they stand. */
+    void (*cursor_form)(WORD bg, WORD fg, const UWORD *mask, const UWORD *data);
+
+    /* Save what is under (cx, cy) and paint the form over it, done and on
+     * the screen by the time this returns. */
+    void (*cursor_show)(WORD cx, WORD cy);
+
+    /* Put back what was under it. */
+    void (*cursor_hide)(void);
+
+    /* Forget what was under it WITHOUT putting it back -- v_clrwk's case,
+     * where restoring would stamp stale pixels onto a cleared screen. */
+    void (*cursor_discard)(void);
+
+    /* A DIAGONAL line, styled the same way.  It is separate from
+     * dev_style_line because on one device the two could not be less alike:
+     * a horizontal run is a single patterned blit and a diagonal is the one
+     * primitive the blitter cannot accelerate at all, so it goes pixel by
+     * pixel through the MEMAC window.  The VDI decides which it is -- that
+     * is geometry, and the same either way -- and the device decides what
+     * that costs.
+     *
+     * The AES never draws one: every box and frame it makes is axis-aligned
+     * (it calls neither the GDPs nor v_fillarea), so this is an
+     * application's path, and it is slow on both devices for different
+     * reasons. */
+    void (*line_diag)(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask);
+
+    /* ---- rasters ----------------------------------------------------------
+     * The screen described as a form: an MFDB with a null address means "the
+     * screen", and only the device knows where that is and how wide a row of
+     * it is. */
+    void (*screen_form)(RFORM *f);
+
+    /* vro_cpyfm's copy, both rectangles already clipped by the VDI and known
+     * to be inside their forms.  Source and destination may be the same form
+     * and may overlap, so the device picks its direction.  VBXE takes one
+     * blit when the two ends share their alignment and the width is a whole
+     * number of bytes, and falls to pixel-by-pixel otherwise, because its
+     * blitter has no shifter. */
+    void (*copy_form)(const RFORM *src, WORD sx, WORD sy,
+                      const RFORM *dst, WORD dx, WORD dy, WORD w, WORD h);
+
+    /* The off-screen area the AES saves under menus and dialogs into,
+     * described as an MFDB.  Where it is and what shape it has are entirely
+     * the device's: VRAM on one, and there is no such thing to spare in bank
+     * $00 on the other. */
+    void (*save_form)(MFDB *m);
+
+    /* ---- the rest ---------------------------------------------------------
+     * The screen, cleared.  The pointer is the VDI's to put back afterwards.
+     */
+    void (*clear_screen)(void);
+
+    /* One pixel read back: `value` is what the device stores there and is
+     * what v_get_pixel reports as intout[0], `pen` the VDI pen it maps to.
+     * Both, because the VDI's contract asks for both and only the device can
+     * answer either. */
+    void (*get_pixel)(WORD x, WORD y, WORD *value, WORD *pen);
+
+    /* The value this device stores for a VDI pen -- the units dev_get_pixel
+     * and dev_row_pixel answer in. */
+    WORD (*pen_value)(WORD pen);
+
+    /* One screen row into SCR_STRIDE bytes, and a pixel out of it.  This is
+     * the paint bucket's, and it is the one primitive that has to look at
+     * what is already on the screen a whole row at a time; keeping the row
+     * in the DEVICE's packed form and asking for pixels out of it is what
+     * stops a 640-pixel row costing 640 bytes of a 2 KB stack. */
+    void (*read_row)(WORD y, uint8_t *px);
+    WORD (*row_pixel)(const uint8_t *px, WORD x);
+
+    /* How many colours the device can show at once.  v_opnwk reports it, so
+     * it is what the AES and every application lay themselves out for -- and
+     * it is why this is a device question and not a constant: a two-colour
+     * workstation also has to say it cannot do colour at all, the way the
+     * ST's monochrome one does. */
+    WORD (*colours)(void);
+
+    /* ...and how many PLANES that is.  The AES reads it out of vq_extnd and
+     * sizes its menu save buffer from it, so a device that lies here wastes
+     * memory or loses part of a menu. */
+    WORD (*planes)(void);
+
+    /* The palette: sixteen VDI pens' worth of 8-bit RGB, or one of them.
+     * The device permutes into whatever order its hardware wants -- and a
+     * device with two colours takes what it can of it. */
+    void (*palette_all)(const uint8_t *rgb);
+    void (*palette_one)(WORD pen, const uint8_t *rgb);
+
+    /* Whatever the device precomputed about the current pattern or pen is
+     * stale.  The VDI calls this when a workstation is selected or reset or
+     * when the user pattern is replaced: it cannot know WHETHER a device
+     * caches anything, only that the ground has moved.  VBXE keeps the
+     * pattern expanded to 4bpp in VRAM with a line's strip beside it and
+     * throws both away; ANTIC caches nothing and this is empty. */
+    void (*invalidate)(void);
+
+    /* Whatever the device has queued, done and on the screen.  A blit list
+     * started and waited for on VBXE; nothing at all on ANTIC, where the
+     * write WAS the drawing. */
+    void (*flush)(void);
+
+} VDIDEV;
+
+/* THE DEVICE IN USE.
+ *
+ * The PROGRAM sets this, once, before vdi_init(), and it never moves
+ * again -- src/gem.c after vbxe_detect() and the config file, a
+ * milestone to whichever device it is about.  Deliberately not a
+ * function that picks for itself: the program is what knows whether it
+ * has brought the surface up, and only one thing should be able to
+ * decide, so there is no second copy of the answer to disagree.
+ *
+ * Nothing above the seam names it.  vdi.c and the AES read SCR_W,
+ * FONT_H and dev_fill_rect exactly as they did when there was one device
+ * compiled in; the macros below are where those names land now.
+ *
+ * __far, and so are the tables: each is about 130 bytes, and bank $00
+ * has 2,430 for every constant the system owns (src/gem4xe.scm).  Two of
+ * them there would be a tenth of it spent on a table read once per
+ * primitive, so they live in `cfar` with the far code and the reads are
+ * 24-bit.  At 20 MHz that is a few cycles against a VRAM write at 1.79.
+ *
+ * IT IS NULL UNTIL THE PROGRAM SETS IT, and every macro below
+ * dereferences it.  A VDI call before that is a null far read, not a
+ * diagnosable error -- which is why setting it is the first line of
+ * every bring-up and not something arranged later. */
+extern const VDIDEV __far *vdev;
+
+/* The two tables, in the two device files.  A build links whichever
+ * devices it has a screen for; naming one that is not linked is a link
+ * error, which is the right time to find out. */
+extern const VDIDEV __far vdev_vbxe;
+extern const VDIDEV __far vdev_antic;
+
+#ifdef GEM4XE_DEV_IMPL
+/* A DEVICE'S OWN FILE keeps the names the seam gave it and has its own
+ * prefix stamped on them, so both devices can be linked at once and
+ * neither had to be renamed by hand.  GEM4XE_DEV_PREFIX comes from the
+ * Makefile, beside GEM4XE_DEV_IMPL. */
+#  define DEV_CAT_(a, b) a ## b
+#  define DEV_CAT(a, b)  DEV_CAT_(a, b)
+#  define DEV_(name)     DEV_CAT(GEM4XE_DEV_PREFIX, name)
+#  define dev_fill_rect      DEV_(fill_rect)
+#  define dev_xor_rect       DEV_(xor_rect)
+#  define dev_patt_rect      DEV_(patt_rect)
+#  define dev_style_line     DEV_(style_line)
+#  define dev_glyph          DEV_(glyph)
+#  define dev_font_changed   DEV_(font_changed)
+#  define dev_raster_1bpp    DEV_(raster_1bpp)
+#  define dev_cursor_form    DEV_(cursor_form)
+#  define dev_cursor_show    DEV_(cursor_show)
+#  define dev_cursor_hide    DEV_(cursor_hide)
+#  define dev_cursor_discard DEV_(cursor_discard)
+#  define dev_line_diag      DEV_(line_diag)
+#  define dev_screen_form    DEV_(screen_form)
+#  define dev_copy_form      DEV_(copy_form)
+#  define dev_save_form      DEV_(save_form)
+#  define dev_clear_screen   DEV_(clear_screen)
+#  define dev_get_pixel      DEV_(get_pixel)
+#  define dev_pen_value      DEV_(pen_value)
+#  define dev_read_row       DEV_(read_row)
+#  define dev_row_pixel      DEV_(row_pixel)
+#  define dev_colours        DEV_(colours)
+#  define dev_planes         DEV_(planes)
+#  define dev_palette_all    DEV_(palette_all)
+#  define dev_palette_one    DEV_(palette_one)
+#  define dev_invalidate     DEV_(invalidate)
+#  define dev_flush          DEV_(flush)
+#else
+#  define SCR_W         (vdev->w)
+#  define SCR_H         (vdev->h)
+#  define SCR_STRIDE    (vdev->stride)
+/* The widest row either device can hand back, for the one buffer that
+ * has to be an array rather than a pointer (vdi.c, the paint bucket). */
+#  define SCR_STRIDE_MAX 320
+
+#  define FONT_W        (vdev->font_w)
+#  define FONT_H        (vdev->font_h)
+#  define FONT_TOP      (vdev->font_top)
+#  define FONT_ASCENT   (vdev->font_ascent)
+#  define FONT_HALF     (vdev->font_half)
+#  define FONT_DESCENT  (vdev->font_descent)
+#  define FONT_BOTTOM   (vdev->font_bottom)
+#  define FONT_POINT    (vdev->font_point)
+
+#  define dev_fill_rect     (vdev->fill_rect)
+#  define dev_xor_rect      (vdev->xor_rect)
+#  define dev_patt_rect     (vdev->patt_rect)
+#  define dev_style_line    (vdev->style_line)
+#  define dev_glyph         (vdev->glyph)
+#  define dev_font_changed  (vdev->font_changed)
+#  define dev_raster_1bpp   (vdev->raster_1bpp)
+#  define dev_cursor_form   (vdev->cursor_form)
+#  define dev_cursor_show   (vdev->cursor_show)
+#  define dev_cursor_hide   (vdev->cursor_hide)
+#  define dev_cursor_discard (vdev->cursor_discard)
+#  define dev_line_diag     (vdev->line_diag)
+#  define dev_screen_form   (vdev->screen_form)
+#  define dev_copy_form     (vdev->copy_form)
+#  define dev_save_form     (vdev->save_form)
+#  define dev_clear_screen  (vdev->clear_screen)
+#  define dev_get_pixel     (vdev->get_pixel)
+#  define dev_pen_value     (vdev->pen_value)
+#  define dev_read_row      (vdev->read_row)
+#  define dev_row_pixel     (vdev->row_pixel)
+#  define dev_colours       (vdev->colours)
+#  define dev_planes        (vdev->planes)
+#  define dev_palette_all   (vdev->palette_all)
+#  define dev_palette_one   (vdev->palette_one)
+#  define dev_invalidate    (vdev->invalidate)
+#  define dev_flush         (vdev->flush)
+#endif /* GEM4XE_DEV_IMPL */
 
 #endif /* GEM4XE_VDIDEV_H */

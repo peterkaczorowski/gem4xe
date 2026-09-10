@@ -13,6 +13,7 @@
 #include "vdi/vdi.h"
 #include "aes/aes.h"
 #include "vdi/font.h"
+#include "vdi/vdidev.h"    /* which device this program is about */
 
 #define STATUS ((volatile unsigned char *) 0x0600)
 
@@ -47,6 +48,9 @@ __task void main(void)
     /* The face first, as src/gem.c and src/m3_vdi.c do: vdi_init opens
      * the workstation but the FONT is the program's to choose, and a
      * vdi_font of zero is a glyph blit reading address zero. */
+    vdev = &vdev_antic;      /* this milestone is about the other
+                              * device; nothing else in the file
+                              * names it again */
     vdi_font_default();
     vdi_init();                         /* opens the workstation: the
                                          * device's palette call is what

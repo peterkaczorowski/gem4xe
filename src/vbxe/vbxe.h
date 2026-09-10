@@ -85,11 +85,16 @@
 #define BLT_MAX_WIDTH      512    /* width field is NINE bits (1..512)      */
 
 /* ---- display geometry ------------------------------------------------ */
-/* HR is 4bpp: 2 pixels per byte, high nibble = LEFT pixel. */
-#define SCR_W              640
-#define SCR_H              240
-#define SCR_STRIDE         (SCR_W / 2)          /* 320 bytes per row        */
-#define SCR_BYTES          ((uint32_t)SCR_STRIDE * SCR_H)   /* 76,800       */
+/* HR is 4bpp: 2 pixels per byte, high nibble = LEFT pixel.
+ *
+ * VB_, the way the other device's are AN_ (src/antic/antic.h).  These are
+ * THIS DEVICE'S numbers, and a program that has both linked cannot use
+ * either as "the screen": that is vdev->w and vdev->h, which is what the
+ * VDI reads as VB_W and VB_H (src/vdi/vdidev.h). */
+#define VB_W               640
+#define VB_H               240
+#define VB_STRIDE          (VB_W / 2)           /* 320 bytes per row        */
+#define VB_BYTES           ((uint32_t)VB_STRIDE * VB_H)     /* 76,800       */
 
 /* ---- VRAM map (512 KB) ----------------------------------------------- */
 #define VR_SCREEN0         0x00000UL            /* 76,800 -> $12BFF         */
@@ -134,7 +139,7 @@
 /* Scratch for vrt_cpyfm (src/vdi/vdi.c): a monochrome form expanded to 4bpp
  * AND and OR strips, half a page each, written through one MEMAC mapping
  * and blitted in bands.  The first page boundary after the save buffer.  */
-#define VR_STRIP           ((VR_SAVE + SCR_BYTES + 0xFFFUL) & ~0xFFFUL)
+#define VR_STRIP           ((VR_SAVE + VB_BYTES + 0xFFFUL) & ~0xFFFUL)
 #define VR_STRIP_LEN       0x1000UL
 /* VR_STRIP + VR_STRIP_LEN onward is free: window backing stores, icons */
 

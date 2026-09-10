@@ -255,6 +255,7 @@ The listing is still the fallback for a drive that will not answer SIO.
 With a volume that has room, the system stops being one lump:
 
     \GEM\GEM.COM         the system: VDI, AES, GEMDOS, the shell
+    \GEM\GEM4XE.CFG      the screen and the mouse -- see section 4a
     \GEM\DESKTOP.G4A     the desktop
     \GEM\DESKTOP.RSC     its resource (its own strings, its own layout)
     \GEM\LANG.RSC        the system's strings -- see below
@@ -269,6 +270,45 @@ card into that desktop, so the layout is not a plan.  Two things follow for the 
 application is found by path, not by being on `D1:`, and the shell's
 command tail (`SH_TAILLEN`, 128 bytes) is what carries arguments -- both
 already true.
+
+## 4a. `GEM4XE.CFG`: the settings that cannot live in a dialog
+
+Everything a user can change about gem4xe is in `DESKTOP.INF`, which the
+desktop writes and reads with a GEM already on the screen.  Two things
+cannot be, and they are in a plain text file beside `GEM.COM`:
+
+    # VIDEO=AUTO       AUTO, VBXE, ANTIC (= SAFE)
+    # MOUSE=AUTO       AUTO, ST, AMIGA, TRAKBALL, TABLET, XEM1, NONE
+
+**The screen**, because a monitor that will not lock to the VBXE's
+640x240 leaves the user with nothing to put a dialog on.  `VIDEO=ANTIC`
+brings the machine up on stock ANTIC -- 320x168 in two colours, on
+Atari's condensed 6x6 face -- even where a VBXE is fitted and working.
+That is the safe mode, and it has to beat a working VBXE or it is not a
+way out.
+
+**The mouse**, because a user whose pointer does not move cannot reach a
+dialog either.
+
+The file ships with every setting commented out, so finding it is finding
+its documentation.  A missing file means the same thing.  An unknown key
+or value is skipped, never refused: a typo in this file must not be able
+to stop the machine starting, and a file written for a later gem4xe has
+to keep booting this one.
+
+**The recovery path is a DOS prompt.**  Boot to DOS, edit the file, run
+GEM again.  On media that starts GEM by itself -- the SpartaDOS batch
+file of section 2, DOS 2's `AUTORUN.SYS` -- GEM comes straight back, so
+there the answer is to boot another disk and edit the file from that.
+That is worth saying in the manual next to the file, because it is the
+one case where the product's best feature (it comes up in the desktop
+with nothing typed) is in the way.
+
+`tests/emu/m26_fallback.py` boots the shipped disk three ways -- with a
+VBXE, without one, and with `VIDEO=ANTIC` against a working VBXE -- and
+checks which device the VDI ended on, what the AES laid out for, what the
+file parsed to, and that the two routes to ANTIC give the same picture to
+the pixel.  `docs/phase34.md` has the rest.
 
 ## 5. Localization: `LANG.RSC`
 

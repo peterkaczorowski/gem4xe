@@ -67,7 +67,7 @@ __task void main(void)
      *    blitter's 9-bit width allows in one row, so this is rows: 320
      *    bytes x 240, exactly the screen's own shape. */
     blit_reset();
-    blit_fill(VR_SCREEN0, SCR_STRIDE, SCR_STRIDE, SCR_H, 0x00);
+    blit_fill(VR_SCREEN0, VB_STRIDE, VB_STRIDE, VB_H, 0x00);
     blit_run();
     STATUS[2] = 5;
 
@@ -77,7 +77,7 @@ __task void main(void)
     blit_reset();
     for (i = 0; i < 16; i++) {
         unsigned char c = (unsigned char)((i << 4) | i);
-        blit_fill(VR_SCREEN0 + (unsigned long)(i * 20), SCR_STRIDE,
+        blit_fill(VR_SCREEN0 + (unsigned long)(i * 20), VB_STRIDE,
                   20, 120, c);
         if (i == 11) {                  /* MAX_BCB is 12 -- flush and go on */
             blit_run();
@@ -91,8 +91,8 @@ __task void main(void)
      *    real read-modify path (AND mask $FF) and a differing source and
      *    destination stride offset. */
     blit_reset();
-    blit_copy(VR_SCREEN0, SCR_STRIDE,
-              VR_SCREEN0 + (unsigned long)SCR_STRIDE * 180, SCR_STRIDE,
+    blit_copy(VR_SCREEN0, VB_STRIDE,
+              VR_SCREEN0 + (unsigned long)VB_STRIDE * 180, VB_STRIDE,
               80, 60);
     blit_run();
     STATUS[2] = 7;
@@ -101,8 +101,8 @@ __task void main(void)
      *    is the full 320-byte stride still works (width field is 9 bits, and
      *    320-1 = 319 needs that ninth bit). */
     blit_reset();
-    blit_fill(VR_SCREEN0 + (unsigned long)SCR_STRIDE * 150, SCR_STRIDE,
-              SCR_STRIDE, 20, 0x99);
+    blit_fill(VR_SCREEN0 + (unsigned long)VB_STRIDE * 150, VB_STRIDE,
+              VB_STRIDE, 20, 0x99);
     blit_run();
 
     /* --- 5. measure the blitter ---------------------------------------
@@ -115,19 +115,19 @@ __task void main(void)
      * untimed copy restores.  The screen must end up exactly as the pixel
      * comparison expects. */
     blit_reset();
-    blit_copy(VR_SCREEN0, SCR_STRIDE, VR_SCREEN1, SCR_STRIDE, SCR_STRIDE, SCR_H);
+    blit_copy(VR_SCREEN0, VB_STRIDE, VR_SCREEN1, VB_STRIDE, VB_STRIDE, VB_H);
     i = blit_time();                    /* full-screen COPY (2 cycles/byte) */
     STATUS[10] = (unsigned char)i;
     STATUS[11] = (unsigned char)(i >> 8);
 
     blit_reset();
-    blit_fill(VR_SCREEN0, SCR_STRIDE, SCR_STRIDE, SCR_H, 0x11);
+    blit_fill(VR_SCREEN0, VB_STRIDE, VB_STRIDE, VB_H, 0x11);
     i = blit_time();                    /* full-screen FILL (1 cycle/byte)  */
     STATUS[8] = (unsigned char)i;
     STATUS[9] = (unsigned char)(i >> 8);
 
     blit_reset();                       /* restore the pattern, untimed */
-    blit_copy(VR_SCREEN1, SCR_STRIDE, VR_SCREEN0, SCR_STRIDE, SCR_STRIDE, SCR_H);
+    blit_copy(VR_SCREEN1, VB_STRIDE, VR_SCREEN0, VB_STRIDE, VB_STRIDE, VB_H);
     blit_run();
 
     STATUS[2] = 0xA5;                   /* done */

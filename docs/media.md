@@ -83,6 +83,7 @@ laid out exactly as the card is.
       GEM>DESKTOP.RSC                                 GEM>DESKTOP.RSC
       GEM>LANG.RSC                                    GEM>LANG.RSC
       GEM>816.COM                                     GEM>816.COM
+      GEM>GEM4XE.CFG     the screen and the mouse     GEM>GEM4XE.CFG
       APPS>M11.G4A       the applications             APPS>M11.G4A
       APPS>CALC.G4A                                   APPS>CALC.G4A
       APPS>CLOCK.G4A                                  APPS>CLOCK.G4A

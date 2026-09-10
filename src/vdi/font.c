@@ -22,15 +22,12 @@
 #include "font.h"
 #include "vdidev.h"
 
-/* The face this build links.  Which one it is is the device's choice
- * (vdidev.h): 8x8 where there are 80 columns to spend and Atari's
- * condensed 6x6 where there are not. */
-#ifdef GEM4XE_DEV_ANTIC
-extern const uint8_t __far font6x6[];
-#define vdi_face font6x6
-#else
-#define vdi_face font8x8
-#endif
+/* The face the running DEVICE carries -- 8x8 where there are 80 columns
+ * to spend and Atari's condensed 6x6 where there are not (vdidev.h).  It
+ * is read off `vdev` rather than chosen here, because both faces are in
+ * the image and which screen came up is not decided until the program
+ * starts. */
+#define vdi_face (vdev->font_face)
 #include "sys/cio.h"
 #include "sys/farmem.h"
 
@@ -85,7 +82,7 @@ void vdi_font_where(const char *cioname)
 
 void vdi_font_default(void)
 {
-    vdi_font = (uint32_t)(const uint8_t __far *)vdi_face;
+    vdi_font = (uint32_t)vdi_face;
     dev_font_changed();
 }
 
@@ -193,7 +190,7 @@ const char *vdi_font_name(WORD face)
 WORD vdi_font_select(WORD id)
 {
     uint32_t want = (uint32_t)(font_have && id == font_loaded_id && id != FONT_ID_SYS
-                               ? font_ram : (uint32_t)(const uint8_t __far *)vdi_face);
+                               ? font_ram : (uint32_t)vdi_face);
     WORD now = (WORD)(want == font_ram && font_have ? font_loaded_id : FONT_ID_SYS);
 
     if (want != vdi_font) {

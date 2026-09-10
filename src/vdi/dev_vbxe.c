@@ -1289,3 +1289,45 @@ WORD dev_planes(void)
 {
     return 4;
 }
+
+/* ---- the table (vdidev.h) --------------------------------------------
+ * What the VDI reaches this file through.  The geometry and the font
+ * metrics are constants HERE and variables above the seam, which is the
+ * whole trade: this file may fold them, and vdi.c may be compiled once
+ * for both screens.
+ */
+extern const uint8_t __far font8x8[];
+
+const VDIDEV __far vdev_vbxe = {
+    SCR_W, SCR_H, SCR_STRIDE,
+    FONT_W, FONT_H,
+    FONT_TOP, FONT_ASCENT, FONT_HALF, FONT_DESCENT, FONT_BOTTOM,
+    FONT_POINT, font8x8,
+
+    dev_fill_rect,
+    dev_xor_rect,
+    dev_patt_rect,
+    dev_style_line,
+    dev_glyph,
+    dev_font_changed,
+    dev_raster_1bpp,
+    dev_cursor_form,
+    dev_cursor_show,
+    dev_cursor_hide,
+    dev_cursor_discard,
+    dev_line_diag,
+    dev_screen_form,
+    dev_copy_form,
+    dev_save_form,
+    dev_clear_screen,
+    dev_get_pixel,
+    dev_pen_value,
+    dev_read_row,
+    dev_row_pixel,
+    dev_colours,
+    dev_planes,
+    dev_palette_all,
+    dev_palette_one,
+    dev_invalidate,
+    dev_flush,
+};

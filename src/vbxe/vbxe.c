@@ -191,12 +191,12 @@ void vbxe_xdl_hr(uint32_t screen)
 
     xdl[n++] = (uint8_t)(ctl & 0xFF);
     xdl[n++] = (uint8_t)(ctl >> 8);
-    xdl[n++] = (uint8_t)(SCR_H - 1);              /* repeat -> SCR_H lines  */
+    xdl[n++] = (uint8_t)(VB_H - 1);              /* repeat -> VB_H lines  */
     xdl[n++] = (uint8_t)(screen);                 /* OVADR, 3 bytes         */
     xdl[n++] = (uint8_t)(screen >> 8);
     xdl[n++] = (uint8_t)(screen >> 16);
-    xdl[n++] = (uint8_t)(SCR_STRIDE);             /* OVSTEP, 12 bits        */
-    xdl[n++] = (uint8_t)(SCR_STRIDE >> 8);
+    xdl[n++] = (uint8_t)(VB_STRIDE);             /* OVSTEP, 12 bits        */
+    xdl[n++] = (uint8_t)(VB_STRIDE >> 8);
     xdl[n++] = OVATT_OVPAL(1) | OVATT_WIDTH_NORMAL;
     xdl[n++] = OVATT_PRI_OVER_ALL;                /* $FF -- see vbxe.h      */
     xdl[n++] = (uint8_t)((XDLC_OVOFF | XDLC_END) & 0xFF);

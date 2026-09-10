@@ -11,6 +11,8 @@
 #                   a trak-ball counted in the handler, and the way back to DOS
 #   make test-m11   the application ABI: a separately linked program loaded,
 #                   relocated and run, calling GEM through COP
+#   make test-m26   one binary, two screens: GEM.COM with a VBXE, without
+#                   one, and in safe mode from GEM4XE.CFG
 #   make check-cc   the compiler bugs we work around, in the vendor's simulator
 #   make bench      GEMBench's tests on this machine, in milliseconds (docs/bench.md)
 #   make test       all of them
@@ -18,7 +20,13 @@
 
 CALYPSI  ?= $(HOME)/dev/toolchains/calypsi-65816
 EMUTOS   ?= $(HOME)/dev/emutos
-CC        = $(CALYPSI)/bin/cc65816
+# The compiler, through tools/ccdep.sh, which records what each object
+# really depends on into build/*.d and is included below.  The hand-written
+# header lists on the rules stay: they are what makes the first build after
+# a clean correct.  See the top of that script for what a missing one cost.
+CC65816   = $(CALYPSI)/bin/cc65816
+export CC65816
+CC        = tools/ccdep.sh
 AS        = $(CALYPSI)/bin/as65816
 LD        = $(CALYPSI)/bin/ln65816
 LIB       = clib-lc-sd.a
@@ -33,6 +41,9 @@ CFLAGS    = --code-model=large --data-model=small -O2
 # --override lets src/sys/div16.o replace the library's _Div16/_Mod16, which
 # leave the wrong flags for the compiler's own `beq` (see that file).
 LDFLAGS   = --rtattr exit=simplified --override _Div16 --override _Mod16
+
+# What the compiler said each object opened, last time it was compiled.
+-include $(wildcard build/*.d)
 
 SRC_DOS  ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['dos']['sd_dos2'])" 2>/dev/null)
 # A double-density DOS 2 disk, [dos].dd_dos2: 720 x 256 is where the DOS 2
@@ -56,8 +67,8 @@ M24_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m24_antic.o b
 # The VDI on the ANTIC device: the same vdi.c, compiled for the other
 # side of the seam and linked against dev_antic.o.
 M25_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m25_antic_vdi.o \
-             build/vdi_a.o build/dev_antic.o build/antic.o build/pointer_a.o \
-             build/font8x8.o build/font6x6.o build/fillpat.o build/sintbl.o build/font_a.o \
+             build/vdi.o build/dev_antic.o build/antic.o build/pointer.o \
+             build/font8x8.o build/font6x6.o build/fillpat.o build/sintbl.o build/font.o \
              build/farmem.o build/irq.o build/irqs.o build/rapidus.o \
              build/cio.o build/cios.o build/dos.o build/m25_stub.o \
              build/graf.o build/objc.o build/grlib.o build/event.o \
@@ -70,7 +81,11 @@ M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o buil
 # itself and its compiled-in test application taken out, linked on the
 # same rules with the application pool given the whole of $4000-$7FFF
 # (src/gem4xe.scm, `layout`).
-GEM_OBJS   = $(filter-out build/m3_vdi.o build/app_blob.o,$(M3_OBJS)) build/gem.o
+# GEM.COM links BOTH devices and chooses at start-up, so the ANTIC
+# surface, its driver and its face come in on top of the runner's set.
+GEM_OBJS   = $(filter-out build/m3_vdi.o build/app_blob.o,$(M3_OBJS)) \
+             build/dev_antic.o build/antic.o build/font6x6.o \
+             build/config.o build/gem.o
 
 # A gem4xe application: its own C startup and bindings (src/app), linked
 # against nothing of gem4xe's, on the application's own linker rules.
@@ -98,9 +113,14 @@ build/%.o: src/%.c
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
+# The two device files.  GEM4XE_DEV_IMPL says "this is one device's own
+# translation unit", so vdidev.h gives it compile-time geometry instead
+# of the pointer, and GEM4XE_DEV_PREFIX stamps its functions -- which is
+# what lets BOTH be linked into one binary without a rename by hand.
 build/dev_vbxe.o: src/vdi/dev_vbxe.c src/vdi/vdidev.h src/vdi/vdi.h src/vbxe/vbxe.h
 	@mkdir -p build
-	$(CC) $(CFLAGS) -I src -I src/vdi -o $@ $<
+	$(CC) $(CFLAGS) -DGEM4XE_DEV_IMPL -DGEM4XE_DEV_PREFIX=vbd_ \
+	      -I src -I src/vdi -o $@ $<
 
 build/font6x6.o: src/vdi/font6x6.c
 	@mkdir -p build
@@ -111,24 +131,16 @@ src/vdi/font6x6.c: tools/fontconv6.py
 
 build/dev_antic.o: src/vdi/dev_antic.c src/vdi/vdidev.h src/vdi/vdi.h src/antic/antic.h
 	@mkdir -p build
-	$(CC) $(CFLAGS) -DGEM4XE_DEV_ANTIC -I src -I src/vdi -o $@ $<
+	$(CC) $(CFLAGS) -DGEM4XE_DEV_IMPL -DGEM4XE_DEV_PREFIX=and_ \
+	      -DGEM4XE_DEV_ANTIC -I src -I src/vdi -o $@ $<
 
-# The device-independent halves, compiled for the ANTIC side of the seam.
-build/vdi_a.o: src/vdi/vdi.c src/vdi/vdi.h src/vdi/vdidev.h src/vdi/pointer.h src/antic/antic.h
+# There is no second copy of the device-INdependent halves any more.
+# build/vdi.o, build/pointer.o and build/font.o serve both screens: that
+# is what the vtable bought, and it is checkable rather than claimed --
+# test-m3 and test-m25 link the same vdi.o.
+build/m25_antic_vdi.o: src/m25_antic_vdi.c src/vdi/vdi.h src/vdi/vdidev.h
 	@mkdir -p build
-	$(CC) $(CFLAGS) -DGEM4XE_DEV_ANTIC -I src -I src/vdi -o $@ $<
-
-build/pointer_a.o: src/vdi/pointer.c src/vdi/pointer.h src/vdi/vdidev.h
-	@mkdir -p build
-	$(CC) $(CFLAGS) -DGEM4XE_DEV_ANTIC -I src -I src/vdi -o $@ $<
-
-build/font_a.o: src/vdi/font.c src/vdi/font.h src/vdi/vdi.h src/vdi/vdidev.h
-	@mkdir -p build
-	$(CC) $(CFLAGS) -DGEM4XE_DEV_ANTIC -I src -I src/vdi -o $@ $<
-
-build/m25_antic_vdi.o: src/m25_antic_vdi.c src/vdi/vdi.h
-	@mkdir -p build
-	$(CC) $(CFLAGS) -DGEM4XE_DEV_ANTIC -I src -I src/vdi -o $@ $<
+	$(CC) $(CFLAGS) -I src -I src/vdi -o $@ $<
 
 build/vbxe.o: src/vbxe/vbxe.c src/vbxe/vbxe.h
 	@mkdir -p build
@@ -143,13 +155,13 @@ build/m24_antic.o: src/m24_antic.c src/antic/antic.h
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
 build/m2_vbxe.o: src/m2_vbxe.c src/vbxe/vbxe.h
-build/m3_vdi.o:  src/m3_vdi.c  src/vbxe/vbxe.h src/vdi/vdi.h src/sys/irq.h src/sys/abi.h src/sys/app.h src/sys/cio.h src/sys/dos.h
+build/m3_vdi.o:  src/m3_vdi.c  src/vbxe/vbxe.h src/vdi/vdi.h src/vdi/vdidev.h src/sys/irq.h src/sys/abi.h src/sys/app.h src/sys/cio.h src/sys/dos.h
 
-build/vdi.o: src/vdi/vdi.c src/vdi/vdi.h src/vdi/pointer.h src/vbxe/vbxe.h src/sys/irq.h
+build/vdi.o: src/vdi/vdi.c src/vdi/vdi.h src/vdi/vdidev.h src/vdi/pointer.h src/sys/irq.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
-build/pointer.o: src/vdi/pointer.c src/vdi/pointer.h src/vdi/vdi.h src/sys/irq.h
+build/pointer.o: src/vdi/pointer.c src/vdi/pointer.h src/vdi/vdi.h src/vdi/vdidev.h src/sys/irq.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -245,6 +257,19 @@ build/dos.o: src/sys/dos.c src/sys/dos.h src/sys/cio.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
+# GEM.COM itself: it names both devices and the config, so it has to be
+# rebuilt when the seam moves.
+build/gem.o: src/gem.c src/vdi/vdi.h src/vdi/vdidev.h src/vdi/pointer.h \
+             src/vdi/font.h src/aes/aes.h src/sys/config.h \
+             src/vbxe/vbxe.h src/antic/antic.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+# GEM4XE.CFG: what the machine should be told before it has a screen.
+build/config.o: src/sys/config.c src/sys/config.h src/sys/cio.h src/vdi/pointer.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
 # GEMDOS for the applications: the ST's trap #1 on CIO, through the seam.
 build/gemdos.o: src/sys/gemdos.c src/sys/clock.h src/sys/gemdos.h src/sys/dos.h src/sys/cio.h src/sys/farmem.h src/sys/app.h
 	@mkdir -p build
@@ -276,7 +301,7 @@ build/clock.o: src/sys/clock.c src/sys/clock.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
-build/font.o: src/vdi/font.c src/vdi/font.h src/vdi/vdi.h src/sys/cio.h src/sys/farmem.h
+build/font.o: src/vdi/font.c src/vdi/font.h src/vdi/vdi.h src/vdi/vdidev.h src/sys/cio.h src/sys/farmem.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -628,18 +653,50 @@ build/816.com: tools/mk816.py
 # that the smallest disk is still somewhere a person can put a program
 # of their own.  Filling that space with ours would be taking exactly
 # what the floor is there to keep.  The other two media have room.
-build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com
+# GEM4XE.CFG as it ships: every setting commented out, so that finding
+# the file is finding its documentation.  Translated to the Atari's EOL
+# ($9B) on the way to the disk -- src/sys/config.c reads CR, LF and EOL
+# alike, but a file that a DOS editor opens should already be in the
+# form that editor writes.
+build/gem4xe.cfg: dist/gem4xe.cfg
+	@mkdir -p build
+	python3 -c "import sys; \
+	    open(sys.argv[2],'wb').write(open(sys.argv[1],'rb').read() \
+	        .replace(b'\r\n', b'\n').replace(b'\n', b'\x9b'))" $< $@
+
+# ...and the safe-mode one the ANTIC gate boots with, which is the same
+# file with the one line uncommented.
+build/safe.cfg: dist/gem4xe.cfg
+	@mkdir -p build
+	python3 -c "import sys; \
+	    open(sys.argv[2],'wb').write(open(sys.argv[1],'rb').read() \
+	        .replace(b'# VIDEO=AUTO', b'VIDEO=ANTIC') \
+	        .replace(b'\r\n', b'\n').replace(b'\n', b'\x9b'))" $< $@
+
+build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/gem4xe.cfg
 	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
 	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
-	    --add build/lang.rsc LANG.RSC --add build/816.com 816.COM
+	    --add build/lang.rsc LANG.RSC --add build/816.com 816.COM \
+	    --add build/gem4xe.cfg GEM4XE.CFG
 
 # The product's SpartaDOS floppy is an INSTALL disk: the same \GEM\ and
 # \APPS\ layout the card has, so copying it onto an APT hard drive is a
 # directory copy and not a decision, and none of the file layer's
 # fixtures -- those belong on a gate's disk (--tree) and not on this one.
-build/gem-sp.atr: build/gem.xex build/lang.rsc build/816.com $(DESK_DEPS) $(APP_DEPS) tools/mkspdisk.py tools/atr.py
+# The same shipped disk with the safe-mode line uncommented: what a user
+# writes from the DOS prompt when the VBXE's output is not something
+# their monitor will show (tests/emu/m26_fallback.py).
+build/gem-antic.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/safe.cfg
+	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
+	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
+	    --add build/lang.rsc LANG.RSC --add build/816.com 816.COM \
+	    --add build/safe.cfg GEM4XE.CFG
+
+build/gem-sp.atr: build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg $(DESK_DEPS) $(APP_DEPS) tools/mkspdisk.py tools/atr.py
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) \
@@ -648,6 +705,7 @@ build/gem-sp.atr: build/gem.xex build/lang.rsc build/816.com $(DESK_DEPS) $(APP_
 	    --add build/desktop.rsc "GEM>DESKTOP.RSC" \
 	    --add build/lang.rsc "GEM>LANG.RSC" \
 	    --add build/816.com "GEM>816.COM" \
+	    --add build/gem4xe.cfg "GEM>GEM4XE.CFG" \
 	    --add build/m11_app.g4a "APPS>M11.G4A" \
 	    --add build/calc.g4a "APPS>CALC.G4A" --add build/calc.rsc "APPS>CALC.RSC" \
 	    --add build/clock.g4a "APPS>CLOCK.G4A" --add build/clock.rsc "APPS>CLOCK.RSC"
@@ -662,7 +720,7 @@ build/gem-sp.atr: build/gem.xex build/lang.rsc build/816.com $(DESK_DEPS) $(APP_
 # tools/apt.py writes the table, tests/host/test_apt.py checks it against
 # the rules Altirra's own parser applies, and test-cf boots it.
 build/gem-cf.img: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a \
-                  build/lang.rsc $(APP_DEPS) tools/mkcf.py tools/apt.py tools/atr.py
+                  build/lang.rsc build/gem4xe.cfg $(APP_DEPS) tools/mkcf.py tools/apt.py tools/atr.py
 	@rm -f $@
 	python3 tools/mkcf.py $@
 
@@ -742,7 +800,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-boot
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-boot
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -788,7 +846,7 @@ build/gem4xe-sdk.tar.gz: $(SDK_FILES)
 DIST ?= build/gem4xe-$(shell date +%F)-$(shell git rev-parse --short HEAD 2>/dev/null || echo local)
 DIST_DISKS = build/gem-sp.atr build/gem-boot.atr build/gem-cf.img
 DIST_SYS   = build/gem.xex build/desktop.g4a build/desktop.rsc \
-             build/lang.rsc build/816.com build/m11_app.g4a
+             build/lang.rsc build/816.com build/m11_app.g4a build/gem4xe.cfg
 
 dist: $(DIST_SYS) $(DIST_DISKS) build/gem4xe-sdk.tar.gz \
       tools/mkdist.py tools/dist/README.md tools/mksdk.py
@@ -934,6 +992,13 @@ test-m24: build/m24-boot.atr
 test-m25: build/m25-boot.atr
 	python3 tests/emu/m25_antic_vdi.py
 
+# ONE BINARY, TWO SCREENS: the shipped GEM.COM on a machine with a VBXE
+# and on one without, and then the safe mode -- VIDEO=ANTIC in
+# GEM4XE.CFG beating a VBXE that works.  Nothing is typed in any of the
+# three; the disks start GEM themselves.
+test-m26: build/gem-boot.atr build/gem-antic.atr build/gem.sym
+	python3 tests/emu/m26_fallback.py
+
 # The desktop's writes to a disk (phase 14, milestone 7; phase 19): File
 # -> New folder, File -> Delete, and File -> Show info -- which is also
 # the rename -- driven at the mouse and the keyboard against the model,
@@ -1007,4 +1072,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-boot test-cf demo movie bench emu-stop clean

@@ -35,6 +35,7 @@
 #include "vdi/vdi.h"
 #include "vdi/pointer.h"
 #include "vdi/font.h"
+#include "vdi/vdidev.h"    /* which device this program is about */
 #include "aes/aes.h"
 #include "sys/farmem.h"
 #include "sys/rapidus.h"
@@ -934,12 +935,13 @@ __task void main(void)
      * "next" bit is always set.  Clear the control region before first use. */
     vram_fill(VR_XDL, 0x00, 0x1000);
     vbxe_xdl_hr(VR_SCREEN0);
+    vdev = &vdev_vbxe;              /* the conformance runner is about the VBXE device, and says so */
     vdi_font_default();         /* the linked 8x8 into VRAM */
     vdi_init();
     /* No pointing device: the harness IS the pointer.  It writes ptr_state
      * directly (position and buttons), and PTR_NONE keeps ptr_poll() from
      * overwriting that with a POT or joystick read.  v_locator still warps. */
-    ptr_init(PTR_NONE, SCR_W / 2, SCR_H / 2);
+    ptr_init(PTR_NONE, VB_W / 2, VB_H / 2);
 
     /* Discover linear RAM above bank $00.  Reported at STATUS[16..23] so the
      * harness can check what was actually found on this machine. */
@@ -976,7 +978,7 @@ __task void main(void)
     STATUS[24] = (unsigned char)_fl_running_bank();
 
     /* Start from a known screen: pen 0 (white), as a GEM desktop would. */
-    blit_fill(VR_SCREEN0, SCR_STRIDE, SCR_STRIDE, SCR_H, 0x00);
+    blit_fill(VR_SCREEN0, VB_STRIDE, VB_STRIDE, VB_H, 0x00);
     blit_run();
 
     STATUS[ST_VC_PERIOD] = vcount_period();

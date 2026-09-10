@@ -15,6 +15,11 @@
 #include "../sys/zwin.h"
 #include "../sys/farmem.h"
 
+/* The device this VDI is drawing on (vdidev.h).  The PROGRAM sets it
+ * before vdi_init() and it does not move afterwards; every SCR_ and
+ * FONT_ name in this file, and every dev_ call, is a read through it. */
+const VDIDEV __far *vdev;
+
 WORD contrl[CONTRL_SIZE];
 WORD intin[INTIN_SIZE];
 WORD ptsin[PTSIN_SIZE];
@@ -1132,7 +1137,10 @@ static void cf_seed_row(WORD y, WORD run0, WORD run1, uint8_t *px, uint8_t *sn)
 
 static void vdi_v_contourfill(void)
 {
-    uint8_t px[SCR_STRIDE];             /* one row of the screen */
+    /* One row of the screen, in the DEVICE's packing.  SCR_STRIDE is a
+     * variable now, so the buffer is sized for the wider of the two
+     * devices and only SCR_STRIDE of it is ever filled. */
+    uint8_t px[SCR_STRIDE_MAX];
     uint8_t sn[CF_STRIDE];              /* one row of the bitmap */
     WORD x = ptsin[0], y = ptsin[1], index = intin[0];
     WORD i, run0, run1;

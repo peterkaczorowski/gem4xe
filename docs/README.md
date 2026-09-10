@@ -44,6 +44,15 @@ Read in order if you want the argument; jump if you want an answer.
 | [phase25.md](phase25.md) | The desktop remembers: `Save desktop` and `Read .INF file`, and the start-up order that makes a layout outlive the machine being switched off — the shell buffer, then the file, then the default. Most of it was already there; what was missing was a file. |
 | [phase26.md](phase26.md) | More than one thing at a time: shift-click and a rubber band, and the order a press has to be read in — the drag recognised before the click, because SHIFT means "move" to one and "add" to the other. Carries an anomaly nobody has explained: the desktop's stack had to grow, and the low-water mark says it did not need to. |
 
+| [phase27.md](phase27.md) | The View menu's other item: `Show as text`, the same FNODEs the icon grid draws laid out one line each, in columns. |
+| [phase28.md](phase28.md) | Two programs that are not tests: a calculator and a clock, written to the application ABI and run from the desktop. |
+| [phase29.md](phase29.md) | Two bugs a person found in ten minutes that eight gates had not, both on one path: open a folder, launch the program in it, use it. |
+| [phase30.md](phase30.md) | The clock was stopping the mouse. A question about which RTC gem4xe reads turned up the cause of "the mouse is slow as snot" and then "I can't click on anything" — a probe that wrote where it should only have read. |
+| [phase31.md](phase31.md) | Size to fit: the View menu's last item, and the first thing in the desktop that scrolls sideways. |
+| [phase32.md](phase32.md) | The ANTIC surface: the second display gem4xe can draw on, 320x168 in one bit, in the region the VBXE's MEMAC window would have had. Proof the driver seam is real. |
+| [phase33.md](phase33.md) | The VDI on it — the same `vdi.c`, extracted onto a device seam in seven increments with the 86-case gate run after each — and Atari's condensed 6x6 face, because 320 pixels and an 8-wide cell is forty columns and forty columns is not a desktop. |
+| [phase34.md](phase34.md) | One binary, two screens: the device chosen when the program starts, and `GEM4XE.CFG` to overrule it from a DOS prompt when the screen is the broken thing. Carries the build lesson — a hand-written prerequisite list is a list that can be wrong, and when it is wrong the compiler is not. |
+
 ## Across the phases
 
 | | |
