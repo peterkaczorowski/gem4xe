@@ -31,8 +31,9 @@ CUR_DATA = (0x0000, 0x4000, 0x6000, 0x7000, 0x7800, 0x7C00, 0x7E00, 0x7F00,
 AN_GLYPH_W = AN_GLYPH_H = 8
 
 # The same font the target links, read from the same file, so the model
-# cannot drift from the device (vdiref does this too).
-from vdiref import FONT, FONT_STRIDE      # noqa: E402
+# cannot drift from the device.  From fontref rather than vdiref: a face
+# is the device's, and importing the VDI model here would make a cycle.
+from fontref import FONT_8X8 as FONT, FONT_STRIDE      # noqa: E402
 
 
 def apply(dst, src, m, mode, pen):

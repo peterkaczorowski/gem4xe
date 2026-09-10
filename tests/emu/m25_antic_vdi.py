@@ -14,8 +14,12 @@ it, and a line of text.  Then it hands an AES OBJECT TREE to ob_draw --
 an outlined dialog box with a title, an edit field and a DEFAULT button
 -- so the object library is on the screen too, and the whole stack from
 objc_draw down through the VDI to the device is what the pixels prove.
-The model draws all of it with tools/anticref.py's primitives, and every
-one of the 53,760 pixels has to agree.
+THE MODEL IS THE MODELS.  tools/vdiref.py's rasteriser and
+tools/aesref.py's object library -- the same code that answers for the
+VBXE in test-m3 and test-m4 -- are run here with ONE argument changed:
+the device (tools/devref.py), exactly as the target changes one pointer.
+Neither model was written for this screen and neither was edited for it.
+Every one of the 53,760 pixels has to agree.
 
 WHAT THE PENS DO HERE IS WORTH READING.  GEM numbers its pens white 0,
 black 1.  The device has two colours and no palette, so pen 0 is the
@@ -30,137 +34,81 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from a8test.launcher import launch          # noqa: E402
-import anticref                             # noqa: E402
-import fontconv6                            # noqa: E402
-from anticref import (AN_W, AN_H, MD_REPLACE, MD_TRANS,   # noqa: E402
-                      MD_XOR)                          # noqa: E402
+import aesref                               # noqa: E402
+import devref                               # noqa: E402
+from aesref import (Obj, NIL, G_BOX, G_STRING, G_BUTTON,   # noqa: E402
+                    OUTLINED, SELECTABLE, EXIT, DEFAULT, LASTOB)
+from anticref import AN_W, AN_H              # noqa: E402
+from m4_aes import Layout, GSX_START, OBJC_DRAW, FULL   # noqa: E402
+from vdiref import (V_OPNWK, V_CLRWK, WORK_IN, VSF_COLOR,   # noqa: E402
+                    VSF_INTERIOR, VSWR_MODE, VST_COLOR, VR_RECFL, V_GTEXT)
+
+# Where the harness pretends the application pool starts: the model puts
+# the tree's strings there and nothing on the target reads them back, so
+# any address inside bank $00 will do (m4_aes.Layout).
+POOL = 0x6800
+FIS_SOLID, MD_REPLACE, MD_XOR = 1, 1, 3
+
+# The milestone's own calls, in its order (src/m25_antic_vdi.c): a filled
+# rectangle in pen 1, the same rectangle again in XOR so a hole appears in
+# it, a line of text -- then gsx_start, where the AES learns what device
+# it is on, and the dialog.
+SCRIPT = [
+    (V_OPNWK, (), WORK_IN),
+    (V_CLRWK,),
+    (VSF_COLOR, (), (1,)),
+    (VSF_INTERIOR, (), (FIS_SOLID,)),
+    (VSWR_MODE, (), (MD_REPLACE,)),
+    (VR_RECFL, (20, 20, 200, 60), ()),
+    (VSWR_MODE, (), (MD_XOR,)),
+    (VR_RECFL, (60, 30, 160, 50), ()),
+    (VSWR_MODE, (), (MD_REPLACE,)),
+    (VST_COLOR, (), (1,)),
+    (V_GTEXT, (20, 80), tuple(ord(c) for c in "GEM ON ANTIC")),
+    (GSX_START,),
+    (OBJC_DRAW, FULL, (0, 8)),
+]
 
 DISK = os.path.abspath(os.path.join(ROOT, "build", "m25-boot.atr"))
 SHOT = os.path.abspath(os.path.join(ROOT, "build", "m25.png"))
 STATUS = 0x0600
 SHOT_X0, SHOT_Y0 = 8, 24
-FONT_W, FONT_H, FONT_TOP = 6, 6, 4          # the ANTIC face (vdidev.h)
-# ...read from the same file the target links, so the model cannot drift
-FACE = fontconv6.unpack(fontconv6.parse(
-    os.path.join(os.path.expanduser("~"), "dev", "emutos",
-                 "bios", "fnt_st_6x6.c")))
-
-
-BLACK, WHITE = 1, 0             # GEM's pens: white is 0, black is 1
-
-
-def outline(a, x, y, w, h, pen):
-    """gsx_box: a rectangle's perimeter as a five-point v_pline.  The style
-    is solid and the mode MD_REPLACE, so each side lands as a one-pixel
-    span in the pen -- and in the pen 0 case that means CLEARED, because
-    replace mode on one plane writes the complement for colour 0."""
-    x2, y2 = x + w - 1, y + h - 1
-    a.rect_mode(x, y, x2, y, MD_REPLACE, pen)
-    a.rect_mode(x, y2, x2, y2, MD_REPLACE, pen)
-    a.rect_mode(x, y, x, y2, MD_REPLACE, pen)
-    a.rect_mode(x2, y, x2, y2, MD_REPLACE, pen)
-
-
-def gr_box(a, x, y, w, h, th, pen):
-    """src/aes/graf.c gr_box, loop and all: nested perimeters, inward for a
-    positive thickness and outward for a negative one -- including the
-    extra decrement a negative one gets before the loop, which is why a
-    button's -3 draws four rings and not three."""
-    if th == 0:
-        return
-    if th < 0:
-        th -= 1
-    while True:
-        th += -1 if th > 0 else 1
-        outline(a, x + th, y + th, w - 2 * th, h - 2 * th, pen)
-        if th == 0:
-            break
-
-
-def gtext(a, s, x, y):
-    """gsx_tblt: MD_TRANS in BLACK.  It hands the VDI a BASELINE, made by
-    adding the font's top to the cell's y -- and align_y takes exactly
-    that back off again, so the cell lands at y."""
-    for i, ch in enumerate(s):
-        a.glyph(ord(ch), x + i * FONT_W, y, MD_TRANS, BLACK,
-                FONT_W, FACE, FONT_H)
-
-
-def outlined(a, x, y, w, h):
-    """OUTLINED: a black ring three pixels out, and two of white inside it
-    (src/aes/objc.c).  The white one is w+4 by h+4 -- two rings, at the
-    rect and one in -- so together they land entirely OUTSIDE the object
-    and never touch the border it drew for itself."""
-    gr_box(a, x - 3, y - 3, w + 6, h + 6, 1, BLACK)
-    gr_box(a, x - 2, y - 2, w + 4, h + 4, 2, WHITE)
-
-
-def hollow(a, x, y, w, h, th):
-    """gr_rect with IP_HOLLOW inside a border of thickness th.  An inward
-    border eats th pixels off each side (gr_inside); an outward one eats
-    none.  fill_rect() sends a hollow pattern in MD_REPLACE straight to
-    dev_fill_rect in pen 0, so the interior is CLEARED, not stippled."""
-    i = th if th > 0 else 0
-    a.rect(x + i, y + i, x + w - i - 1, y + h - i - 1, False)
-
-
-def dialog(a):
-    """What the object library makes of the milestone's four objects.
-
-    src/aes/objc.c just_draw, in its order: the border, then the interior,
-    then the OUTLINED rings, then the children.  The coordinates are the
-    tree's own, resolved the way ob_draw resolves them -- each child's
-    ob_x/ob_y added to its parent's -- so the root's (30, 100) is what
-    puts the title at (38, 106).
-
-    This is where GEM's colour conventions meet a device with two of them.
-    gr_crack reads $1100 as a BLACK border and a WHITE interior; a button
-    is not cracked at all but forced to the same pair.  Neither the AES
-    nor the VDI was told the screen is monochrome -- pen 1 is simply the
-    only ink there is, and pen 0 the only paper.
-    """
-    # the root: G_BOX, spec $00021100 -- no char, a 2px border, colour
-    # word $1100 -- and OUTLINED
-    bx, by, bw, bh = 30, 100, 160, 46
-    gr_box(a, bx, by, bw, bh, 2, BLACK)
-    hollow(a, bx, by, bw, bh, 2)
-    outlined(a, bx, by, bw, bh)
-
-    gtext(a, "A GEM dialog", bx + 8, by + 6)                # G_STRING
-
-    ex, ey, ew, eh = bx + 8, by + 16, 144, 8                # G_BOX, 1px
-    gr_box(a, ex, ey, ew, eh, 1, BLACK)
-    hollow(a, ex, ey, ew, eh, 1)
-
-    # G_BUTTON: the thickness is -1, one more for EXIT and one more for
-    # DEFAULT, negative meaning outward -- computed, never stored.  The
-    # text is centred in the object, and "  OK  " is exactly six cells
-    # wide, so it starts at the button's own left edge.
-    ok = "  OK  "
-    kx, ky, kw, kh = bx + 56, by + 30, 6 * FONT_W, 10
-    gr_box(a, kx, ky, kw, kh, -3, BLACK)
-    hollow(a, kx, ky, kw, kh, -3)
-    gtext(a, ok, kx + (kw - len(ok) * FONT_W) // 2, ky + (kh - FONT_H) // 2)
+FONT_W, FONT_H = 6, 6                       # the ANTIC face (vdidev.h)
 
 
 def model():
     """What the milestone draws, as the device sees it.
 
-    v_gtext is given a BASELINE and the default vertical alignment puts
-    the cell's top FONT_TOP above it (vdi.c align_y), which is the one
-    piece of VDI arithmetic this gate has to know about -- everything
-    else the milestone asks for lands on the device unchanged.
+    THE MODEL IS THE MODELS, on the other device.  tools/vdiref.py's
+    rasteriser and tools/aesref.py's object library are the same code
+    that answers for the VBXE in test-m3 and test-m4; what changes here
+    is one argument -- the device (tools/devref.py) -- exactly as the
+    target changes one pointer.  Nothing in either model was written for
+    this screen and nothing in either was edited for it, which is the
+    claim, and 53,760 pixels are what check it.
+
+    This used to be src/aes/objc.c transcribed by hand into anticref's
+    primitives: sixty lines that had to be kept in step with the AES and
+    that got OUTLINED's ring wrong the first time (h+4, not h+4-2).  The
+    hand copy is gone.
     """
-    a = anticref.pattern.__globals__["Antic"]()
-    a.clear(0)
-    a.rect_mode(20, 20, 200, 60, MD_REPLACE, 1)
-    a.rect_mode(60, 30, 160, 50, MD_XOR, 1)
-    text = "GEM ON ANTIC"
-    for i, ch in enumerate(text):
-        a.glyph(ord(ch), 20 + i * FONT_W, 80 - FONT_TOP, MD_REPLACE, 1,
-                FONT_W, FACE, FONT_H)
-    dialog(a)
-    return a
+    L = Layout(POOL)
+    v, a, _ = aesref.run(SCRIPT, tree(L), L.mem, dev=devref.Antic())
+    return v.dev
+
+
+def tree(L):
+    """The four objects src/m25_antic_vdi.c builds: an OUTLINED box with
+    a 2px border and the colour word $1100, a title, an edit field, and a
+    button whose thickness is computed -- -1, one more for EXIT and one
+    more for DEFAULT, negative meaning outward."""
+    return [
+        Obj(NIL,  1,   3, G_BOX,    0, OUTLINED, 0x00021100, 30, 100, 160, 46),
+        Obj(2,  NIL, NIL, G_STRING, 0, 0, L.text("A GEM dialog"),  8,  6,  72,  6),
+        Obj(3,  NIL, NIL, G_BOX,    0, 0, 0x00011100,             8, 16, 144,  8),
+        Obj(0,  NIL, NIL, G_BUTTON, SELECTABLE | EXIT | DEFAULT | LASTOB,
+            0, L.text("  OK  "),                               56, 30,  36, 10),
+    ]
 
 
 def main(argv):

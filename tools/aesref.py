@@ -2473,7 +2473,7 @@ class AES:
         the blitter (docs/phase12.md)."""
         x = pr.x & ~1
         w = (pr.w + (pr.x & 1) + 1) & ~1
-        save = vdiref.VramForm.save_buffer()
+        save = self.v.dev.save_form()
         forms = (None, save) if saveit else (save, None)
         clip = self.gsx_gclip()
         self.gsx_sclip(self.gl_rzero)
@@ -4412,7 +4412,7 @@ GD_ENHNDL, GD_EIHNDL = -35, -37
 
 
 def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None,
-        dirs=None, pool=None, buffers=None, dirsep="", lang=None):
+        dirs=None, pool=None, buffers=None, dirsep="", lang=None, dev=None):
     """Run a mixed VDI/AES script against fresh models; returns
     (vdi, aes, results) with one result record per script record, the
     way vdiref.VDI.run() does for a pure VDI script.
@@ -4438,7 +4438,7 @@ def run(script, tree, mem, plan=None, pointer=(0, 0), trees=None,
     them; `dirs` is what the drives list and `pool` where the target's
     application pool starts (AES.fs_input).
     """
-    v = vdiref.VDI()
+    v = vdiref.VDI(dev)
     v.ptr_x, v.ptr_y = pointer
     a = AES(v, tree, mem)
     a.trees = trees or {}

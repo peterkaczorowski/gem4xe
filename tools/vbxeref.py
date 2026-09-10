@@ -9,6 +9,22 @@ thing Phase 2's VDI opcode tests will be built on.
 Models only what gem4xe uses: a 4bpp HR overlay (2 pixels per byte, high
 nibble = LEFT pixel) and the blitter's BCB semantics.
 """
+import os as _os
+import re as _re
+
+_VBXE_H = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                        "..", "src", "vbxe", "vbxe.h")
+
+
+def vram_symbol(name):
+    """A VRAM address from vbxe.h's map, read rather than restated, so no
+    model's picture of VRAM can drift from the driver's."""
+    m = _re.search(r"#define\s+%s\s+0x([0-9A-Fa-f]+)UL" % name,
+                   open(_VBXE_H).read())
+    if not m:
+        raise KeyError(name)
+    return int(m.group(1), 16)
+
 
 SCR_W, SCR_H = 640, 240
 STRIDE = SCR_W // 2                       # 320 bytes per row
