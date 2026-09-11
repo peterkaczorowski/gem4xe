@@ -25,18 +25,25 @@ against what the formats hold, in bytes a file system can actually use:
     double density     707 x 253 = 178,871  the system, and 15 KB over
     SDFS, our gates   2048 x 128 = 262,144  the system, and 96 KB over
 
-(The system is **159 KB** now, not 121: GEM.COM carries BOTH display
-drivers since `phase34.md`, which cost it 10 KB, and the desktop has
-grown besides.  The DOS and its `DUP.SYS` take 9 KB of the 15 that are
-left on the double-density disk, which is where the 6 KB below comes
-from.)
+(The system is **168 KB** now, not 121 -- 681 sectors of 253 on the disk,
+which is the figure the arithmetic below uses.  GEM.COM carries BOTH
+display drivers since `phase34.md`, which cost it 10 KB, and the printer
+device and its emitters since `phase37.md`; the desktop has grown
+besides.  The DOS takes 3.5 KB of the 15 the double-density disk has left
+-- and its `DUP.SYS` would have taken 5 KB more than there are, which is
+why that disk no longer carries one.  See below.)
 
 Enhanced density is where the DOS 2 product disk used to live, and it
 was too tight to be a product: the system left **three sectors free**,
 which is no room for the applications a desktop exists to launch -- and
 none for the DOS's own shell either, which is worse (section 2).
-**Double density is where it lives now**: the system, the DOS and its
-`DUP.SYS`, with **26 sectors -- 6 KB -- still free**.
+**Double density is where it lives now**: the system and the DOS, with
+**12 sectors -- 3,036 bytes -- still free**, and no `DUP.SYS`.  The
+shell went because the system wanted seven sectors more than the disk had
+left beside it, and because a floppy is a test vehicle now rather than how
+anybody runs this: a real machine runs gem4xe off the APT/CF card, which
+has 96 KB spare.  `tests/emu/product_boot.py` asserts its absence, so
+putting it back is a deliberate act and not an accident.
 
 That was 42 KB when this section was written, and it is 6 now.  One
 binary that carries both display drivers took 10 KB of it and the
@@ -96,6 +103,25 @@ with `DUP.SYS` present the same disk returns to its menu).  **So on an
 enhanced-density floppy you can have a DOS shell or an auto-start, and
 not both** -- which is the argument for the density above it.
 
+**That argument has since come due on the double-density disk as well.**
+The system is 681 sectors and the disk has 674 free beside `DOS.SYS` and
+`DUP.SYS`, so as of `phase37.md` the shell had to go there too -- the
+same trade one density up, seven sectors instead of thirty-nine.
+
+What it costs, stated exactly, because the enhanced-density measurement
+above must not be read as covering this: **what this DOS does when GEM
+quits is not measured.**  The `$144C` illegal instruction above is DOS
+2.5's, and this disk carries the German "DISK OPERATING SYSTEM II" of
+1990 instead.  What IS measured is that the disk boots into the desktop
+with nothing typed (`test-boot`), which is what the floppy is for.
+Quitting is not: the SpartaDOS install disk and the card both keep their
+DOS and both return to it, and that is where a machine anybody uses for
+anything runs from.  Driving File -> Quit on the PRODUCT is harder than
+it looks and is why the figure is absent rather than wrong -- the
+product's pointer comes from the emulated mouse and not from the
+host-driven `ptr_state` the accessory and desktop gates poke, so the
+click the gates use does not reach it.
+
 ### Double density, which is where the DOS 2 disk belongs
 
 A double-density disk is the same DOS 2 file system with 253 data bytes
@@ -110,8 +136,8 @@ directory stays eight entries to a sector and uses half of one.
 `test-boot` boots the result.
 
 The disk is built by sweeping a fixture down to its DOS (`mkdisk.py
---sweep`) and writing GEM onto it as `AUTORUN.SYS`, so what ships is the
-DOS's boot sectors, `DOS.SYS`, `DUP.SYS` and ours.  The DOS is the
+--sweep --remove DUP.SYS`) and writing GEM onto it as `AUTORUN.SYS`, so
+what ships is the DOS's boot sectors, `DOS.SYS` and ours.  The DOS is the
 German Atari **"DISK OPERATING SYSTEM II"** of 1990 (H. Barth and
 F. Bruchhäuser), which does double density and does run `AUTORUN.SYS`.
 

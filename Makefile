@@ -822,7 +822,12 @@ build/safe.cfg: dist/gem4xe.cfg
 build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/gem4xe-min.cfg
 	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
+# --remove DUP.SYS: the system outgrew the disk WITH the DOS's shell on
+# it (docs/shipping.md), and this floppy is a test vehicle -- a real
+# machine runs gem4xe off the APT/CF card.  What it costs is the return
+# to a DOS menu when GEM quits; test-boot measures what happens instead.
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
+	    --remove DUP.SYS \
 	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
 	    --add build/lang.rsc LANG.RSC --add build/816.com 816.COM \
 	    --add build/gem4xe-min.cfg GEM4XE.CFG
@@ -845,6 +850,7 @@ build/gem-antic.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11
 	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
+	    --remove DUP.SYS \
 	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
 	    --add build/lang.rsc LANG.RSC --add build/816.com 816.COM \
 	    --add build/safe.cfg GEM4XE.CFG

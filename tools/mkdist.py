@@ -48,13 +48,16 @@ DISKS = [
      "Clock under the About item."),
     ("gem-boot.atr", "disks/gem-boot.atr", "dos2",
      "A double-density DOS 2 floppy, 180 KB.  GEM is AUTORUN.SYS, which "
-     "this DOS runs at boot; DUP.SYS is still on it, so there is a DOS to "
-     "come back to.  The system and nothing else: the calculator, the "
-     "clock and the desk accessory are on the other two, because 3 KB is "
-     "what this disk has left once GEM's 122 KB and the desktop are on "
-     "it, and its GEM4XE.CFG is the short form -- the same keys without "
-     "the prose, which is on the other two and in system/.  The Desk "
-     "menu here holds only the About item."),
+     "this DOS runs at boot.  DUP.SYS is NOT on it -- the system wanted "
+     "seven sectors more than the disk had left beside the DOS's own "
+     "shell -- so there is nothing to come back to when GEM quits: use "
+     "one of the other two, or the card, if that matters to you.  The "
+     "system and nothing else: the calculator, the clock and the desk "
+     "accessory are on the other two, because 3 KB is what this disk has "
+     "left once GEM's 127 KB and the desktop are on it, and its "
+     "GEM4XE.CFG is the short form -- the same keys without the prose, "
+     "which is on the other two and in system/.  The Desk menu here "
+     "holds only the About item."),
     ("gem-cf.img", "disks/gem-cf.img", None,
      "A 16 MB CF card: an APT partition table and two SDFS partitions, "
      "with the system and the desk accessory in `\\GEM\\` and the "

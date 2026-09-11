@@ -27,7 +27,10 @@ the DOS's demonstration programs on it, and the product disk has no room
 for them beside GEM.  --sweep deletes every file except the DOS's own
 (DOS.SYS and DUP.SYS), which is what the double-density product disk
 does: its fixture is somebody's game disk, and all we want off it is the
-DOS that boots and the shell to come back to.
+DOS that boots.  That disk also passes `--remove DUP.SYS`, because the
+system outgrew it with the DOS's own shell on board -- seven sectors'
+worth -- and a floppy is now a test vehicle rather than how the thing is
+run (docs/shipping.md section 2).
 
 --enhanced makes the disk DOS 2.5 enhanced density (1040 sectors) before
 anything is written: the runner outgrew a single-density disk's 620 free
@@ -45,7 +48,9 @@ from atr import ATRImage, Dos2, enhance  # noqa: E402
 
 # What a DOS 2 disk needs to boot and to have somewhere to come back to:
 # the DOS, and the command processor if it is a separate file.  --sweep
-# keeps these and deletes the rest.
+# keeps these and deletes the rest; a caller that cannot afford the shell
+# removes it by name afterwards, which is not the same decision and is
+# made in the Makefile where it is visible.
 DOS_FILES = ("DOS.SYS", "DUP.SYS")
 
 

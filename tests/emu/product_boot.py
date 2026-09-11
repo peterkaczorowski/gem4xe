@@ -10,10 +10,12 @@ There are two of them and they come up the same way by different means:
                      booted it (tools/mkspdisk.py --boot);
   build/gem-boot.atr a double-density DOS 2 disk, the system named
                      AUTORUN.SYS because that is what the DOS runs at
-                     boot, with the DOS's own DUP.SYS still on it and
-                     43 KB free for applications (tools/mkdisk.py
-                     --sweep, and docs/shipping.md section 2 for why the
-                     DOS 2 disk had to become double density).
+                     boot.  The DOS's own DUP.SYS is NOT on it: the
+                     system wanted seven sectors more than the disk had
+                     left beside it, and this floppy is a test vehicle --
+                     a real machine runs gem4xe off the card
+                     (tools/mkdisk.py --sweep --remove, and
+                     docs/shipping.md section 2).
 
 This gate touches no key -- there is no b.key() in this file -- so what
 comes up is what the disk itself started.  It runs the machine's real
@@ -215,7 +217,16 @@ def one(name, progname, how, keep, check):
                 check(fs.read(batch) == BOOT_LINE,
                       f"{name}: {batch} holds {fs.read(batch)!r}, not {BOOT_LINE!r}")
     else:
-        check("DUP.SYS" in listed, f"{name}: no DUP.SYS -- nowhere to return to")
+        # NO DUP.SYS, deliberately (Makefile, build/gem-boot.atr).  The
+        # system outgrew the disk with the DOS's own shell on it -- 681
+        # sectors wanted against 674 left beside DOS.SYS and DUP.SYS --
+        # and this floppy is a test vehicle: a real machine runs gem4xe
+        # off the APT/CF card, which has 96 KB spare.  What it costs is
+        # the return to a DOS menu when GEM quits; docs/shipping.md
+        # section 2 has what happens instead, measured.
+        check("DUP.SYS" not in listed,
+              f"{name}: DUP.SYS is on the disk -- it was dropped to make "
+              f"room, so something has put it back")
         free = fs.free_count() * fs.data_bytes
         print(f"  {fs.free_count()} sectors free, {free // 1024} KB -- this "
               f"disk is the system and nothing else")
