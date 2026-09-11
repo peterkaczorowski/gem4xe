@@ -55,7 +55,8 @@ from m12_file import Runner                 # noqa: E402
 from m13_alert import ALLOC, SHOT, SETTLE   # noqa: E402
 from m14_sparta import boot, screen         # noqa: E402
 from m16_shell import SHELL, poll           # noqa: E402
-from m17_desktop import (DESKTOP, DESK_SYM, SYMS, PROBE, DRVBYT,  # noqa: E402
+from m17_desktop import (DESKTOP, DESK_RSC, rsc_imlen,  # noqa: E402
+                         DESK_SYM, SYMS, PROBE, DRVBYT,
                          GCLICK, header, listing)
 from m18_launch import model_desk           # noqa: E402
 from m22_apps import (Panel, form_centre, panel_centre, calc_display,  # noqa: E402
@@ -130,14 +131,23 @@ def model(mark, brk, pointer, drvmap):
     v, a, want = aesref.run(PRELUDE, [], {}, pointer=pointer, pool=mark)
     link_near, near_size, far_banks = header(DESKTOP)
     desk_len = (os.path.getsize(DESKTOP) + 3) & ~3
-    arena = ((brk + desk_len + 0xFFFF) & ~0xFFFF) + (far_banks << 16)
+    # ...and the resource's icon bitmaps, taken by rs_load before the
+    # desktop Mallocs anything and given back by app_free with the rest
+    # (src/aes/rsrc.c).  Each run of the desktop takes them again, which
+    # is why the arena is the same on both.
+    im_base = ((brk + desk_len + 0xFFFF) & ~0xFFFF) + (far_banks << 16)
+    im_len = rsc_imlen(DESK_RSC)
+    arena = im_base + ((im_len + 3) & ~3)
+    if not im_len:
+        im_base = None                  # they stayed in the pool
     a.dos_dirs = listing(DISK)
     g_link = symfile.load(DESK_SYM)["G"]
     memo = {}
 
     model_desk(v, a)
     a.dos_brk = arena
-    d = Desktop(v, a, mark, link_near, near_size, g_link, drvmap, inputs(memo))
+    d = Desktop(v, a, mark, link_near, near_size, g_link, drvmap, inputs(memo),
+                imbase=im_base)
     d.main()
     return v, a, want, d, memo
 

@@ -57,7 +57,8 @@ from m12_file import Runner                 # noqa: E402
 from m13_alert import ALLOC                 # noqa: E402
 from m14_sparta import boot, screen         # noqa: E402
 from m16_shell import SHELL                 # noqa: E402
-from m17_desktop import (DISK as SRC_DISK, DESKTOP, DESK_SYM, SYMS,  # noqa: E402
+from m17_desktop import (DISK as SRC_DISK, DESKTOP, DESK_RSC,  # noqa: E402
+                         rsc_imlen, DESK_SYM, SYMS,
                          SHOT, PROBE, DRVBYT, GCLICK, header, listing, menu)
 from aesref import W_FULLER                 # noqa: E402
 from demo_aes import path                   # noqa: E402
@@ -315,7 +316,14 @@ def model(mark, brk, pointer, drvmap):
     a.draw(0, 0, (0, 0, a.gl_width, a.gl_height))
     link_near, near_size, far_banks = header(DESKTOP)
     desk_len = (os.path.getsize(DESKTOP) + 3) & ~3
-    a.dos_brk = ((brk + desk_len + 0xFFFF) & ~0xFFFF) + (far_banks << 16)
+    # ...and the resource's icon bitmaps, which rs_load copies up before
+    # the desktop Mallocs anything (src/aes/rsrc.c).  Read from the .RSC's
+    # own header so it cannot drift from the file.
+    im_base = ((brk + desk_len + 0xFFFF) & ~0xFFFF) + (far_banks << 16)
+    im_len = rsc_imlen(DESK_RSC)
+    a.dos_brk = im_base + ((im_len + 3) & ~3)
+    if not im_len:
+        im_base = None                  # they stayed in the pool
     a.dos_dirs = listing(DISK)
     # A folder SpartaDOS X has just made measures 0 in its parent's
     # entry -- measured here, against the 23 (one entry) the host's own
@@ -324,7 +332,8 @@ def model(mark, brk, pointer, drvmap):
     a.dos_newdir = 0
     g_link = symfile.load(DESK_SYM)["G"]
     memo = {}
-    d = Desktop(v, a, mark, link_near, near_size, g_link, drvmap, inputs(memo))
+    d = Desktop(v, a, mark, link_near, near_size, g_link, drvmap, inputs(memo),
+                 imbase=im_base)
     d.main()
     return v, a, want, d, memo
 

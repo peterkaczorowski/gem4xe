@@ -71,6 +71,7 @@ DISK = os.path.abspath(os.path.join(ROOT, "build", "m17-boot.atr"))
 # GEM.COM gives them (the Makefile, M3DESK_SIZES).
 SYMS = os.path.join(ROOT, "build", "m3desk.sym")
 DESKTOP = os.path.join(ROOT, "build", "desktop.g4a")
+DESK_RSC = os.path.join(ROOT, "build", "desktop.rsc")
 DESK_SYM = os.path.join(ROOT, "build", "desktop.sym")
 SHOT = ("shot", None)
 PROBE = ("probe", None)                     # G, read out of the target
@@ -89,6 +90,18 @@ def GCLICK(xy):
     on it; then the control manager watches the gadget while the button
     is down and sends its message at the release, which ends the wait."""
     return [M(*xy), B(1), F(14), B(0)]
+
+
+def rsc_imlen(path):
+    """The bytes of image data at the END of a .RSC -- what rs_load moves
+    to far memory, or 0 when it keeps them (a resource with BITBLKs or
+    free images, whose bytes a near address has to be able to name)."""
+    d = open(path, "rb").read(36)
+    h = struct.unpack(">18H", d)
+    imdata, nbb, nimages, rssize = h[7], h[14], h[16], h[17]
+    if nbb or nimages:
+        return 0
+    return rssize - imdata
 
 
 def header(path):
@@ -301,13 +314,21 @@ def model(mark, brk, pointer, drvmap):
     link_near, near_size, far_banks = header(DESKTOP)
     # the far heap as the desktop's Malloc finds it: the file's blob at
     # brk (shel.c far_read_file), the code's banks from the next boundary
-    # (app.c app_load, farmem.c far_alloc_banks)
+    # (app.c app_load, farmem.c far_alloc_banks), and then the RESOURCE'S
+    # ICON BITMAPS, which rs_load copies up and hands the pool back
+    # (src/aes/rsrc.c).  That last one is read out of the .RSC's own header
+    # rather than written down here, so it cannot drift from the file.
     desk_len = (os.path.getsize(DESKTOP) + 3) & ~3
-    a.dos_brk = ((brk + desk_len + 0xFFFF) & ~0xFFFF) + (far_banks << 16)
+    im_base = ((brk + desk_len + 0xFFFF) & ~0xFFFF) + (far_banks << 16)
+    im_len = rsc_imlen(DESK_RSC)
+    a.dos_brk = im_base + ((im_len + 3) & ~3)
+    if not im_len:
+        im_base = None                  # they stayed in the pool
     a.dos_dirs = listing(DISK)
     g_link = symfile.load(DESK_SYM)["G"]
     memo = {}
-    d = Desktop(v, a, mark, link_near, near_size, g_link, drvmap, inputs(memo))
+    d = Desktop(v, a, mark, link_near, near_size, g_link, drvmap, inputs(memo),
+                imbase=im_base)
     d.main()
     return v, a, want, d, memo
 

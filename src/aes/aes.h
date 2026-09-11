@@ -632,6 +632,9 @@ void wm_calc(WORD wtype, UWORD kind, WORD x, WORD y, WORD w, WORD h,
  * over its process record, not a global, so that an accessory holding one
  * does not stop an application loading one. */
 RSHDR *rs_loaded(void);
+/* Where the loaded resource's icon bitmaps went, and how many bytes:
+ * base 0 when they stayed in the pool.  See src/aes/rsrc.c. */
+void rs_imaddr(uint32_t *base, uint16_t *len);
 WORD rs_load(const char *name);
 WORD rs_free(void);
 WORD rs_gaddr(UWORD rtype, UWORD rindex, uint32_t *paddr);

@@ -2011,7 +2011,11 @@ static void vdi_vrt_cpyfm(void)
         return;
     order(&sx1, &sx2); order(&sy1, &sy2);
     wdwidth = src->fd_wdwidth;                              /* WORDS */
-    dev_raster_1bpp((const uint8_t *)(uint16_t)src->fd_addr,
+    /* The form's address WHOLE: fd_addr is 32 bits and it was being cut
+     * to sixteen here, which was right only while every memory form was
+     * in bank $00.  A resource's icons are in far memory now
+     * (src/aes/rsrc.c). */
+    dev_raster_1bpp((const uint8_t __far *)src->fd_addr,
                     (uint16_t)((uint16_t)wdwidth * 2u),
                     sx1, sy1, (WORD)(sx2 - sx1 + 1), (WORD)(sy2 - sy1 + 1),
                     ptsin[4], ptsin[5], intin[0], intin[1], intin[2]);

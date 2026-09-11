@@ -159,7 +159,7 @@ void dev_glyph(WORD ch, WORD cx, WORD cy, WORD overlay)
  *   XOR          complement where set
  *   erase        bg where CLEAR
  */
-void dev_raster_1bpp(const uint8_t *bits, uint16_t stride,
+void dev_raster_1bpp(const uint8_t __far *bits, uint16_t stride,
                      WORD sx, WORD sy, WORD w, WORD h,
                      WORD dx, WORD dy, WORD mode, WORD ink, WORD bg)
 {
@@ -169,7 +169,7 @@ void dev_raster_1bpp(const uint8_t *bits, uint16_t stride,
 
     for (r = 0; r < h; r++) {
         WORD y = (WORD)(dy + r);
-        const uint8_t *row = bits + (uint16_t)(sy + r) * stride;
+        const uint8_t __far *row = bits + (uint16_t)(sy + r) * stride;
 
         if (y < 0 || y >= AN_H)
             continue;

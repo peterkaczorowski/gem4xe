@@ -163,7 +163,14 @@ typedef struct {
     /* A ONE-PLANE source expanded into the device's colours -- how the AES
      * draws icons and glyph masks (vrt_cpyfm).  `ink` and `bg` are VDI pens.
      * The source is a near pointer because a form lives in bank $00. */
-    void (*raster_1bpp)(const uint8_t *bits, uint16_t stride,
+    /* THE SOURCE IS FAR, and that is not decoration.  A 1bpp memory form
+     * is an icon's mask or image, and those come out of a resource --
+     * which src/aes/rsrc.c moves to far memory so the 14 KB application
+     * pool does not have to hold a quarter of DESKTOP.RSC.  An MFDB's
+     * fd_addr has been 32 bits since phase 2, but it used to be
+     * truncated here on the way in, because a memory form had always
+     * been in bank $00. */
+    void (*raster_1bpp)(const uint8_t __far *bits, uint16_t stride,
                         WORD sx, WORD sy, WORD w, WORD h,
                         WORD dx, WORD dy, WORD mode, WORD ink, WORD bg);
 

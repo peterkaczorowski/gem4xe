@@ -32,6 +32,7 @@
 #include "aes/proc.h"
 #include "sys/app.h"
 #include "sys/cio.h"
+#include "sys/farmem.h"
 
 /* The running process's resource and the pool mark before it: see
  * src/aes/proc.h for why these belong to a process and not to this file.
@@ -234,6 +235,67 @@ void rs_fixit(RSHDR *h)
     }
 }
 
+/* THE IMAGE BITS GO TO FAR MEMORY, and the pool gets them back.
+ *
+ * A resource is loaded into the application pool -- 14 KB of bank $00 for
+ * the desktop, its resource and everything resident beside it -- and
+ * DESKTOP.RSC is 6,226 bytes of that.  A quarter of it is icon bitmaps,
+ * which are the one part nothing in bank $00 has to reach: an ICONBLK
+ * names its mask and its image in 32-bit fields, and gsx_blt has taken a
+ * 32-bit address since phase 2, because that is what an MFDB holds.  So
+ * the bits are copied up and the pool is wound back over them: 1,536
+ * bytes, which is what a second desk accessory costs.
+ *
+ * tools/rsc.py puts the image block LAST in the file for this, so the
+ * release is a wind-back of the tail and not a compaction of the middle
+ * -- which would invalidate every offset rs_fixit has just fixed.
+ *
+ * IT ONLY MOVES WHAT IS PROVABLY REACHED THROUGH A 32-BIT FIELD.  A
+ * resource with BITBLKs or free images keeps its bits in the pool, and
+ * the reason is rs_gaddr: it answers an application with a NEAR address,
+ * so a free image's bytes must be somewhere sixteen bits can name.  An
+ * ICONBLK's cannot be asked for that way -- the application is given the
+ * ICONBLK and reads the wide field itself.
+ *
+ * The far bytes are released by app_free with the rest of the program's
+ * far memory, not by rs_free: a program that loaded and freed resources
+ * in a loop would grow the far heap, and with 14 MB of it that is a note
+ * rather than a leak. */
+static uint32_t rs_imbase;      /* where they went, 0 if they stayed */
+static uint16_t rs_imsize;
+
+void rs_imaddr(uint32_t *base, uint16_t *len)
+{
+    *base = rs_imbase;
+    *len = rs_imsize;
+}
+
+static void rs_imfar(uint8_t *mem, uint16_t im_off, uint16_t size)
+{
+    uint16_t im_len = (uint16_t)(size - im_off);
+    uint16_t im_near;
+    uint32_t base;
+    WORD i;
+
+    rs_imbase = 0;
+    rs_imsize = 0;
+    if (!im_len || rs_hdr->rsh_nbb || rs_hdr->rsh_nimages)
+        return;                         /* see the note: not provably safe */
+    base = far_alloc(im_len);
+    if (!base)
+        return;                         /* no far memory: leave them be */
+    im_near = (uint16_t)((uint16_t)mem + im_off);
+    far_put(base, (const uint8_t *)im_near, im_len);
+    for (i = 0; i < rs_hdr->rsh_nib; i++) {
+        ICONBLK *ib = addr_of(rs_hdr, R_ICONBLK, i);
+        ib->ib_pmask = base + (ib->ib_pmask - im_near);
+        ib->ib_pdata = base + (ib->ib_pdata - im_near);
+    }
+    pool_release(im_near);
+    rs_imbase = base;
+    rs_imsize = im_len;
+}
+
 WORD rs_load(const char *name)
 {
     RSHDR hdr, raw;
@@ -276,6 +338,7 @@ WORD rs_load(const char *name)
     }
     rs_hdr = (RSHDR *)mem;
     rs_fixit(rs_hdr);
+    rs_imfar(mem, hdr.rsh_imdata, size);
     return 1;
 }
 

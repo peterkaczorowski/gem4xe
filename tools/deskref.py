@@ -312,13 +312,17 @@ class Desktop:
     returns the plan steps for it -- so it can ask the model where things
     are at that moment."""
 
-    def __init__(self, v, a, mark, link_near, near_size, g_link, drvmap, inputs):
+    def __init__(self, v, a, mark, link_near, near_size, g_link, drvmap, inputs,
+                 imbase=None):
         self.v, self.a = v, a
         # app_load: pool_alloc(near_size, 0x100), then rs_load's
         # pool_alloc(size, 2) (src/sys/app.c, src/aes/rsrc.c)
         self.near = (mark + 0xFF) & ~0xFF
         self.G = self.near + (g_link - link_near)
         self.rsc_base = (self.near + near_size + 1) & ~1
+        # where rs_load put the resource's icon bitmaps: far, when it moved
+        # them, which is what lets the pool have them back (src/aes/rsrc.c)
+        self.imbase = imbase
         self.g_screen_addr = self.G + g_offset("g_screen")
         self.g_screeninfo_addr = self.G + g_offset("g_screeninfo")
         a.dos_drvmap = drvmap
@@ -447,7 +451,7 @@ class Desktop:
         a = self.a
         r = deskrsc.build()
         image, trees, mem = r.expect(self.rsc_base, self.wchar, self.hchar,
-                                     a.gl_width)
+                                     a.gl_width, imbase=self.imbase)
         self.rsc, self.rsc_image = r, image
         for t, objs in enumerate(trees):
             a.trees[r.addr(R_TREE, t, self.rsc_base)] = objs

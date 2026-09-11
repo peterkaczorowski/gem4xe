@@ -693,7 +693,14 @@ static UWORD   r1_sig = 0xFFFF;         /* what the tables were built for   */
 static const uint8_t bit_of[8] = {0x80, 0x40, 0x20, 0x10, 8, 4, 2, 1};
 
 /* the row expander's state, in the direct page */
-static const uint8_t    * __attribute__((tiny)) r1_s;   /* next source byte */
+/* FAR, because a 1bpp form's bytes need not be in bank $00 any more: a
+ * resource's icons live in far memory so the application pool does not
+ * have to hold them (src/aes/rsrc.c).  This was a near pointer and the
+ * assignment from `bits` truncated the address to sixteen bits without a
+ * word from the compiler -- the desktop's icons drew as noise and every
+ * address on the way in was correct.  Four bytes of direct page and a
+ * long read per source byte; a 32-wide icon is four of those a row. */
+static const uint8_t __far * __attribute__((tiny)) r1_s;  /* next source byte */
 static volatile UWORD   * __attribute__((tiny)) r1_w;   /* next strip word  */
 static __attribute__((tiny)) UWORD r1_n;                /* bytes to go      */
 static __attribute__((tiny)) UWORD r1_b;                /* the source byte  */
@@ -790,7 +797,7 @@ static void edge_byte(WORD i, WORD in_even, WORD in_odd, volatile uint8_t *pv)
 /* source pixel p of a row, as 0 or 1 */
 #define SRC_BIT(row, p) (((row)[(UWORD)(p) >> 3] & bit_of[(p) & 7]) ? 1 : 0)
 
-static void raster_1bpp(const uint8_t *bits, uint16_t stride,
+static void raster_1bpp(const uint8_t __far *bits, uint16_t stride,
                         WORD sx1, WORD sy1, WORD w, WORD h,
                         WORD dx1, WORD dy1, WORD mode, uint8_t fg, uint8_t bg)
 {
@@ -972,7 +979,7 @@ void dev_glyph(WORD ch, WORD cx, WORD cy, WORD overlay)
 }
 
 /* vrt_cpyfm's one-plane expansion, with the pens mapped here. */
-void dev_raster_1bpp(const uint8_t *bits, uint16_t stride,
+void dev_raster_1bpp(const uint8_t __far *bits, uint16_t stride,
                      WORD sx, WORD sy, WORD w, WORD h,
                      WORD dx, WORD dy, WORD mode, WORD ink, WORD bg)
 {

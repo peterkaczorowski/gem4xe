@@ -181,17 +181,26 @@ class Rsc:
 
     # -- the file --------------------------------------------------------------
     def layout(self):
-        """Assign every item its file offset.  Strings and image bits first
-        (bytes, so the tables after them start even), then the four
-        arrays, then the three tables of longs."""
+        """Assign every item its file offset.  Strings first (bytes, so the
+        tables after them start even), then the four arrays, then the three
+        tables of longs -- and THE IMAGE BITS LAST.
+
+        Last is not cosmetic.  A resource is loaded into the application
+        pool, which is 14 KB of bank $00 for the desktop, its resource and
+        everything resident beside it, and the image bits are a quarter of
+        DESKTOP.RSC while being the one part of it nothing in bank $00
+        needs to reach: an ICONBLK names its mask and its image in 32-bit
+        fields and the VDI has taken 32-bit addresses since phase 2.  With
+        the bits at the END of the file, src/aes/rsrc.c can copy them to
+        far memory and hand the pool back everything above them -- without
+        compacting the middle of the file, which would invalidate every
+        offset already fixed up.
+
+        The strings stay where they are.  ob_spec points at them and the
+        object library reads them through a near pointer."""
         off = HDR_SIZE
         self.o_string = off
         for it in self.strings:
-            it.off = off
-            off += len(it.blob)
-        off += off & 1
-        self.o_imdata = off
-        for it in self.images:
             it.off = off
             off += len(it.blob)
         off += off & 1
@@ -217,6 +226,11 @@ class Rsc:
         off += 4 * len(self.frimg)
         self.o_trindex = off
         off += 4 * len(self.trees)
+        off += off & 1
+        self.o_imdata = off             # last: see the note above
+        for it in self.images:
+            it.off = off
+            off += len(it.blob)
         self.size = off
         return off
 
@@ -271,10 +285,22 @@ class Rsc:
         return bytes(out)
 
     # -- what the AES makes of it ----------------------------------------------
-    def expect(self, base, wchar, hchar, width):
+    def expect(self, base, wchar, hchar, width, imbase=None):
         """(image, trees, mem): the file as rsrc_load leaves it at `base`,
-        the trees as aesref Obj lists, and the address map for aesref."""
+        the trees as aesref Obj lists, and the address map for aesref.
+
+        `imbase` is where the ICON BITMAPS ended up, when rs_load moved
+        them to far memory and wound the pool back over them -- which it
+        does for any resource with no BITBLKs and no free images, because
+        an ICONBLK names its mask and its image in 32-bit fields
+        (src/aes/rsrc.c).  Pass it and the ICONBLKs carry far addresses,
+        as the target's do; leave it and they are near, which is what a
+        resource whose bits stayed in the pool has."""
         self.layout()
+        if imbase is None:
+            imbase = base
+        else:
+            imbase -= self.o_imdata        # so + it.off lands on the bytes
         e = "<"
         out = bytearray(self.size)
         out[0:HDR_SIZE] = self.header(e)
@@ -284,13 +310,15 @@ class Rsc:
             mem[base + it.off] = Text(it.s, len(it.blob))
         for it in self.images:
             out[it.off:it.off + len(it.blob)] = it.blob
-            mem[base + it.off] = it.blob
+            mem[imbase + it.off] = it.blob
         for it in self.bitblks:
+            # never moved: rs_load keeps the bits of a resource with
+            # BITBLKs in the pool, so this is still a near address
             b = Bitblk(base + it.data.off, it.wb, it.hl, it.x, it.y, it.color)
             out[it.off:it.off + BITBLK_SIZE] = b.pack()
             mem[base + it.off] = b
         for it in self.iconblks:
-            ib = Iconblk(base + it.mask.off, base + it.data.off,
+            ib = Iconblk(imbase + it.mask.off, imbase + it.data.off,
                          base + it.text.off, it.char, it.xchar, it.ychar,
                          Rect(it.xicon, it.yicon, it.wicon, it.hicon),
                          Rect(it.xtext, it.ytext, it.wtext, it.htext))
