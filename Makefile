@@ -72,7 +72,7 @@ M24_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m24_antic.o b
 # The VDI on the ANTIC device: the same vdi.c, compiled for the other
 # side of the seam and linked against dev_antic.o.
 M25_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m25_antic_vdi.o \
-             build/vdi.o build/dev_antic.o build/antic.o build/pointer.o \
+             build/vdi.o build/dev_antic.o build/dev_print.o build/emit.o build/antic.o build/pointer.o \
              build/font8x8.o build/font6x6.o build/fillpat.o build/sintbl.o build/font.o \
              build/farmem.o build/irq.o build/irqs.o build/rapidus.o \
              build/cio.o build/cios.o build/dos.o build/m25_stub.o \
@@ -81,7 +81,21 @@ M25_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m25_antic_vdi
              build/wind.o build/ctrl.o build/menu.o build/form.o \
              build/alert.o build/gemdata.o build/lang.o build/lang_rsc.o \
              build/rsrc.o build/apppool.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/dev_vbxe.o build/pointer.o build/objc.o build/graf.o build/event.o build/proc.o build/ctx.o build/ctxs.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/antic.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
+# The VDI on the PRINTER: the same vdi.c again, on the third device --
+# a page in far memory rather than a screen -- plus the emitters, which
+# are the only reason this milestone needs CIO.  No AES: nothing draws an
+# object tree onto paper here, so the stub answers for the call gate.
+M30_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m30_print.o \
+             build/vdi.o build/dev_print.o build/emit.o build/pointer.o \
+             build/font8x8.o build/fillpat.o build/sintbl.o build/font.o \
+             build/farmem.o build/irq.o build/irqs.o build/rapidus.o \
+             build/cio.o build/cios.o build/dos.o build/m25_stub.o \
+             build/graf.o build/objc.o build/grlib.o build/event.o \
+             build/proc.o build/ctx.o build/ctxs.o \
+             build/wind.o build/ctrl.o build/menu.o build/form.o \
+             build/alert.o build/gemdata.o build/lang.o build/lang_rsc.o \
+             build/rsrc.o build/apppool.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/dev_vbxe.o build/pointer.o build/dev_print.o build/emit.o build/objc.o build/graf.o build/event.o build/proc.o build/ctx.o build/ctxs.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/antic.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
 
 # GEM.COM, the product (src/gem.c): the runner's objects with the runner
 # itself and its compiled-in test application taken out, linked on the
@@ -135,6 +149,20 @@ build/font6x6.o: src/vdi/font6x6.c
 src/vdi/font6x6.c: tools/fontconv6.py
 	python3 tools/fontconv6.py "$(EMUTOS)/bios/fnt_st_6x6.c" $@
 
+# The page (src/vdi/dev_print.c): the third device behind the same seam,
+# 640x800 at 1bpp in far memory.  docs/printing.md has the geometry.
+build/dev_print.o: src/vdi/dev_print.c src/vdi/vdidev.h src/vdi/vdi.h src/vdi/print.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -DGEM4XE_DEV_IMPL -DGEM4XE_DEV_PREFIX=prd_ \
+	      -DGEM4XE_DEV_PRINT -I src -I src/vdi -o $@ $<
+
+# The page, off the machine (src/vdi/emit.c): PCL 5 and PostScript, and
+# where they go.  Above the device seam -- it reads the page, it does not
+# draw on it -- so no device macros.
+build/emit.o: src/vdi/emit.c src/vdi/print.h src/vdi/vdi.h src/sys/cio.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -I src/vdi -o $@ $<
+
 build/dev_antic.o: src/vdi/dev_antic.c src/vdi/vdidev.h src/vdi/vdi.h src/antic/antic.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -DGEM4XE_DEV_IMPL -DGEM4XE_DEV_PREFIX=and_ \
@@ -147,6 +175,10 @@ build/dev_antic.o: src/vdi/dev_antic.c src/vdi/vdidev.h src/vdi/vdi.h src/antic/
 build/m25_antic_vdi.o: src/m25_antic_vdi.c src/vdi/vdi.h src/vdi/vdidev.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -I src/vdi -o $@ $<
+
+build/m30_print.o: src/m30_print.c src/vdi/vdi.h src/vdi/vdidev.h src/vdi/print.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -DGEM4XE_DEV_PRINT -I src -I src/vdi -o $@ $<
 
 build/vbxe.o: src/vbxe/vbxe.c src/vbxe/vbxe.h
 	@mkdir -p build
@@ -284,7 +316,7 @@ build/dos.o: src/sys/dos.c src/sys/dos.h src/sys/cio.h
 # GEM.COM itself: it names both devices and the config, so it has to be
 # rebuilt when the seam moves.
 build/gem.o: src/gem.c src/vdi/vdi.h src/vdi/vdidev.h src/vdi/pointer.h \
-             src/vdi/font.h src/aes/aes.h src/sys/config.h \
+             src/vdi/font.h src/vdi/print.h src/aes/aes.h src/sys/config.h \
              src/vbxe/vbxe.h src/antic/antic.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
@@ -570,6 +602,22 @@ build/m25-boot.atr: build/m25.xex
 	@test -n "$(SRC_DOS)" || { echo "no DOS fixture: set [dos].sd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ M25.COM $(DISK_DENSITY)
+
+build/m30.elf: $(M30_OBJS) src/gem4xe.scm
+	$(LD) src/gem4xe.scm $(M30_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/m30.map
+
+build/m30.xex: build/m30.elf
+	python3 tools/mkxex.py $< $@ --entry _atari_entry
+
+# The printer gate's disk (test-m30).  SpartaDOS, not the DOS 2 floppy
+# the other VDI milestones boot from, for one reason: the milestone
+# WRITES, and a page in PostScript is 129 KB -- more than a DOS 2.5
+# enhanced-density disk holds in total.  320 KB of SpartaDOS is where the
+# two files fit, and it is the medium the product ships on anyway.
+build/m30-boot.atr: build/m30.xex tools/mkspdisk.py tools/atr.py
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ --name M30.COM $(SP_SECTORS)
 
 build/m27.elf: $(M27_OBJS) src/gem4xe.scm
 	$(LD) src/gem4xe.scm $(M27_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/m27.map
@@ -930,7 +978,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-boot
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-boot
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -1127,6 +1175,12 @@ test-m28: build/m28-boot.atr
 test-m29: build/m29-boot.atr
 	python3 tests/emu/m29_big.py
 
+# The VDI on the printer, and the page off the machine: the third device
+# through the seam, checked from the files it writes rather than from a
+# screenshot, because paper is not photographable from here.
+test-m30: build/m30-boot.atr
+	python3 tests/emu/m30_print.py
+
 # Where bank $00 has gone, and whether there is enough of it left.  Run it
 # after a change that adds a table or a program; tests/host/test_memory.py
 # runs it too, so make test says so without being asked.
@@ -1217,4 +1271,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist memcheck gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist memcheck gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-boot test-cf demo movie bench emu-stop clean

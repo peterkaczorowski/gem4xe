@@ -48,9 +48,23 @@
 /* MOUSE: a PTR_* from src/vdi/pointer.h, or this. */
 #define CFG_MOUSE_AUTO  (-1)
 
+/* PRINTER -- what a page is written IN.  docs/printing.md says why these
+ * and not others: PCL 5 and PostScript are row-oriented and take the
+ * page's rows as they are, and PCL 6 is a different (binary) protocol
+ * that every device speaking it also speaks PCL 5 for. */
+#define CFG_PRINT_NONE   0      /* v_updwk does nothing.  The default:
+                                 * a machine with no printer must not
+                                 * hang waiting for one */
+#define CFG_PRINT_PCL    1      /* PCL 5 raster */
+#define CFG_PRINT_PS     2      /* PostScript */
+
+#define CFG_PRINTTO_MAX  20     /* "D1:PAGE.PS" and room to spare */
+
 typedef struct {
     int16_t video;
     int16_t mouse;
+    int16_t printer;            /* CFG_PRINT_* */
+    char    printto[CFG_PRINTTO_MAX];   /* where it goes; "P:" by default */
 } CONFIG;
 
 /* What the file said, or the defaults.  Readable after config_read(). */

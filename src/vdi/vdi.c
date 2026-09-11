@@ -8,6 +8,7 @@
  */
 #include "vdi.h"
 #include "vdidev.h"
+#include "print.h"
 #include "pointer.h"
 #include "font.h"
 #include "sys/zwin.h"
@@ -651,6 +652,20 @@ static void vdi_v_opnwk(void)
 static void vdi_v_opnvwk(void)
 {
     WORD i;
+    /* WHICH DEVICE, from work_in[0] -- the ST's ranges: 1..10 a screen,
+     * 21..30 a printer.  On the ST this is GDOS's business and it loads a
+     * driver; gem4xe has no GDOS by design (README) and both devices are
+     * already linked, so the id chooses between them here.
+     *
+     * That it is v_opnvwk rather than v_opnwk IS a departure, and a
+     * considered one: v_opnwk opens the PHYSICAL workstation, which on
+     * this machine is the screen the AES owns and everything is drawn
+     * on.  An application asking for a page must not reset that.  So a
+     * page is a virtual workstation on another device, which is exactly
+     * what a Vwk carrying its own device is for (src/vdi/vdi.h). */
+    WORD devid = (WORD)(contrl[3] > 0 ? intin[0] : 1);
+    const VDIDEV __far *want = (const VDIDEV __far *)vwk_tab[0].dev;
+
     for (i = 1; i < NUM_VWK; i++)
         if (vwk_tab[i].handle == 0)
             break;
@@ -658,8 +673,16 @@ static void vdi_v_opnvwk(void)
         contrl[6] = 0;
         return;
     }
+    if (devid >= 21 && devid <= 30) {
+        if (!pr_page_open()) {
+            contrl[6] = 0;              /* no far memory for a page */
+            return;
+        }
+        want = &vdev_print;
+    }
     vwk_tab[vwk_cur] = vwk;
     vwk_cur = i;
+    vdev = want;                        /* init_wk reads the extent off it */
     init_wk((WORD)(i + 1));
     vwk_tab[i] = vwk;
     vwk_own[i] = ctx_cur;           /* whoever asked keeps it */
@@ -745,6 +768,24 @@ static void vdi_vq_extnd(void)
  * than restored -- restoring it would stamp stale pixels onto a cleared
  * screen.  The cursor is then repainted so it survives the clear, which is
  * what GEM applications expect. */
+/* v_updwk: the page, off the machine.
+ *
+ * A screen has nothing to update -- the write was the drawing -- which is
+ * why DRI's own screen driver v_nops this opcode and why it was a v_nop
+ * here until there was a printer.  On a page it is the whole point: the
+ * dots have been accumulating in far memory since the workstation was
+ * opened and this is what sends them (src/vdi/emit.c).
+ *
+ * It is the DEVICE that decides, not the handle: a workstation on the
+ * screen updates nothing, one on the page emits.  That the same opcode
+ * means two things on two devices is exactly what a device-independent
+ * interface is. */
+static void vdi_v_updwk(void)
+{
+    if (vdev == &vdev_print)
+        pr_emit();
+}
+
 static void vdi_v_clrwk(void)
 {
     WORD was_drawn = cur_drawn;
@@ -2484,7 +2525,7 @@ typedef void (*VDI_OP)(void);
 /* Two flat tables, split exactly as DRI split them: 1..39 and 100..137. */
 static const VDI_OP jmptb1[] = {
     vdi_v_opnwk,     /*  1 */  v_nop,           /*  2 v_clswk        */
-    vdi_v_clrwk,     /*  3 */  v_nop,           /*  4 v_updwk  (nop) */
+    vdi_v_clrwk,     /*  3 */  vdi_v_updwk,     /*  4 */
     vdi_v_escape,    /*  5 */                   vdi_v_pline,     /*  6 */
     vdi_v_pmarker,   /*  7 */                   vdi_v_gtext,     /*  8 */
     vdi_v_fillarea,  /*  9 */                   v_nop,           /* 10 cellarray (nop) */

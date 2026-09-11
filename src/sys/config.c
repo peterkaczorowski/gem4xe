@@ -11,7 +11,7 @@
 #include "../vdi/vdi.h"
 #include "../vdi/pointer.h"
 
-CONFIG config = { CFG_VIDEO_AUTO, CFG_MOUSE_AUTO };
+CONFIG config = { CFG_VIDEO_AUTO, CFG_MOUSE_AUTO, CFG_PRINT_NONE, "P:" };
 
 #define CFG_LINE 72             /* a whole line, or it is not a setting */
 
@@ -54,9 +54,18 @@ static const CFG_WORD __far cfg_mouse[] = {
     { "MOUSTER",  PTR_XEM1         }     /* likewise */
 };
 
+static const CFG_WORD __far cfg_printer[] = {
+    { "NONE", CFG_PRINT_NONE },
+    { "PCL",  CFG_PRINT_PCL  },
+    { "PCL5", CFG_PRINT_PCL  },          /* what somebody would write */
+    { "PS",   CFG_PRINT_PS   }
+};
+
 /* ...and the keys themselves, for the same reason. */
 static const char __far k_video[] = "VIDEO";
 static const char __far k_mouse[] = "MOUSE";
+static const char __far k_printer[] = "PRINTER";
+static const char __far k_printto[] = "PRINTTO";
 
 static char up(char c)
 {
@@ -135,6 +144,18 @@ static void cfg_line(char *s)
         config.video = lookup(NAMES(cfg_video), val, config.video);
     else if (same(k_mouse, key))
         config.mouse = lookup(NAMES(cfg_mouse), val, config.mouse);
+    else if (same(k_printer, key))
+        config.printer = lookup(NAMES(cfg_printer), val, config.printer);
+    else if (same(k_printto, key)) {
+        /* A NAME, not a word out of a table: the value is taken as it
+         * stands (upper-cased, as CIO wants) and truncated rather than
+         * refused, because a key or a value this file does not
+         * understand must never stop the machine starting. */
+        WORD i;
+        for (i = 0; i < CFG_PRINTTO_MAX - 1 && val[i]; i++)
+            config.printto[i] = val[i];
+        config.printto[i] = 0;
+    }
     /* anything else: a key this gem4xe does not know, which is what a
      * file written for a later one looks like.  Leave it. */
 }

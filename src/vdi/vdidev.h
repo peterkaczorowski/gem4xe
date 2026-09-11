@@ -50,7 +50,31 @@
  * constants and the code should be able to fold them.  Portable code
  * gets the same names below, off `vdev`, and never sees these. */
 #ifdef GEM4XE_DEV_IMPL
-#ifdef GEM4XE_DEV_ANTIC
+#ifdef GEM4XE_DEV_PRINT
+   /* A PAGE, not a screen: 640 x 800 dots of far memory, declared to the
+    * printer at 100 dpi, which is 6.4 x 8.0 inches and fits Letter and
+    * A4 with better than three-quarters of an inch of margin.
+    * docs/printing.md has the arithmetic, and the reason for 800 rather
+    * than a rounder number: 80 bytes a row by 800 is 64,000 against a
+    * bank's 65,536, so the whole page is addressable inside ONE far bank
+    * and every loop below is plain 16-bit arithmetic.
+    *
+    * The face is the 8x8, the same one the VBXE screen draws with, so
+    * the printer reports the same 80 columns and a form laid out for the
+    * screen lands on the page at identical coordinates. */
+#  include "../vdi/print.h"
+#  define SCR_W       PR_W
+#  define SCR_H       PR_H
+#  define SCR_STRIDE  PR_STRIDE
+#  define FONT_W        8
+#  define FONT_H        8
+#  define FONT_TOP      6
+#  define FONT_ASCENT   6
+#  define FONT_HALF     4
+#  define FONT_DESCENT  1
+#  define FONT_BOTTOM   1
+#  define FONT_POINT    9
+#elif defined(GEM4XE_DEV_ANTIC)
 #  include "../antic/antic.h"
 #  define SCR_W       AN_W
 #  define SCR_H       AN_H
@@ -318,6 +342,13 @@ extern const VDIDEV __far *vdev;
  * error, which is the right time to find out. */
 extern const VDIDEV __far vdev_vbxe;
 extern const VDIDEV __far vdev_antic;
+/* ...and the page, which is a device open BESIDE one of those rather
+ * than instead of it: a workstation carries its own (src/vdi/vdi.h). */
+extern const VDIDEV __far vdev_print;
+/* ...and the page it draws on, which unlike a screen has to be taken
+ * before it can be drawn on and given back after (src/vdi/print.h). */
+int16_t pr_page_open(void);
+void    pr_page_close(void);
 
 #ifdef GEM4XE_DEV_IMPL
 /* A DEVICE'S OWN FILE keeps the names the seam gave it and has its own

@@ -42,6 +42,7 @@
 #include "sys/cio.h"
 #include "sys/dos.h"
 #include "sys/config.h"
+#include "vdi/print.h"
 #include "sys/gemdos.h"
 #include "vbxe/vbxe.h"
 #include "antic/antic.h"
@@ -105,6 +106,10 @@ __task void main(void)
     ptr_init(config.mouse == CFG_MOUSE_AUTO ? GEM_POINTER
                                             : (WORD)config.mouse,
              SCR_W / 2, SCR_H / 2);
+    /* The printer, which is a destination and a language and nothing
+     * else until a program opens the workstation. */
+    pr_kind = config.printer;
+    pr_dest = config.printto;
     farmem_probe();
     /* The processes, and the mark the context switch measures from.
      * ctx_init() MUST be called from here and not from inside

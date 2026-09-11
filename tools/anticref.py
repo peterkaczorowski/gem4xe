@@ -52,33 +52,34 @@ def apply(dst, src, m, mode, pen):
 
 
 class Antic:
-    def __init__(self):
-        self.mem = bytearray(AN_STRIDE * AN_H)
+    def __init__(self, w=AN_W, h=AN_H):
+        self.w, self.h, self.stride = w, h, w // 8
+        self.mem = bytearray(self.stride * self.h)
         self.cur = None
 
     # -- the primitives, in the order antic.c has them -------------------
     def clear(self, value=0):
-        self.mem = bytearray([value & 0xFF]) * (AN_STRIDE * AN_H)
+        self.mem = bytearray([value & 0xFF]) * (self.stride * self.h)
 
     def plot(self, x, y, set_):
-        if x < 0 or y < 0 or x >= AN_W or y >= AN_H:
+        if x < 0 or y < 0 or x >= self.w or y >= self.h:
             return
-        i = y * AN_STRIDE + (x >> 3)
+        i = y * self.stride + (x >> 3)
         bit = 0x80 >> (x & 7)
         self.mem[i] = (self.mem[i] | bit) if set_ else (self.mem[i] & ~bit & 0xFF)
 
     def hline(self, x1, x2, y, set_):
-        if y < 0 or y >= AN_H:
+        if y < 0 or y >= self.h:
             return
         if x1 > x2:
             x1, x2 = x2, x1
-        if x2 < 0 or x1 >= AN_W:
+        if x2 < 0 or x1 >= self.w:
             return
         x1 = max(x1, 0)
-        x2 = min(x2, AN_W - 1)
+        x2 = min(x2, self.w - 1)
         b1, b2 = x1 >> 3, x2 >> 3
         lm, rm = LEFT[x1 & 7], RIGHT[x2 & 7]
-        base = y * AN_STRIDE
+        base = y * self.stride
 
         def paint(i, m):
             self.mem[i] = (self.mem[i] | m) if set_ else (self.mem[i] & ~m & 0xFF)
@@ -95,22 +96,22 @@ class Antic:
         if y1 > y2:
             y1, y2 = y2, y1
         y1 = max(y1, 0)
-        y2 = min(y2, AN_H - 1)
+        y2 = min(y2, self.h - 1)
         for y in range(y1, y2 + 1):
             self.hline(x1, x2, y, set_)
 
     # -- the writing modes ----------------------------------------------
     def span(self, x1, x2, y, mode, pen):
-        if y < 0 or y >= AN_H:
+        if y < 0 or y >= self.h:
             return
         if x1 > x2:
             x1, x2 = x2, x1
-        if x2 < 0 or x1 >= AN_W:
+        if x2 < 0 or x1 >= self.w:
             return
-        x1, x2 = max(x1, 0), min(x2, AN_W - 1)
+        x1, x2 = max(x1, 0), min(x2, self.w - 1)
         b1, b2 = x1 >> 3, x2 >> 3
         lm, rm = LEFT[x1 & 7], RIGHT[x2 & 7]
-        base = y * AN_STRIDE
+        base = y * self.stride
 
         def at(i, m):
             self.mem[i] = apply(self.mem[i], 0xFF, m, mode, pen)
@@ -126,7 +127,7 @@ class Antic:
     def rect_mode(self, x1, y1, x2, y2, mode, pen):
         if y1 > y2:
             y1, y2 = y2, y1
-        y1, y2 = max(y1, 0), min(y2, AN_H - 1)
+        y1, y2 = max(y1, 0), min(y2, self.h - 1)
         for y in range(y1, y2 + 1):
             self.span(x1, x2, y, mode, pen)
 
@@ -137,12 +138,12 @@ class Antic:
         face = FONT if face is None else face
         rows = AN_GLYPH_H if rows is None else rows
         cell = (0xFF << (8 - w)) & 0xFF
-        if x < 0 or y < 0 or x + w > AN_W or y + rows > AN_H:
+        if x < 0 or y < 0 or x + w > self.w or y + rows > self.h:
             return
         shift = x & 7
         for row in range(rows):
             g = face[row * FONT_STRIDE + (ch & 0xFF)] & cell
-            i = (y + row) * AN_STRIDE + (x >> 3)
+            i = (y + row) * self.stride + (x >> 3)
             if shift == 0:
                 self.mem[i] = apply(self.mem[i], g, cell, mode, pen)
             else:
@@ -155,16 +156,16 @@ class Antic:
         return (patrow & 0xFF) if (bx & 1) else (patrow >> 8)
 
     def patt_span(self, x1, x2, y, patrow, mode, pen):
-        if y < 0 or y >= AN_H:
+        if y < 0 or y >= self.h:
             return
         if x1 > x2:
             x1, x2 = x2, x1
-        if x2 < 0 or x1 >= AN_W:
+        if x2 < 0 or x1 >= self.w:
             return
-        x1, x2 = max(x1, 0), min(x2, AN_W - 1)
+        x1, x2 = max(x1, 0), min(x2, self.w - 1)
         b1, b2 = x1 >> 3, x2 >> 3
         lm, rm = LEFT[x1 & 7], RIGHT[x2 & 7]
-        base = y * AN_STRIDE
+        base = y * self.stride
 
         def at(b, m):
             i = base + b
@@ -180,11 +181,11 @@ class Antic:
         at(b2, rm)
 
     def vline(self, x, y1, y2, mask, mode, pen):
-        if x < 0 or x >= AN_W:
+        if x < 0 or x >= self.w:
             return
         if y1 > y2:
             y1, y2 = y2, y1
-        y1, y2 = max(y1, 0), min(y2, AN_H - 1)
+        y1, y2 = max(y1, 0), min(y2, self.h - 1)
         for y in range(y1, y2 + 1):
             bit = (mask >> (15 - (y & 15))) & 1
             self.patt_span(x, x, y, 0xFFFF if bit else 0x0000, mode, pen)
@@ -207,16 +208,16 @@ class Antic:
     # -- the mouse cursor ------------------------------------------------
     def cursor_save(self, x, y):
         self.cur = None
-        if x >= AN_W or y >= AN_H or x + 16 <= 0 or y + 16 <= 0:
+        if x >= self.w or y >= self.h or x + 16 <= 0 or y + 16 <= 0:
             return
         bx0 = (max(x, 0)) >> 3
-        bx1 = min((x + 15) >> 3, AN_STRIDE - 1)
-        y0, y1 = max(y, 0), min(y + 15, AN_H - 1)
+        bx1 = min((x + 15) >> 3, self.stride - 1)
+        y0, y1 = max(y, 0), min(y + 15, self.h - 1)
         if bx1 < bx0 or y1 < y0:
             return
         rows = []
         for r in range(y1 - y0 + 1):
-            i = (y0 + r) * AN_STRIDE + bx0
+            i = (y0 + r) * self.stride + bx0
             rows.append(bytes(self.mem[i:i + (bx1 - bx0 + 1)]))
         self.cur = (bx0, y0, bx1 - bx0 + 1, rows)
 
@@ -225,7 +226,7 @@ class Antic:
             return
         bx0, y0, nb, rows = self.cur
         for r, row in enumerate(rows):
-            i = (y0 + r) * AN_STRIDE + bx0
+            i = (y0 + r) * self.stride + bx0
             self.mem[i:i + nb] = row
         self.cur = None
 
@@ -243,18 +244,18 @@ class Antic:
                     self.plot(x + c, y + r, bg)
 
     def get_pixel(self, x, y):
-        if x < 0 or y < 0 or x >= AN_W or y >= AN_H:
+        if x < 0 or y < 0 or x >= self.w or y >= self.h:
             return 0
         return self.bit(x, y)
 
     # -- what the gate compares -----------------------------------------
     def bit(self, x, y):
-        return (self.mem[y * AN_STRIDE + (x >> 3)] >> (7 - (x & 7))) & 1
+        return (self.mem[y * self.stride + (x >> 3)] >> (7 - (x & 7))) & 1
 
     def bits(self):
         """The screen as rows of 0/1, which is what a shot reduces to
         once its two colours are known."""
-        return [[self.bit(x, y) for x in range(AN_W)] for y in range(AN_H)]
+        return [[self.bit(x, y) for x in range(self.w)] for y in range(self.h)]
 
 
 def pattern():

@@ -236,6 +236,7 @@ UWORD style_anchor(UWORD mask, WORD from, WORD dir);
 #define V_OPNWK        1
 #define V_CLSWK        2
 #define V_CLRWK        3
+#define V_UPDWK        4
 #define V_PLINE        6
 #define V_GTEXT        8
 #define VST_HEIGHT    12

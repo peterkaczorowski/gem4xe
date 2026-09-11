@@ -300,6 +300,14 @@ class Vbxe:
 # on both sides (src/vdi/dev_antic.c, form_get).
 FAR_BASE = 0x10000
 
+# The page, from src/vdi/print.h.  640 x 800 at one bit is 64,000 bytes,
+# which is the largest page that still fits one far bank -- the argument
+# is in docs/printing.md, and the numbers are here so the model and the C
+# cannot drift apart without tests/host/test_print.py noticing.
+PR_W, PR_H = 640, 800
+PR_STRIDE = PR_W // 8
+PR_DPI = 100
+
 
 class Antic:
     """320x168, ONE bit a pixel, 40 bytes a line, in plain motherboard
@@ -490,3 +498,141 @@ class Form:
     @property
     def stride(self):
         return self._stride
+
+
+class Printer:
+    """640 x 800 dots, one bit each, 80 bytes a row -- the page
+    (src/vdi/print.h).  The THIRD device through the seam, and the first
+    that is not a screen.
+
+    It is a 1bpp surface like the ANTIC one and shares that surface's
+    model, so almost everything here is geometry and the parts a printer
+    has not got.  What it has not got is a cursor (nothing points at a
+    page), a palette (a dot is on paper or it is not), and a save area
+    (no menu ever comes down over one, so dev_save_form returns an MFDB
+    with no address and the model returns None).
+
+    The font is the 8x8 strip, not the condensed 6x6: 640 dots across is
+    80 columns at 8, which is the width a line printer has had since
+    before any of this, and the reason the page is 640 wide at all.
+    """
+
+    w, h = PR_W, PR_H
+    stride = PR_STRIDE
+
+    font_w, font_h, font_top = 8, 8, 6
+    font_ascent, font_half, font_descent, font_bottom = 6, 4, 1, 1
+    font_point = 8
+
+    # Ink on paper.  Unlike the ANTIC device's pair these are not
+    # measured off a screen -- there is no screen -- and to_rgb() exists
+    # only so that a caller written for a screen still runs.
+    PAPER, INK = (255, 255, 255), (0, 0, 0)
+
+    def __init__(self, face=None, pal=None):
+        self.a = anticref.Antic(self.w, self.h)
+        self.face = fontref.FONT_8X8 if face is None else face
+        self.off = bytearray(self.stride * self.h)
+        self.clear()
+
+    # -- colours ---------------------------------------------------------
+    @staticmethod
+    def colours():
+        return 2
+
+    @staticmethod
+    def planes():
+        return 1
+
+    @staticmethod
+    def pen_value(pen):
+        return 1 if pen else 0
+
+    @staticmethod
+    def pen_of(value):
+        return value
+
+    def palette_all(self, pal):
+        """Nothing.  dev_palette_all on this device is `(void)rgb;`."""
+
+    def palette_one(self, pen, rgb):
+        """The same."""
+
+    # -- pixels ----------------------------------------------------------
+    def clear(self):
+        """A blank page is NO ink, and no ink is 0 -- the same value the
+        ANTIC device clears to, for the opposite-looking reason."""
+        self.a.clear(0)
+
+    def fill_rect(self, x1, y1, x2, y2, pen):
+        self.a.rect_mode(x1, y1, x2, y2, anticref.MD_REPLACE, 1 if pen else 0)
+
+    def xor_rect(self, x1, y1, x2, y2):
+        self.a.rect_mode(x1, y1, x2, y2, anticref.MD_XOR, 1)
+
+    def plot(self, x, y, pen):
+        self.a.plot(x, y, 1 if pen else 0)
+
+    def plot_xor(self, x, y):
+        self.a.span(x, x, y, anticref.MD_XOR, 1)
+
+    def pixel(self, x, y):
+        if not (0 <= x < self.w and 0 <= y < self.h):
+            return 0
+        return self.a.get_pixel(x, y)
+
+    def bit(self, x, y):
+        return self.a.bit(x, y)
+
+    # -- raster forms ----------------------------------------------------
+    def screen_form(self):
+        return 0, self.stride, self.w, self.h, True
+
+    def save_form(self):
+        return None
+
+    def _buf(self, base):
+        return (self.a.mem, base) if base < FAR_BASE else (self.off,
+                                                           base - FAR_BASE)
+
+    def read_pixel(self, base, stride, x, y):
+        buf, off = self._buf(base)
+        return (buf[off + y * stride + (x >> 3)] >> (7 - (x & 7))) & 1
+
+    def write_pixel(self, base, stride, x, y, value):
+        buf, off = self._buf(base)
+        a = off + y * stride + (x >> 3)
+        bit = 0x80 >> (x & 7)
+        buf[a] = (buf[a] | bit) if value else (buf[a] & ~bit & 0xFF)
+
+    def copy(self, sb, ss, sx1, sy1, db, ds, dx1, dy1, w, h):
+        if sb < FAR_BASE and db < FAR_BASE:
+            self.a.copy(sx1, sy1, dx1, dy1, w, h)
+            return
+        back_y, back_x = dy1 > sy1, dx1 > sx1
+        for y in range(h):
+            sy = (sy1 + h - 1 - y) if back_y else (sy1 + y)
+            dy = (dy1 + h - 1 - y) if back_y else (dy1 + y)
+            for i in range(w):
+                sx = (sx1 + w - 1 - i) if back_x else (sx1 + i)
+                dx = (dx1 + w - 1 - i) if back_x else (dx1 + i)
+                self.write_pixel(db, ds, dx, dy,
+                                 self.read_pixel(sb, ss, sx, sy))
+
+    # -- the cursor a printer has not got --------------------------------
+    def cursor_save(self, cx, cy):
+        pass
+
+    def cursor_restore(self):
+        pass
+
+    def cursor_discard(self):
+        pass
+
+    # -- readback --------------------------------------------------------
+    def to_rgb(self):
+        return [[self.INK if self.a.bit(x, y) else self.PAPER
+                 for x in range(self.w)] for y in range(self.h)]
+
+    def key(self):
+        return zlib.crc32(bytes(self.a.mem))

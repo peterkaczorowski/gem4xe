@@ -68,22 +68,94 @@ a config value and not a constant in the device.
     planes              1
     cell                8 x 8
 
+## The emitters
+
+`GEM4XE.CFG` chooses, beside VIDEO and MOUSE:
+
+    PRINTER = NONE | PCL | PS       what a page is written in
+    PRINTTO = P:                    where it goes; a filename works
+
+NONE is the default, and does nothing: a machine with no printer must not
+stop in `v_updwk` waiting for one.  `src/gem.c` copies both into
+`pr_kind` and `pr_dest` at start-up, the same way it hands the pointer
+kind to `ptr_init` -- the VDI does not know what a configuration file is.
+
+**Both formats are ROW-oriented**, which is the whole reason these two
+and not the older one.  The page's rows go out as they lie; ESC/P, the
+dot-matrix language, is column-oriented -- each byte eight vertical dots
+-- so it wants the page transposed, and the oldest format is the awkward
+one here while the two modern ones are nearly free.
+
+    PCL 5       ESC E, ESC *t100R, ESC *r0A, then per row either
+                ESC *b<n>Y  to skip n blank rows
+                ESC *b80W   followed by the row's 80 bytes
+                and ESC *rC, ESC E to eject.
+                14,074 bytes for the gate's page: most of a page of GEM
+                is paper, and the skip is the difference between that and
+                64,000 down a serial line.
+
+    PostScript  a DSC-conforming one-page program: 460.8 x 576 points
+                (6.4 x 8.0 inches at 100 dpi) translated to 76, 108, and
+                one `image` with the matrix [640 0 0 -800 0 800], which
+                flips y because PostScript counts from the bottom left
+                and a raster from the top left.  129,049 bytes, all of
+                it ASCII hex.
+
+**One asymmetry worth knowing.**  A 1 bit in this page means ink.  PCL
+agrees -- a 1 raster bit prints a dot -- so its rows are copied out
+unchanged.  PostScript's `image` in DeviceGray reads 0 as black, so the
+bytes are INVERTED on the way out.  That is done rather than argued about
+with `imagemask`'s polarity, which is the sort of thing that is only ever
+discovered on paper.
+
+**PCL 6 is not on the list and should not be**: it is PCL XL, a binary
+protocol and a different thing entirely, and every device that speaks it
+also speaks PCL 5.
+
+Where they reach: PCL 5 to `P:` is a laser printer, a FujiNet passing the
+bytes through, or Altirra's emulated 825.  PostScript to a FILE is every
+modern printer there is, by way of the machine the user copies it to --
+CUPS, Ghostscript, a mail client.  Neither needs gem4xe to know anything
+about networks.
+
+## How it is checked
+
+`v_updwk` on a printer produces a file, and a wrong one does not fail:
+it prints, and comes out blank, or shifted by a row, or in negative, and
+the thing that tells you is a laser printer in another room.  So:
+
+  * `tools/emitref.py` is the model of `src/vdi/emit.c` -- `pcl()`,
+    `ps()`, and a `from_pcl()` decoder strict enough to refuse anything
+    but what `pcl()` emits;
+  * `tools/devref.py`'s `Printer` is the third device the models drive,
+    beside `Vbxe` and `Antic`, and `tools/vdiref.py` runs on it with one
+    argument changed;
+  * `tests/host/test_print.py` pins the constants across `print.h`,
+    `config.h`, `emitref` and `devref`, round-trips the PCL, and renders
+    the PostScript with **Ghostscript** -- the only honest way to check a
+    program written in a language that has an interpreter;
+  * `tests/emu/m30_print.py` runs the real thing on the Atari, reads the
+    two files back out of the disk image, and compares all three: the
+    decoded PCL against the model's page, the PCL bytes against the
+    model's bytes, and Ghostscript's rendering of the Atari's own
+    PostScript against the same page.
+
+It earned its keep on the first run.  `dev_glyph` read the system face as
+`ch * height + row` when the face is a STRIP -- row r of all 256
+characters together, `row * 256 + ch` -- so "GEM4XE" came out as six
+other letters' middles.  Nothing about the page looked wrong in outline;
+it took 512,000 dots compared against a model to say so.
+
 ## What is still open
 
-  * **The emitters.**  `PRINTER=PCL | PS | EPSON | FILE` in GEM4XE.CFG,
-    beside VIDEO and MOUSE.  PCL 5 and PostScript are both row-oriented
-    and take the page's rows as they are; ESC/P is column-oriented and
-    needs the page transposed, which is why the dot-matrix format is the
-    awkward one here and not the modern ones.  ESC/P earns its place by
-    being what FujiNet's printer emulation renders, which is how a
-    machine with no printer at all gets a PDF.
-  * **PCL 6 is not on that list** and should not be: it is PCL XL, a
-    binary protocol and a different thing entirely, and every device that
-    speaks it also speaks PCL 5.
   * **The page buffer's lifetime.**  64,000 bytes of far memory taken at
     `v_opnwk` and given back at `v_clswk`, which puts it above the
     allocator's floor (src/sys/app.h) and inside the program's own
     extent.
-  * **`v_updwk`** is what emits a page -- opcode 4, which DRI's own
-    screen driver `v_nop`s and which a printer driver is the first thing
-    here to implement.
+  * **ESC/P**, which is what FujiNet's printer emulation renders to a
+    PDF -- and so how a machine with no printer at all gets one.  It
+    needs the page transposed: eight rows at a time into a column of
+    bytes, which is a buffer and a loop and no new argument.
+  * **A `NET` destination** by way of FujiNet's `N:` handler, so a page
+    can go straight at a CUPS queue rather than to a file somebody
+    carries.
