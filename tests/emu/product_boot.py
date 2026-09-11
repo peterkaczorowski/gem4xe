@@ -310,6 +310,20 @@ def one(name, progname, how, keep, check):
         mark = b.peek16(syms["app_near"])
         brk = int.from_bytes(bytes(b.memdump(syms["farmem"] + FARMEM_BRK, 4)), "little")
         pointer = (b.peek16(syms["ptr_state"]), b.peek16(syms["ptr_state"] + 2))
+        # What the pool has left with everything the product ships
+        # resident.  GEMDOS reads files and directories through a slice
+        # of it, capped at 2 KB and falling back to sixty-four bytes of
+        # stack below 128 (src/sys/gemdos.c), so this is the difference
+        # between a desktop that lists a directory briskly and one that
+        # does not -- and nothing else would fail if it went.
+        # tools/memreport.py predicts the same figure from the build
+        # artefacts; this is the machine agreeing with it.
+        room = (b.peek16(syms["app_pool_hi"])
+                - b.peek16(syms["pool_brk"])) & 0xFFFF
+        check(room >= 2048,
+              f"{name}: the pool has {room} bytes left, and GEMDOS wants "
+              f"2,048 for a read slice")
+        print(f"  the pool has {room} bytes left for GEMDOS's slices")
         print(f"  DOS kind {kind}, drive map {drvmap:#04x}, pool ${mark:04X}, "
               f"far brk ${brk:06X}, pointer {pointer}")
         dirs = listing(disk) if sdfs else dos2_listing(fs)

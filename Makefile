@@ -1072,6 +1072,12 @@ test-m27: build/m27-boot.atr
 test-m28: build/m28-boot.atr
 	python3 tests/emu/m28_acc.py
 
+# Where bank $00 has gone, and whether there is enough of it left.  Run it
+# after a change that adds a table or a program; tests/host/test_memory.py
+# runs it too, so make test says so without being asked.
+memcheck: build/gem.xex build/desktop.g4a build/desktop.rsc build/clockacc.g4a build/clock.rsc
+	python3 tools/memreport.py
+
 # ...and the VDI itself on it: the same vdi.c, the other side of the seam.
 test-m25: build/m25-boot.atr
 	python3 tests/emu/m25_antic_vdi.py
@@ -1156,4 +1162,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist memcheck gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-boot test-cf demo movie bench emu-stop clean

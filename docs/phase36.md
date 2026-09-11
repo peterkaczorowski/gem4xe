@@ -223,7 +223,9 @@ where GEM has one `appl_msg`.  `ap_sendmsg` owns the one buffer now; it is
 filled and copied into the destination's queue before the call returns,
 so it was never state.  That is 32 bytes back.
 
-It was not enough, so the rectangle pool went to far memory.  `gl_olist`
+It was not enough, so the rectangle pool went to far memory -- and later
+the resource's icon bitmaps did too, which is 1,536 bytes of the pool
+rather than of LoRAM and took the same trap twice more (below).  `gl_olist`
 is eighty ten-byte nodes reached only through `o_link`, from nineteen
 places, all in one file -- the only one of the window manager's four
 tables that could leave, since `W_TREE` and `W_ACTIVE` are OBJECT trees
@@ -249,6 +251,25 @@ so the lesson is procedural and worth more than the fix: **moving a
 structure to far memory is not done when it compiles.  Grep for `&`
 applied to its fields first.**
 
+And then it happened twice more in the same phase, moving the resource's
+icons.  `vdi.c` cut the form address to sixteen bits on the way into the
+device seam -- right only while every memory form was in bank $00 -- and
+`dev_vbxe.c`'s row expander kept its source pointer in the direct page as
+a NEAR pointer, so assigning the far one truncated it.  Every address on
+the way in was correct and the icons drew as noise.
+
+What found it was not reasoning, which had checked the file, the fixup
+arithmetic and the model and found all three right.  It was a probe: the
+far copy compared with the file at seven offsets, byte for byte.  That
+said the bytes were there and the addresses were right, which left only
+the reading -- and the reading is where both casts were.
+
+**The general defence is a gate that exercises the far path**, and there
+is one now: the desktop's icons come from far memory on every run of
+`test-m17`, `test-m19` and `test-boot`.  The reason the trap could be
+sprung twice is that nothing had ever drawn a 1bpp form from outside bank
+$00 before.
+
 Smaller, same file: casting an integer VARIABLE to a far pointer crashes
 the compiler outright -- *internal error:
 Translator/Compiler/IL/Evaluate.hs:370: Irrefutable pattern failed* --
@@ -272,6 +293,31 @@ including its resource, so the slots stay at six and the loader stops when
 the pool says no -- which is also what the donor does when its one
 allocation for all the accessories fails.
 
+## Knowing where bank $00 has gone
+
+Three times in this phase a change ran into bank $00 rather than being
+told it would: `data`, twenty-five bytes, would not place; the pool was
+left with 1,838 bytes and nothing said so; and the question "does a
+second accessory fit" could only be answered by building one.
+
+    make memcheck
+
+answers it now.  `tools/memreport.py` reads the linker's map for the
+regions, each `.g4a`'s header for what a program reserves and each
+`.RSC`'s for what a resource costs the pool once its icons are far, and
+then **simulates `pool_alloc` in the order the machine runs it** --
+process records, each accessory's queue, near region and resource, then
+the desktop and its resource, with a program's region page-aligned as
+`app.c` aligns it.  Simulating rather than summing is the point: the
+report prints `$5200` for the desktop's near region, which is the address
+`test-boot` reads off the live machine, and 3,246 bytes free, which is
+the number the machine reports too.  `tests/host/test_memory.py` runs it,
+so `make test` says so without being asked, and `test-boot` asserts the
+LIVE figure against the same floor -- GEMDOS reads files and directories
+through a slice of whatever the pool has spare, so falling under 2 KB is
+the difference between a desktop that lists a directory briskly and one
+that does not, and nothing else would fail if it went.
+
 ## What is not done
 
   * **Windows have no owners**, so `WM_*` messages all go to the
@@ -281,13 +327,11 @@ allocation for all the accessories fails.
   * **Virtual workstations and GEMDOS handles are still global**:
     `vdi_close_virtuals` and `gemdos_release` wipe everything on
     `app_free`, not just the exiting program's.
-  * **The icon bitmaps are still in the pool.**  `DESKTOP.RSC`'s image
-    data is 1,536 of its 6,226 bytes, and `ICONBLK`'s `ib_pmask`/
-    `ib_pdata` have been `uint32_t` since phase 2 -- they are already
-    able to hold a far address, and `gsx_blt` already takes one.  Moving
-    the image block to far memory is the cleanest pool saving left, and
-    it reaches `tools/deskref.py`, which reproduces the resource's
-    addresses.
+  * **A second accessory does not fit yet.**  With `CLOCK.ACC` resident
+    the pool has 3,246 bytes, and the calculator wants about 2,400 of
+    them -- which would leave GEMDOS under the 2 KB its read slice wants.
+    The next 1,536 bytes are probably the desktop's own: it reserves
+    3,840 and the map says it uses 3,235.
   * **An accessory may not call `menu_bar`.**  The donor does not stop it
     either, and the Compendium's "desk accessories should not use a menu
     bar" is not style advice: `gl_mntree` is one global, so an accessory
