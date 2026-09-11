@@ -14,6 +14,7 @@
 #include "../sys/irq.h"
 #include "../sys/zwin.h"
 #include "../sys/farmem.h"
+#include "../sys/ctx.h"    /* whose a virtual workstation is */
 
 /* The device this VDI is drawing on (vdidev.h).  The PROGRAM sets it
  * before vdi_init() and it does not move afterwards; every SCR_ and
@@ -543,6 +544,16 @@ static void vdi_vq_color(void)
 ZWIN static Vwk vwk_tab[NUM_VWK];
 static WORD     vwk_cur;            /* the slot vwk holds */
 
+/* WHOSE each open slot is, by the CONTEXT that opened it.  The VDI has no
+ * business knowing what an AES process is, and it does not need to: it
+ * needs identity, and ctx_cur is identity (src/sys/ctx.h).
+ *
+ * vdi_close_virtuals() used to close every virtual workstation when any
+ * program ended, which an accessory holding one cannot survive -- it is
+ * why the clock opens and closes its own around each panel rather than
+ * keeping it.  Slot 0 is the physical workstation and belongs to nobody. */
+static void    *vwk_own[NUM_VWK];
+
 /* Make handle h's workstation the current one; 0 if it is not open. */
 static WORD vwk_select(WORD h)
 {
@@ -603,9 +614,13 @@ static void init_wk(WORD handle)
 static void vdi_v_opnwk(void)
 {
     WORD i;
-    /* The physical workstation, and every virtual one closed with it. */
-    for (i = 0; i < NUM_VWK; i++)
+    /* The physical workstation, and every virtual one closed with it --
+     * whoever owned them: this is the device being opened, not a program
+     * ending. */
+    for (i = 0; i < NUM_VWK; i++) {
         vwk_tab[i].handle = 0;
+        vwk_own[i] = 0;
+    }
     vwk_cur = 0;
     init_wk(VDI_PHYS_HANDLE);
     vwk_tab[0] = vwk;
@@ -639,6 +654,7 @@ static void vdi_v_opnvwk(void)
     vwk_cur = i;
     init_wk((WORD)(i + 1));
     vwk_tab[i] = vwk;
+    vwk_own[i] = ctx_cur;           /* whoever asked keeps it */
     fill_workout();
     contrl[6] = vwk.handle;
 }
@@ -667,12 +683,19 @@ static void vdi_v_clsvwk(void)
 /* What a program left open when it ended (src/sys/app.c app_free): the
  * AES draws on the physical workstation, so every virtual one is some
  * program's, and with one program at a time they are all its. */
+/* Every virtual workstation the RUNNING process opened.  app_free calls
+ * it when a program has ended, and at that moment the running process is
+ * that program -- an application is process 0 and the shell runs in its
+ * context -- so an accessory's stays open. */
 void vdi_close_virtuals(void)
 {
     WORD i;
     for (i = 1; i < NUM_VWK; i++)
-        vwk_tab[i].handle = 0;
-    if (vwk_cur != 0)
+        if (vwk_own[i] == (void *)ctx_cur) {
+            vwk_tab[i].handle = 0;
+            vwk_own[i] = 0;
+        }
+    if (vwk_cur != 0 && vwk_tab[vwk_cur].handle == 0)
         vwk_to_phys();
 }
 

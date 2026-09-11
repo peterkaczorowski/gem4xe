@@ -15,9 +15,11 @@
 #include "farmem.h"
 #include "clock.h"
 #include "app.h"
+/* ...and the AES's processes, because a program's open files are its
+ * own (gemdos_release).  aes.h brings WORD/UWORD/LONG with it, which
+ * this file used to declare for itself. */
+#include "../aes/proc.h"
 
-typedef int16_t  WORD;
-typedef uint16_t UWORD;
 typedef int32_t  LONG;
 
 #define GD_DRIVES   8
@@ -55,11 +57,15 @@ static uint32_t gd_dirs;        /* GD_DRIVES x GD_DIRMAX */
  * is", and a set one means "here, absolutely".  gd_cioname is where the
  * difference is spent. */
 static uint8_t gd_dirset[GD_DRIVES];
-static uint32_t gd_dta0;        /* the default DTA */
-static uint32_t gd_dta;         /* the current one */
+/* A DEFAULT DTA EACH, not one shared.  A search is found again by the
+ * DTA that owns it (SL_OWNER), so two processes both using "the default"
+ * would be handed each other's directory position.  gemdos_init takes
+ * NUM_PROCS of them, one per process, and gd_dta0 is the first. */
+static uint32_t gd_dta0;
+#define gd_dta      (rlr->p_gddta)      /* the running process's */
 static uint32_t gd_slots;       /* GD_SLOTS x SL_SIZE */
 static uint8_t  gd_drive;       /* the current drive, 0 = A */
-static uint8_t  gd_owned;       /* the IOCBs Fopen has out, bit n */
+#define gd_owned    (rlr->p_gdowned)    /* the IOCBs Fopen has out, bit n */
 /* Where each open file is, and how to get back to its start.  GEMDOS
  * counts a file in BYTES from the beginning and CIO does not count at
  * all, so the count is kept here, one per IOCB: every Fread and Fwrite
@@ -81,7 +87,8 @@ static uint8_t  gd_owned;       /* the IOCBs Fopen has out, bit n */
 static uint32_t gd_files;               /* CIO_IOCBS x FH_SIZE, far */
 static uint32_t gd_scratch;             /* a DTA and a path, for Fdatime */
 
-static uint8_t  gd_ateof;       /* ...and those a read has taken to the end.
+#define gd_ateof    (rlr->p_gdateof)
+static uint8_t  gd_ateof_doc;   /* ...and those a read has taken to the end.
                                  * GEMDOS says 0 at the end, every time; DOS
                                  * II+/D 6.4 says it once, and on the read
                                  * after that hands the file's last partial
@@ -1152,7 +1159,7 @@ void gemdos_init(void)
     WORD i;
 
     gd_dirs = far_alloc(GD_DRIVES * GD_DIRMAX);
-    gd_dta0 = far_alloc(DTA_SIZE);
+    gd_dta0 = far_alloc((uint32_t)NUM_PROCS * DTA_SIZE);
     gd_slots = far_alloc((uint32_t)GD_SLOTS * SL_SIZE);
     gd_files = far_alloc((uint32_t)CIO_IOCBS * FH_SIZE);
     gd_scratch = far_alloc(DTA_SIZE + GD_KEEPNAME);
@@ -1165,12 +1172,20 @@ void gemdos_init(void)
         far_write8(gd_slot(i) + SL_IOCB, 0);
         far_write8(gd_slot(i) + SL_AGE, 0);
     }
-    gd_dta = gd_dta0;
+    for (i = 0; i < NUM_PROCS; i++) {
+        PROC *p = &proc_tab[i];
+        p->p_gddta = gd_dta0 + (uint32_t)i * DTA_SIZE;
+        p->p_gdowned = p->p_gdateof = 0;
+    }
     gd_drive = 0;
-    gd_owned = gd_ateof = 0;
     gd_age = 0;
 }
 
+/* The RUNNING process's files, searches and DTA.  app_free calls it when
+ * a program has ended, and at that moment the running process is that
+ * program -- an application is process 0 and the shell runs in its
+ * context -- so an accessory's open files are left exactly where they
+ * are, which is what an accessory needs to hold one at all. */
 void gemdos_release(void)
 {
     WORD i;
@@ -1180,8 +1195,9 @@ void gemdos_release(void)
             cio_close((int16_t)i);
     gd_owned = gd_ateof = 0;
     for (i = 0; i < GD_SLOTS; i++)
-        gd_slot_free(gd_slot(i));
-    gd_dta = gd_dta0;
+        if ((uint32_t)rd32(gd_slot(i) + SL_OWNER) == gd_dta)
+            gd_slot_free(gd_slot(i));
+    gd_dta = gd_dta0 + (uint32_t)proc_pid(rlr) * DTA_SIZE;
 }
 
 void gemdos_call(uint32_t pb)

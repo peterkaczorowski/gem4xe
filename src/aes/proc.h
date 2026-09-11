@@ -72,6 +72,15 @@ typedef struct PROC {
      * releases are still in the reverse of the takes. */
     void    *p_rsc;             /* RSHDR *, or 0 */
     uint16_t p_rscmark;         /* the pool before its load */
+    /* Its open files and its search state (src/sys/gemdos.c).  These
+     * were three file statics, and app_free closed EVERY process's
+     * handles when any program exited -- which an accessory cannot
+     * survive if it is holding a file.  Per process, gemdos_release()
+     * releases the running one's, and at app_free the running one IS the
+     * program that has just ended, because an application is process 0. */
+    uint16_t p_gdowned;         /* the IOCBs Fopen has out, bit n */
+    uint16_t p_gdateof;         /* ...and those a read took to the end */
+    uint32_t p_gddta;           /* its Disk Transfer Address */
 } PROC;
 
 extern PROC *proc_tab;          /* NUM_PROCS records, the caller's memory */

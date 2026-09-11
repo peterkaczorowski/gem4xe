@@ -414,7 +414,7 @@ build/app_blob.o: build/app_blob.c
 # smallest of anything here -- it draws nothing and owns no window -- so
 # what test-m28 measures is close to the floor an accessory costs.
 ACC_OBJS   = $(G4A_LIB) build/app/m28_acc.o
-$(eval $(call g4a,m28_acc,$(ACC_OBJS),768,192,384,,))
+$(eval $(call g4a,m28_acc,$(ACC_OBJS),1152,128,384,,))
 
 # The two accessories (src/apps): the first programs written to the
 # application ABI that are not tests.  Each is one C file, one resource
@@ -721,6 +721,18 @@ build/gem4xe.cfg: dist/gem4xe.cfg
 	    open(sys.argv[2],'wb').write(open(sys.argv[1],'rb').read() \
 	        .replace(b'\r\n', b'\n').replace(b'\n', b'\x9b'))" $< $@
 
+# ...and the SHORT one the double-density DOS 2 floppy carries, because
+# that disk has about 2 KB free once GEM's 122 KB and the desktop are on
+# it and eight sectors of commentary is the wrong thing to spend it on.
+# It is the same file with the prose taken out and a pointer to where the
+# prose is, generated rather than written, so there is one source for
+# what the keys are.  The file's own opening line says this costs
+# nothing: "No file at all is the same as this one with everything
+# commented out, which is what it is."
+build/gem4xe-min.cfg: dist/gem4xe.cfg tools/mincfg.py
+	@mkdir -p build
+	python3 tools/mincfg.py $< $@
+
 # ...and the safe-mode one the ANTIC gate boots with, which is the same
 # file with the one line uncommented.
 build/safe.cfg: dist/gem4xe.cfg
@@ -730,13 +742,13 @@ build/safe.cfg: dist/gem4xe.cfg
 	        .replace(b'# VIDEO=AUTO', b'VIDEO=ANTIC') \
 	        .replace(b'\r\n', b'\n').replace(b'\n', b'\x9b'))" $< $@
 
-build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/gem4xe.cfg
+build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/gem4xe-min.cfg
 	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
 	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
 	    --add build/lang.rsc LANG.RSC --add build/816.com 816.COM \
-	    --add build/gem4xe.cfg GEM4XE.CFG
+	    --add build/gem4xe-min.cfg GEM4XE.CFG
 
 # NO ACCESSORY ON THIS DISK, and it is not a choice: a double-density DOS
 # 2 floppy is 184 KB and GEM.COM is 122 KB of it, which leaves eleven

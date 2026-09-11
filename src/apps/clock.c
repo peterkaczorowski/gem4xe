@@ -123,18 +123,29 @@ WORD clock_start(void)
     return TRUE;
 }
 
-/* The panel, and the loop it runs until a key or Quit.  Returns when the
- * clock has been put away again and the screen given back; the workstation
- * is opened and closed around it rather than held, because
- * vdi_close_virtuals() still wipes every virtual workstation when any
- * program exits (docs/phase36.md) and an accessory's would go with it. */
-void clock_panel(void)
+/* A workstation of its own.  The caller decides how long to keep it: the
+ * program opens one around its single panel, the accessory opens one at
+ * start-up and holds it for the life of the machine, which it can do
+ * because a virtual workstation belongs to the process that opened it and
+ * a program ending closes only its own (src/vdi/vdi.c). */
+WORD clock_ws(void)
 {
-    WORD handle, wchar, hchar, wbox, hbox, done = FALSE, ticks = 0;
-    WORD x, y, w, h, ev, mx, my, mb, ks, kr, br, msg[8];
+    WORD handle, wchar, hchar, wbox, hbox;
 
     handle = graf_handle(&wchar, &hchar, &wbox, &hbox);
     v_opnvwk(work_in, &handle, work_out);
+    return handle;
+}
+
+/* The panel, and the loop it runs until a key or Quit, on a workstation
+ * the caller has already opened.  Returns when the clock has been put
+ * away and the screen given back. */
+void clock_panel(WORD handle)
+{
+    WORD done = FALSE, ticks = 0;
+    WORD x, y, w, h, ev, mx, my, mb, ks, kr, br, msg[8];
+
+    (void)handle;
     ask_gemdos();
 
     form_center(tree, &x, &y, &w, &h);
@@ -168,5 +179,4 @@ void clock_panel(void)
 
     form_dial(FMD_SHRINK, 0, 0, 0, 0, x, y, w, h);
     form_dial(FMD_FINISH, 0, 0, 0, 0, x, y, w, h);
-    v_clsvwk(handle);
 }

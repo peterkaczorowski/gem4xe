@@ -10,16 +10,21 @@
 #include "gem.h"
 
 WORD clock_start(void);
-void clock_panel(void);
+WORD clock_ws(void);
+void clock_panel(WORD handle);
 
 int main(void)
 {
+    WORD handle;
+
     appl_init();
     if (!clock_start()) {
         appl_exit();
         return 1;
     }
-    clock_panel();
+    handle = clock_ws();
+    clock_panel(handle);
+    v_clsvwk(handle);
     rsrc_free();
     appl_exit();
     return 0;

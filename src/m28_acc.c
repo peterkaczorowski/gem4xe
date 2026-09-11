@@ -31,8 +31,13 @@ WORD acc_opens;                 /* AC_OPEN */
 WORD acc_closes;                /* AC_CLOSE */
 WORD acc_last[8];               /* the last message, word for word */
 WORD acc_ticks;                 /* timer waits completed: it is alive */
+WORD acc_ws;                    /* a workstation, opened once and KEPT */
 
 static char acc_title[] = "  Gate accessory";
+
+/* v_opnvwk's parameter block, the one every GEM program opens with. */
+static WORD work_in[11] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2 };
+static WORD work_out[57];
 
 int main(void)
 {
@@ -41,6 +46,19 @@ int main(void)
     WORD i;
 
     acc_id = appl_init();
+
+    /* A VIRTUAL WORKSTATION, OPENED ONCE AND KEPT.  An accessory could
+     * not do this until one had an owner: vdi_close_virtuals() closed
+     * every open workstation when any program exited, so an accessory
+     * had to open and close one around each use.  The gate reads the
+     * VDI's owner table after the desktop has quit and requires this
+     * handle to still be the accessory's. */
+    {
+        WORD wchar, hchar, wbox, hbox;
+        acc_ws = graf_handle(&wchar, &hchar, &wbox, &hbox);
+        v_opnvwk(work_in, &acc_ws, work_out);
+    }
+
     acc_menu = menu_register(acc_id, acc_title);
 
     /* The loop a desk accessory never leaves.  A timer goes with the

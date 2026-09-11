@@ -145,7 +145,7 @@ def main(argv):
         near = title - (asym["acc_title"] - link_near)
         acc = {n: asym[n] + near - link_near
                for n in ("acc_id", "acc_menu", "acc_ticks", "acc_msgs",
-                         "acc_opens", "acc_closes", "acc_last")}
+                         "acc_opens", "acc_closes", "acc_last", "acc_ws")}
         acc_id, acc_menu = b.peek16(acc["acc_id"]), b.peek16(acc["acc_menu"])
         check(acc_id == 1, f"the accessory's ap_id is {acc_id}, expected 1")
         check(acc_menu == 0, f"its menu id is {acc_menu}, expected slot 0")
@@ -281,6 +281,33 @@ def main(argv):
             print(f"  File -> Quit delivered AC_CLOSE {last[:5]}")
         check(b.peek16(syms["proc_n"]) == 2,
               "the accessory's process went with the program it sat under")
+
+        # 7. ...and so did what it was holding.  The accessory opens a
+        #    virtual workstation at start-up and keeps it, which it could
+        #    not do until one had an owner: vdi_close_virtuals() used to
+        #    close every open workstation when any program exited.  The
+        #    desktop has just exited, so this is the check that it now
+        #    closes only its own -- read out of the VDI's own owner table
+        #    against the accessory's context, which is its PROC record
+        #    because p_ctx is the first member (src/aes/proc.h).
+        ws = b.peek16(acc["acc_ws"])
+        check(ws >= 2, f"the accessory's workstation handle is {ws}")
+        if ws >= 2:
+            # The VDI records each slot's owner as the CONTEXT that opened
+            # it.  A closed slot's owner is 0 and the application's is
+            # proc_tab, since p_ctx is the first member of its record --
+            # so with two processes "neither of those" is the accessory's,
+            # and no sizeof(PROC) has to be written down here.
+            owner = b.peek16(syms["vwk_own"] + (ws - 1) * 2)
+            app_ctx = b.peek16(syms["proc_tab"])
+            check(owner != 0,
+                  f"workstation {ws} was closed when the desktop exited")
+            check(owner != app_ctx,
+                  f"workstation {ws} is the application's (${owner:04X})")
+            if owner and owner != app_ctx:
+                print(f"  it still holds workstation {ws} (owner "
+                      f"${owner:04X}, the application is ${app_ctx:04X}) "
+                      f"after the desktop exited")
         check(b.peek16(syms["ctx_over"]) == 0,
               f"{b.peek16(syms['ctx_over'])} context park(s) refused")
     finally:

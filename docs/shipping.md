@@ -291,6 +291,14 @@ in its OWN directory, the one `GEM.COM` was started from, and never in
 allocators are bump allocators, and anything taken after a program has
 loaded is freed underneath it when that program exits.
 
+The DOS 2 floppy's `GEM4XE.CFG` is the **short form** (`tools/mincfg.py`):
+the same keys and values, generated from the same file, with the prose
+taken out and a pointer to where the prose is.  The full one is 1,922
+bytes of which nearly all is documentation -- every setting in it is
+commented out -- and that disk has about 3 KB free.  The file's own
+opening says the trade costs nothing: *"No file at all is the same as
+this one with everything commented out, which is what it is."*
+
 `CLOCK.ACC` is the first one shipped.  It is the same `src/apps/clock.c`
 as `\APPS\CLOCK.G4A`, with a different `main`: the program opens its
 panel once and exits, the accessory registers "Clock" in the Desk menu
