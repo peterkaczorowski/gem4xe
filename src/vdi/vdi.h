@@ -111,6 +111,16 @@ typedef struct {
     WORD  patmsk;
     UWORD ud_patrn[16];     /* vsf_udpat's pattern, FIS_USER */
     UWORD ud_ls;            /* vsl_udsty's line style, index 7 */
+    /* THE SURFACE THIS WORKSTATION DRAWS ON.  `vdev` was one global, set
+     * before v_opnwk and never moved, because every workstation drew on
+     * the one screen the machine had.  A printer workstation is a second
+     * device alive at the same time as the screen -- that is what
+     * v_opnwk's device id is FOR -- so the device belongs to the
+     * workstation and vwk_select binds it, beside the two copies of a Vwk
+     * it already makes when the drawing changes hands.
+     * A void * rather than the real type: vdi.h is included by code that
+     * has no business seeing the seam (src/vdi/vdidev.h). */
+    const void __far *dev;
 } Vwk;
 
 /* The physical workstation's handle, by specification; v_opnvwk hands

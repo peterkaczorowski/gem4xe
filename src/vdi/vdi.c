@@ -564,6 +564,10 @@ static WORD vwk_select(WORD h)
         vwk_tab[vwk_cur] = vwk;
         vwk = vwk_tab[i];
         vwk_cur = i;
+        /* ...and the surface it draws on, which need not be the one the
+         * last workstation drew on (src/vdi/vdi.h). */
+        if (vwk.dev)
+            vdev = (const VDIDEV __far *)vwk.dev;
         /* A user pattern lives in the Vwk, so PAT_USER names a
          * different sixteen rows in every workstation that has one, and
          * the cache cannot tell them apart: what it holds may be the
@@ -588,6 +592,10 @@ static void init_wk(WORD handle)
     for (l = 0; l < (WORD)sizeof vwk; l++)
         z[l] = 0;                   /* the user pattern too */
     vwk.handle     = handle;
+    /* The surface it will draw on, before anything asks the geometry:
+     * whichever device is current, which for every workstation any
+     * program opens today is the screen (src/vdi/vdi.h). */
+    vwk.dev        = (const void __far *)vdev;
     vwk.xmx_clip   = SCR_W - 1;
     vwk.ymx_clip   = SCR_H - 1;
     vwk.wrt_mode   = MD_REPLACE - 1;
