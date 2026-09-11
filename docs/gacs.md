@@ -42,10 +42,39 @@ and works out of far memory -- which is exactly the shape GACS already
 has, because its first prime directive is that a shell hands the engine
 a buffer.  Compiled that way the engine wants **84 bytes of bank $00**.
 
-**What is missing is a shell, and one linker line.**  `src/app/gemapp.scm`
-maps an application's `farcode` but no far *data* sections, because no
-gem4xe application has needed any yet; a large-data application needs
-`far`, `zfar` and `cfar` there.  That is the change.  After it, the port
+**What is missing is a shell, and rather more than one linker line.**
+That estimate stood here until somebody tried it, which is the honest
+argument for trying things.  What a `--data-model=large` program actually
+needs, found by building one (`src/m29_big.c`, `make test-m29`):
+
+  * **Six sections, not three.**  `src/app/gemapp.scm` mapped `farcode`,
+    `switch`, `cfar`, `libcode` and `code`.  A large-data program also
+    has `far` (initialised variables), `zfar` (uninitialised) and `ifar`
+    (the initialiser `far` is copied from) -- and, in bank $00, `near`,
+    `znear` and `inear`, because a global goes FAR there unless it is
+    declared `__near`, and anything handed to the AES must be near
+    (`src/sys/abi.c`, `near_of`).  It also needs `_NearBaseAddress`
+    declared, which a small-data program never refers to.
+  * **Bits and bss cannot share a memory.**  `far`/`zfar` carry no bytes
+    and the linker refuses to place them beside `farcode`, so they go in
+    a memory of their own -- the bank above the code.
+  * **A runtime library of the same model.**  The linker will not mix
+    runtime models, so `crt_gemapp`, `gemabi` and `gemlib` are built
+    twice and a large-data program links `clib-lc-ld.a`.
+  * **And the .G4A header had to learn to count banks.**  `tools/mkg4a.py`
+    sized the far region from the image, and a far bss carries no bytes:
+    a program whose variables are in the bank above its code would have
+    been given one bank and left them in memory the far heap goes on to
+    hand somebody else, with nothing failing at the time.  The count
+    comes from the linker's map now, and `m29_big.g4a` asks for two banks
+    where every other program in the tree asks for one.
+
+All of that is done.  **What is not done is running it**: M29.G4A links,
+the loader gives it its two banks, and it does not reach its first
+statement.  `make test-m29` is written and red, and out of `make test`
+until it is not.  The next thing to look at is the crt's
+`data_init_table` walk over `far` and `zfar` -- the one part of start-up
+no program in this tree had ever exercised.  After it, the port
 is: GACS's `shells/gem/main.c` against gem4xe's `COP` ABI instead of the
 ST's trap, and `fopen`/`fread`/`fwrite` onto GEMDOS -- which is now a
 seam with `Fseek` under it (`docs/phase16.md`).

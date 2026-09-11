@@ -373,16 +373,35 @@ build/shel.o: src/aes/shel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/d
 # The stack is part of the near bss (src/app/gemapp.scm); its size is the
 # linker's --stack-size, so the map shows what each application asked for.
 G4A_LIB = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o
+
+# ...and the same three for an application compiled --data-model=large.
+# The linker refuses to mix runtime models, so a large-data program needs
+# a large-data library beside it and Calypsi's own clib-lc-ld.a rather
+# than clib-lc-sd.a.  The SOURCES are the same files: only the model
+# differs (docs/gacs.md).
+G4A_LIB_LD = build/appld/crt_gemapp.o build/appld/gemabi.o build/appld/gemlib.o
+LIB_LD     = clib-lc-ld.a
+
+build/appld/%.o: src/app/%.s
+	@mkdir -p build/appld
+	$(AS) -o $@ $<
+
+build/appld/%.o: src/app/%.c src/app/gem.h
+	@mkdir -p build/appld
+	$(CC) --code-model=large --data-model=large -O2 -I src/app -o $@ $<
+# $(8), when given, is the runtime library: a --data-model=large program
+# needs clib-lc-ld.a and the large-data half of the application library,
+# because the linker refuses to mix runtime models.
 define g4a
 build/$(1).elf: $(2) src/app/gemapp.scm
-	$$(LD) src/app/gemapp.scm $(2) $$(LIB) --rtattr exit=simplified --cstartup gemapp -o $$@ \
+	$$(LD) src/app/gemapp.scm $(2) $(if $(8),$(8),$$(LIB)) --rtattr exit=simplified --cstartup gemapp -o $$@ \
 	    --list-file build/$(1).map --stack-size $(5) \
 	    --memories-expression "(app-layout #x1000 #x020000 $(3) $(4))"
 build/$(1)-near.elf: $(2) src/app/gemapp.scm
-	$$(LD) src/app/gemapp.scm $(2) $$(LIB) --rtattr exit=simplified --cstartup gemapp -o $$@ \
+	$$(LD) src/app/gemapp.scm $(2) $(if $(8),$(8),$$(LIB)) --rtattr exit=simplified --cstartup gemapp -o $$@ \
 	    --stack-size $(5) --memories-expression "(app-layout #x1100 #x020000 $(3) $(4))"
 build/$(1)-far.elf: $(2) src/app/gemapp.scm
-	$$(LD) src/app/gemapp.scm $(2) $$(LIB) --rtattr exit=simplified --cstartup gemapp -o $$@ \
+	$$(LD) src/app/gemapp.scm $(2) $(if $(8),$(8),$$(LIB)) --rtattr exit=simplified --cstartup gemapp -o $$@ \
 	    --stack-size $(5) --memories-expression "(app-layout #x1000 #x030000 $(3) $(4))"
 build/$(1).g4a build/$(1).sym $(7): build/$(1).elf build/$(1)-near.elf build/$(1)-far.elf tools/mkg4a.py
 	python3 tools/mkg4a.py build/$(1).elf build/$(1)-near.elf build/$(1)-far.elf \
@@ -655,6 +674,16 @@ ACC_DEPS  = build/m28_acc.g4a
 # every program (src/aes/shel.c).
 ACCP_DEPS = build/clockacc.g4a build/clock.rsc
 
+# The large-data gate application (src/m29_big.c): the ONE object in the
+# tree compiled --data-model=large, which is the model GACS's engine and
+# RetroWP's are written to (docs/gacs.md).  Its own rule rather than the
+# pattern rule, because $(CFLAGS) says small.
+build/appld/m29_big.o: src/m29_big.c src/app/gem.h
+	@mkdir -p build/appld
+	$(CC) --code-model=large --data-model=large -O2 -I src/app -o $@ $<
+BIG_OBJS = $(G4A_LIB_LD) build/appld/m29_big.o
+$(eval $(call g4a,m29_big,$(BIG_OBJS),1024,256,384,,,$(LIB_LD)))
+
 build/test.rsc: tools/mkrsc.py tools/rsc.py tools/aesref.py
 	@mkdir -p build
 	python3 tools/mkrsc.py $@
@@ -827,6 +856,17 @@ build/m22-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt 
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(SHELL_FILES) $(APP_FILES)
+
+# The large-data gate's disk (test-m29): test-m16's stand-in desktop and
+# the one program in the tree compiled --data-model=large, in the root.
+# A disk of its own rather than test-m22's, because adding a file to a
+# fixture moves every pool and directory number the gates on it measure
+# (docs/phase15.md).
+build/m29-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(SHELL_DEPS) build/m29_big.g4a tools/mkspdisk.py tools/atr.py
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(SHELL_FILES) \
+	    --add build/m29_big.g4a M29.G4A
 
 # The desktop gate's disk (test-m17): the runner again, with the real
 # desktop and its resource where test-m16's stand-in was.
@@ -1084,6 +1124,15 @@ test-m27: build/m27-boot.atr
 test-m28: build/m28-boot.atr
 	python3 tests/emu/m28_acc.py
 
+# NOT IN `make test` YET, and deliberately: M29.G4A links, and the loader
+# gives it the two far banks its header asks for, but it does not reach
+# its first statement.  The gate is written and red.  See docs/gacs.md --
+# the next thing to look at is the crt's data_init_table walk over `zfar`
+# and `far`, which is the one part of start-up no program in this tree
+# had ever exercised.
+test-m29: build/m29-boot.atr
+	python3 tests/emu/m29_big.py
+
 # Where bank $00 has gone, and whether there is enough of it left.  Run it
 # after a change that adds a table or a program; tests/host/test_memory.py
 # runs it too, so make test says so without being asked.
@@ -1174,4 +1223,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist memcheck gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist memcheck gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-boot test-cf demo movie bench emu-stop clean

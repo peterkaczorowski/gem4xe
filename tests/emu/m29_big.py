@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Phase 37 gate: an application whose variables live in far memory.
+
+The two programs gem4xe exists for -- GACS and RetroWP -- are written to
+`--data-model=large`, where a pointer is 24 bits and the compiler puts
+every global above bank $00.  GACS's engine is 24 KB of code, 56 KB of
+data and 18 KB of constants, and it wants **84 bytes of bank $00** when
+compiled that way (`make gacs-check`, docs/gacs.md).  An application here
+gets 2 KB of bank $00, so that model is not a preference, it is the only
+way either program fits.
+
+Until now the application linker map had nowhere to put such a program's
+variables: it named `farcode`, `switch`, `cfar`, `libcode` and `code`,
+and none of those is where a large-data compiler puts a global.  This
+gate is the smallest program that proves the map, run through the real
+shell loop.
+
+WHAT IT CHECKS, and why each one would otherwise be silent:
+
+  ZFAR ARRIVED ZEROED.  A far bss section is made at start-up, not
+  loaded.  If the loader gave the program a bank somebody else was
+  using, it would arrive full of their bytes.
+
+  FAR ARRIVED INITIALISED.  An initialised far array is the harder case:
+  its values are COPIED there by the crt's data_init_table walk, from an
+  initialiser the linker puts elsewhere.  If that does not happen the
+  array reads as zeroes and nothing else goes wrong.
+
+  THE SUM IS RIGHT ACROSS 3,000 ENTRIES.  The pattern depends on the
+  index, so a pointer that wrapped inside a bank -- which is what 16-bit
+  arithmetic on a far array would do -- sums differently rather than
+  crashing.  The gate computes the same sum in Python.
+
+  AND THE PROGRAM'S FAR REGION IS TWO BANKS.  Its variables are in the
+  bank above its code, and the loader allocates whole banks from a count
+  in the .G4A header.  That count is taken from the linker's map and not
+  from the image, because a far bss carries no bytes: sizing it from the
+  image would have given the program one bank and left its variables in
+  memory the far heap goes on to hand somebody else, with nothing failing
+  at the time (tools/mkg4a.py, far_span).
+"""
+import os
+import struct
+import sys
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from a8test.launcher import launch          # noqa: E402
+import aesref, symfile                      # noqa: E402
+from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO,  # noqa: E402
+                     SYMS)   # build/m3.sym: this disk's runner
+from m4_aes import PRELUDE                  # noqa: E402
+from m12_file import Runner                 # noqa: E402
+from m14_sparta import boot, screen         # noqa: E402
+from m16_shell import SHELL, poll           # noqa: E402
+from m17_desktop import header              # noqa: E402
+
+DISK = os.path.abspath(os.path.join(ROOT, "build", "m29-boot.atr"))
+BIG = os.path.join(ROOT, "build", "m29_big.g4a")
+BIG_SYM = os.path.join(ROOT, "build", "m29_big.sym")
+
+N = 3000
+SEED = [11, 22, 33, 44, 55, 66, 77, 88]
+
+
+def main(argv):
+    fails = []
+
+    def check(cond, msg):
+        if not cond:
+            fails.append(msg)
+            print(f"  FAIL: {msg}")
+        return cond
+
+    syms = symfile.load(SYMS)
+    bsym = symfile.load(BIG_SYM)
+    link_near, near_size, far_banks = header(BIG)
+    check(far_banks == 2,
+          f"M29.G4A's header asks for {far_banks} far bank(s), expected 2 -- "
+          f"its variables are in the bank above its code")
+
+    emu = launch(tag="m29", memsize="1088K", extra_args=["--disk", DISK])
+    b = emu.bridge
+    try:
+        t, st = boot(b)
+        if st is None:
+            print("FAIL: the runner did not come up")
+            for ln in screen(b):
+                if ln.strip():
+                    print("   |" + ln)
+            return 1
+        print(f"  M3.COM loaded and running {t} frames after RETURN")
+        r = Runner(b, syms)
+        r.run(PRELUDE)
+        script = aesref.encode(PRELUDE + [(SHELL, (), ())], 0)
+        b.memload(r.sa, b"".join(
+            (x if x < 32768 else x - 65536).to_bytes(2, "little", signed=True)
+            for x in script))
+        poke16(b, r.count, NOT_STARTED)
+        b.poke(STATUS + ST_GO, 1)
+
+        runs = syms["sh_runs"]
+        check(poll(b, runs, 1) >= 0, "the stand-in desktop never started")
+
+        # B: the shell loads M29.G4A and calls it.
+        b.key("B")
+        tt = poll(b, runs, 2)          # it waits for a key before it exits
+        check(tt >= 0, f"after B: M29.G4A did not run (sh_runs "
+                       f"{b.peek16(runs)})")
+        if tt < 0:
+            return 1
+        b.frames(120)
+
+        near = b.peek16(syms["app_near"])
+        big = {n: bsym[n] + near - link_near
+               for n in ("m29_ran", "m29_zeroed", "m29_seedok", "m29_sum",
+                         "m29_first", "m29_last")}
+        print(f"  M29.G4A ran {tt} frames after B; its near region is at "
+              f"${near:04X}, {far_banks} far banks")
+
+        check(b.peek16(big["m29_ran"]) == 1, "M29.G4A did not reach its end")
+        check(b.peek16(big["m29_zeroed"]) == 1,
+              "its far bss did not arrive zeroed -- the bank it was given "
+              "held somebody else's bytes")
+        check(b.peek16(big["m29_seedok"]) == 1,
+              "its initialised far array did not arrive initialised -- the "
+              "crt's data_init_table walk did not reach it")
+
+        want = [(SEED[i & 7] + i) & 0xFFFF for i in range(N)]
+        want = [w - 0x10000 if w >= 0x8000 else w for w in want]
+        check(b.peek16(big["m29_first"]) == (want[0] & 0xFFFF),
+              f"big[0] is {b.peek16(big['m29_first'])}, expected {want[0]}")
+        check(b.peek16(big["m29_last"]) == (want[-1] & 0xFFFF),
+              f"big[{N - 1}] is {b.peek16(big['m29_last'])}, expected "
+              f"{want[-1]}")
+        exp = sum(want) & 0xFFFF
+        got = b.peek16(big["m29_sum"])
+        check(got == exp,
+              f"the sum over {N} far entries is {got}, expected {exp} -- a "
+              f"pointer that wrapped inside the bank would read like this")
+        print(f"  {N} far entries: big[0]={want[0]}, big[{N - 1}]="
+              f"{want[-1]}, sum ${exp:04X} -- all as the model has them")
+
+        # Let it go, and see the shell put the desktop back over it.
+        b.key("RETURN")
+        check(poll(b, runs, 3) >= 0,
+              "the shell did not come back to the desktop after M29.G4A")
+    finally:
+        emu.stop()
+
+    print(f"gem4xe-m29: {'PASS' if not fails else 'FAIL'} -- an application "
+          f"with its variables in far memory, {len(fails)} problem(s)")
+    return 1 if fails else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

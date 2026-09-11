@@ -9,8 +9,10 @@
  * then a key:
  *
  *     R   run M11.G4A, the gate application, and come back
- *     C   run CALC.G4A, and K CLOCK.G4A -- the two accessories, which
+ *     C   run CALC.G4A, and K CLOCK.G4A -- the two programs, which
  *         are gated through this same loop (tests/emu/m22_apps.py)
+ *     B   run M29.G4A, which is compiled --data-model=large and keeps
+ *         its variables in far memory (tests/emu/m29_big.py)
  *     X   ask for NOPE.G4A, which is not there: the shell's alert, then
  *         the desktop again
  *     Q   shut GEM down and return to DOS
@@ -33,7 +35,7 @@ int main(void)
     v_opnvwk(work_in, &handle, work_out);
 
     vst_color(handle, 1);
-    v_gtext(handle, 8, hbox + 16, "gem4xe desktop -- R M11.G4A, C CALC, K CLOCK, X a missing one, Q quits");
+    v_gtext(handle, 8, hbox + 16, "gem4xe desktop -- R M11, C CALC, K CLOCK, B M29, X a missing one, Q quits");
 
     for (;;) {
         k = (WORD)(evnt_keybd() & 0x00FF);
@@ -54,6 +56,13 @@ int main(void)
         if (k == 'k' || k == 'K') {
             Dsetpath("A:\\APPS");
             shel_write(SHW_EXEC, 1, 1, "A:\\APPS\\CLOCK.G4A", "\0");
+            break;
+        }
+        /* B: the large-data program (src/m29_big.c).  It is in the root
+         * rather than in \APPS\ because what test-m29 is about is the
+         * MEMORY MODEL, not the path. */
+        if (k == 'b' || k == 'B') {
+            shel_write(SHW_EXEC, 1, 0, "M29.G4A", "\0");
             break;
         }
         if (k == 'x' || k == 'X') {

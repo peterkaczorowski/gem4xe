@@ -29,7 +29,10 @@ entry point are read from the ELFs.
       8  u16 far_off                the far region's offset in its bank
      10  u32 far_size
      14  u8  far_bank               the bank it was linked in
-     15  u8  far_banks              banks it spans (1: the loader takes no more)
+     15  u8  far_banks              banks it spans: the IMAGE is one bank
+;;;                                    (the PC wraps inside one), but a
+;;;                                    --data-model=large program`s far
+;;;                                    variables reach past it
      16  u16 entry_lo, u8 entry_bank, u8 0
      20  u16 x4: fixup counts -- near part: high-byte, bank; far part: high-byte, bank
      28  u32 0
@@ -38,6 +41,7 @@ entry point are read from the ELFs.
 Usage: mkg4a.py base.elf near-shifted.elf far-shifted.elf out.g4a
                 [--syms out.sym] [--c-array out.c NAME]
 """
+import re
 import struct
 import sys
 
@@ -83,11 +87,43 @@ def extents(segs, syms):
     far_base = min(a for a, _, _ in far)
     far_end = max(a + len(d) for a, d, _ in far)
     if (far_base >> 16) != ((far_end - 1) >> 16):
-        raise SystemExit(f"far region ${far_base:06X}-${far_end - 1:06X} "
-                         f"spans banks; one is what the loader takes")
+        raise SystemExit(f"far image ${far_base:06X}-${far_end - 1:06X} "
+                         f"spans banks; the program counter wraps inside "
+                         f"one, so code may not (src/gem4xe.scm)")
     if min(a for a, _, _ in near) < dp:
         raise SystemExit("a near segment lies below the direct page")
     return dp, near_end, far_base, far_end
+
+
+def far_span(mapfile, far_base):
+    """How far the far region REACHES, from the linker's own list file.
+
+    This is not the same as how far the IMAGE reaches, and the difference
+    is a --data-model=large program's variables: `far` and `zfar`
+    (src/app/gemapp.scm) carry no bytes, so they are nowhere in the image
+    -- but the loader allocates whole banks from the count in the header,
+    and a count taken from the image alone would leave them outside what
+    it was given.  That is memory the far heap goes on to hand somebody
+    else, written to by a program that believes it owns it, with nothing
+    failing at the time.
+
+    It has to come from the map because the ELF cannot say: the linker
+    emits a PT_LOAD for every memory it was GIVEN, used or not, all with
+    the memory's full size, so an empty AppFarBss looks exactly like a
+    full one.  The map lists the sections it actually placed.
+    """
+    end = far_base
+    try:
+        f = open(mapfile)
+    except OSError:
+        return end
+    with f:
+        for ln in f:
+            m = re.match(r"^(far|zfar|ifar|farcode|switch|cfar|libcode|code)\s+"
+                         r"([0-9a-f]{6})-([0-9a-f]{6})\s", ln)
+            if m and int(m.group(2), 16) >= far_base:
+                end = max(end, int(m.group(3), 16) + 1)
+    return end
 
 
 def image(segs, base, end):
@@ -141,6 +177,8 @@ def main(argv):
     nb, ne, fb, fe = extents(b_segs, b_syms)
     nn, nne, nf, nfe = extents(n_segs, n_syms)
     fn, fne, ff, ffe = extents(f_segs, f_syms)
+    fspan = far_span(base_elf[:-4] + ".map", fb)
+    far_banks = ((max(fspan, fe) - 1) >> 16) - (fb >> 16) + 1
 
     # The shifts are whatever the links say they are; each must move one
     # region by a whole page / bank and leave the other alone.
@@ -176,7 +214,8 @@ def main(argv):
         raise SystemExit(f"entry ${entry:06X} is not in the far region")
 
     hdr = MAGIC + struct.pack("<HHHIBBHBBHHHHI",
-                              nb, near_size, fb & 0xFFFF, far_size, fb >> 16, 1,
+                              nb, near_size, fb & 0xFFFF, far_size, fb >> 16,
+                              far_banks,
                               entry & 0xFFFF, entry >> 16, 0,
                               len(near_hi), len(near_bank), len(far_hi), len(far_bank), 0)
     assert len(hdr) == 32, len(hdr)
