@@ -323,7 +323,23 @@ def one(name, progname, how, keep, check):
         check(room >= 2048,
               f"{name}: the pool has {room} bytes left, and GEMDOS wants "
               f"2,048 for a read slice")
-        print(f"  the pool has {room} bytes left for GEMDOS's slices")
+        # The floor the shell marked once everything permanent was taken:
+        # the accessories, their queues and resources, the process
+        # records, the shell's own buffers (src/aes/shel.c).
+        floor = b.peek16(syms["pool_low"])
+        print(f"  the pool has {room} bytes left for GEMDOS's slices; "
+              f"permanent up to ${floor:04X}")
+        # Nothing should ever have tried to free below what the shell
+        # marked permanent -- the accessories, the process records, the
+        # shell's own buffers (src/sys/app.c).  A refusal here is a
+        # lifetime bug that would otherwise be somebody's memory quietly
+        # going away.
+        check(b.peek16(syms["pool_refused"]) == 0,
+              f"{name}: {b.peek16(syms['pool_refused'])} pool release(s) "
+              f"refused -- something tried to free what is permanent")
+        check(b.peek16(syms["far_refused"]) == 0,
+              f"{name}: {b.peek16(syms['far_refused'])} far release(s) "
+              f"refused")
         print(f"  DOS kind {kind}, drive map {drvmap:#04x}, pool ${mark:04X}, "
               f"far brk ${brk:06X}, pointer {pointer}")
         dirs = listing(disk) if sdfs else dos2_listing(fs)

@@ -181,6 +181,28 @@ void farmem_probe(void)
  * starts the next one.  The gap is lost, which costs at most 64 KB of
  * the fifteen megabytes this machine has -- and buys an allocator whose
  * blocks can be indexed. */
+/* The far heap's floor, and it is there for the reason the pool's is
+ * (src/sys/app.c): app_free winds the heap back to where app_load found
+ * it, which is right for the program and wrong for anything permanent
+ * taken since.  The shell's buffers, the file selector's names, GEMDOS's
+ * state and an accessory's whole far image are all below it. */
+static uint32_t far_low;
+uint16_t far_refused;
+
+void far_keep_mark(void)
+{
+    far_low = farmem.brk;
+}
+
+void far_release(uint32_t mark)
+{
+    if (mark < far_low) {
+        far_refused++;
+        return;
+    }
+    farmem.brk = mark;
+}
+
 uint32_t far_alloc(uint32_t bytes)
 {
     uint32_t base = farmem.brk;

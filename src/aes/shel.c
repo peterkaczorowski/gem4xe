@@ -366,6 +366,20 @@ WORD sh_main(void)
             return APP_E_FILE;
     }
     sh_accs();                  /* before the first program: see above */
+
+    /* EVERYTHING TAKEN SO FAR IS PERMANENT, and from here the machine
+     * keeps that rather than this file arranging it.  Above this mark is
+     * a program's: its near region, its resource, its far image, and
+     * whatever it asks GEMDOS for -- and a program's exit winds both
+     * allocators back to here and no further.  Below it are the shell's
+     * buffers, the selector's names, the desktop's cached image, the
+     * process records and every accessory with its queue, its resource
+     * and its context.  A release that would cross it is refused and
+     * counted (src/sys/app.c), which is the difference between a rule and
+     * a comment: an accessory loaded a moment too late used to be freed
+     * by the first program to exit, in silence. */
+    pool_keep_mark();
+    far_keep_mark();
     sh_runs = 0;
     sh_lastret = 0;
     sh_lastrc = 0;

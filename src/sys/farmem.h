@@ -44,6 +44,12 @@ extern FARMEM farmem;
 
 void     farmem_probe(void);
 uint32_t far_alloc(uint32_t bytes);     /* 0 on failure */
+/* Everything taken so far is permanent: no later far_release() may go
+ * below it.  far_refused counts the releases turned away. */
+void     far_keep_mark(void);
+void     far_release(uint32_t mark);
+extern uint16_t far_refused;
+
 uint16_t far_alloc_banks(uint16_t n);   /* n whole banks, aligned: the
                                          * first bank's number, 0 on failure */
 

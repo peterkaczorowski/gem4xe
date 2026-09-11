@@ -142,6 +142,10 @@ def main(argv):
         take(ACC_QUEUE, 2, nm + " message queue")
         take(near, 0x100, nm + " near region")
         take(pr, 2, nm + " resource")
+    # Where the shell marks the floor: everything permanent is below it
+    # and no program's exit may wind back past it (src/sys/app.c).  The
+    # desktop and its resource are above it, and come and go with it.
+    say(f"  {'-- permanent below here':<34} {'':6}   ${brk:04X}")
     take(desk, 0x100, "the desktop")
     take(desk_rsc, 2, "its resource")
     free = base + pool - brk

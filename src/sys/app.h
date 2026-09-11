@@ -19,6 +19,26 @@
  * resource file's objects (src/aes/rsrc.c), the file selector's tree and
  * its work while it is up (src/aes/fsel.c).  Same bump discipline:
  * pool_mark(), take, pool_release() to the mark.
+ *
+ * WHY A BUMP ALLOCATOR AND NOT A HEAP, since the question is a fair one.
+ * Of the nineteen places that take from the pool, thirteen release in the
+ * same call they took in -- GEMDOS's slices and directory cache, the
+ * selector's working set, an alert's tree -- which is a stack, not a
+ * heap.  The other six are lifetimes: a program's near region and its
+ * resource, an accessory's, the process records.  With one program
+ * running at a time those nest, so a free list would put a header on
+ * every one of the nineteen and add fragmentation to serve a case that
+ * does not arise.  What DID arise is lifetimes going wrong quietly, and
+ * that is what the floor is for:
+ *
+ *   pool_keep_mark()   everything taken so far is permanent
+ *   pool_release(m)    refused, and counted, if m is below that
+ *
+ * with far_keep_mark() and far_release() the same for the far heap.  The
+ * shell sets both once, after the accessories have started and before the
+ * first program (src/aes/shel.c).  If gem4xe ever runs two programs at
+ * once, THAT is when a real allocator earns its header -- and the seam to
+ * put it behind is these four calls.
  */
 #ifndef GEM4XE_APP_H
 #define GEM4XE_APP_H
@@ -50,6 +70,16 @@ uint16_t pool_mark(void);                          /* the cursor         */
 void    *pool_alloc(uint16_t size, uint16_t align); /* 0 when it will not fit */
 void     pool_release(uint16_t mark);
 uint16_t pool_room(void);
+
+/* Everything taken so far is permanent: no later pool_release() may go
+ * below it.  The accessories call it once they have started and taken
+ * what they need (src/aes/shel.c), which is what turns "an accessory is
+ * loaded before the first program" from an arrangement into a rule the
+ * machine keeps.  pool_refused counts the releases turned away -- a
+ * number nobody should ever see. */
+void     pool_keep_mark(void);
+uint16_t pool_floor(void);
+extern uint16_t pool_refused;
 
 /* Where the last program app_load() placed its near region.  Only a
  * diagnostic -- nothing in the engine reads it -- but the gates need it

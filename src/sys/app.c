@@ -22,11 +22,42 @@ static uint16_t pool_brk;       /* 0 until the first take: then the cursor */
  * because a picture does not depend on where the bss is. */
 uint16_t app_near;
 
+/* THE FLOOR.  Nothing may be released below this, and what puts things
+ * under it is pool_keep_mark(): "everything taken so far is permanent."
+ *
+ * It exists because the pool's discipline was a rule in a comment and
+ * the machine had no way to keep it.  An accessory is loaded before the
+ * first program precisely so that the program's exit -- which winds the
+ * pool back to where the program's load found it -- cannot take the
+ * accessory with it (src/aes/shel.c).  That is correct, and it was also
+ * unenforced: load an accessory a moment later and the first program to
+ * exit would free it, silently, and the machine would run on with a
+ * process whose variables belonged to somebody else.
+ *
+ * Now a release that would cross the floor is refused and counted.
+ * pool_refused is a number nobody should ever see; test-boot reads it. */
+static uint16_t pool_low;
+uint16_t pool_refused;
+
 uint16_t pool_mark(void)
 {
-    if (!pool_brk)
+    if (!pool_brk) {
         pool_brk = app_pool_lo;
+        pool_low = app_pool_lo;
+    }
     return pool_brk;
+}
+
+/* Everything taken so far is permanent. */
+void pool_keep_mark(void)
+{
+    pool_low = pool_mark();
+}
+
+uint16_t pool_floor(void)
+{
+    (void)pool_mark();
+    return pool_low;
 }
 
 void *pool_alloc(uint16_t size, uint16_t align)
@@ -42,6 +73,10 @@ void *pool_alloc(uint16_t size, uint16_t align)
 
 void pool_release(uint16_t mark)
 {
+    if (mark < pool_floor()) {
+        pool_refused++;         /* somebody else's memory: see pool_low */
+        return;
+    }
     pool_brk = mark;
 }
 
@@ -165,7 +200,7 @@ void app_free(const APP *app)
     gemdos_release();               /* its handles, searches and DTA */
     vdi_close_virtuals();           /* its workstations */
     pool_release(app->pool_mark);
-    farmem.brk = app->far_mark;     /* and everything it Malloc'd */
+    far_release(app->far_mark);     /* and everything it Malloc'd */
 }
 
 /* The file, in pieces the size of a slice of the pool (2 KB when the pool
@@ -224,7 +259,7 @@ uint32_t far_read_file(const char *cioname, uint32_t *len)
     if (slice != small)
         pool_release(mark);
     if (!total) {
-        farmem.brk = start;
+        far_release(start);
         return 0;
     }
     *len = total;
@@ -245,7 +280,7 @@ int16_t app_load_file(const char *gemname, APP *app)
     }
     st = app_load((const uint8_t __far *)blob, len, app);
     if (st != APP_OK)
-        farmem.brk = mark;              /* the file goes too */
+        far_release(mark);              /* the file goes too */
     else
         app->far_mark = mark;           /* and at app_free, with the rest */
     return st;
