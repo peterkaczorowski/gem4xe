@@ -930,7 +930,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-boot
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-boot
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -1124,12 +1124,6 @@ test-m27: build/m27-boot.atr
 test-m28: build/m28-boot.atr
 	python3 tests/emu/m28_acc.py
 
-# NOT IN `make test` YET, and deliberately: M29.G4A links, and the loader
-# gives it the two far banks its header asks for, but it does not reach
-# its first statement.  The gate is written and red.  See docs/gacs.md --
-# the next thing to look at is the crt's data_init_table walk over `zfar`
-# and `far`, which is the one part of start-up no program in this tree
-# had ever exercised.
 test-m29: build/m29-boot.atr
 	python3 tests/emu/m29_big.py
 

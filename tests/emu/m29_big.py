@@ -115,11 +115,15 @@ def main(argv):
         near = b.peek16(syms["app_near"])
         big = {n: bsym[n] + near - link_near
                for n in ("m29_ran", "m29_zeroed", "m29_seedok", "m29_sum",
-                         "m29_first", "m29_last")}
+                         "m29_first", "m29_last", "m29_step")}
         print(f"  M29.G4A ran {tt} frames after B; its near region is at "
               f"${near:04X}, {far_banks} far banks")
 
-        check(b.peek16(big["m29_ran"]) == 1, "M29.G4A did not reach its end")
+        step = b.peek16(big["m29_step"])
+        check(b.peek16(big["m29_ran"]) == 1,
+              f"M29.G4A did not reach its end -- it got to step {step} of 5 "
+              f"(1 entered main, 2 past appl_init, 3 read the far bss, "
+              f"4 read the initialised far array, 5 wrote and summed them)")
         check(b.peek16(big["m29_zeroed"]) == 1,
               "its far bss did not arrive zeroed -- the bank it was given "
               "held somebody else's bytes")

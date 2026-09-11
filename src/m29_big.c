@@ -47,13 +47,16 @@ __near WORD m29_seedok;         /* seed[] arrived initialised */
 __near WORD m29_sum;            /* the pattern's sum, low word */
 __near WORD m29_first, m29_last;/* big[0] and big[BIG-1] after filling */
 __near WORD m29_ran;            /* it got to the end */
+__near WORD m29_step;           /* ...and how far it got, if it did not */
 
 int main(void)
 {
     WORD i;
     int32_t sum = 0;
 
+    m29_step = 1;               /* entered main at all */
     appl_init();
+    m29_step = 2;               /* ...and came back from appl_init */
 
     m29_zeroed = 1;
     for (i = 0; i < BIG; i++)
@@ -62,10 +65,14 @@ int main(void)
             break;
         }
 
+    m29_step = 3;               /* read 3,000 far words */
+
     m29_seedok = 1;
     for (i = 0; i < 8; i++)
         if (seed[i] != (WORD)(11 * (i + 1)))
             m29_seedok = 0;
+
+    m29_step = 4;               /* read the initialised far array */
 
     /* A pattern that depends on the index, so a pointer that wrapped
      * would sum differently rather than not at all. */
@@ -74,6 +81,7 @@ int main(void)
     for (i = 0; i < BIG; i++)
         sum += big[i];
 
+    m29_step = 5;               /* wrote and summed them */
     m29_sum = (WORD)(sum & 0xFFFF);
     m29_first = big[0];
     m29_last = big[BIG - 1];

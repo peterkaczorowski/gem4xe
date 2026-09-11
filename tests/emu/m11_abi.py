@@ -46,6 +46,7 @@ from m4_aes import PRELUDE                                          # noqa: E402
 from m7_form import poke16, NOT_STARTED, STATUS, ST_GO, ST_DONE, DISK, SYMS, SHOTDIR  # noqa: E402
 
 APP_SYMS = os.path.join(ROOT, "build", "m11_app.sym")
+APP_G4A = os.path.join(ROOT, "build", "m11_app.g4a")
 LOAD_RUN = 3004
 APP_OK = 0
 REC_WORDS = vdiref.RESULT_WORDS
@@ -124,7 +125,16 @@ def main(argv):
     sa = syms["vdi_script"]
     results_addr, count_addr = syms["vdi_results"], syms["vdi_result_count"]
     script_room = min(a for a in syms.values() if a > sa) - sa
-    link_near = min(a for a in app.values())      # the app's placeholder base
+    # The placeholder base the program was LINKED at, from the .G4A
+    # header, which is where the loader reads it too.  It used to be the
+    # lowest symbol in the .sym, and that stopped being the same thing:
+    # a large-data program needs _NearBaseAddress declared
+    # (src/app/gemapp.scm) and it is zero, so the lowest symbol became 0
+    # and every read came out a page adrift -- while the program itself
+    # ran perfectly and returned the right count, which is what made it
+    # look like anything but a gate bug.
+    with open(APP_G4A, "rb") as f:
+        link_near = struct.unpack("<H", f.read(8)[4:6])[0]
     fails = []
 
     def check(cond, msg):

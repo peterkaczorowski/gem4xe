@@ -86,10 +86,27 @@
     '(block stack (size #x0100))
     '(block heap  (size #x0000))
     '(base-address _DirectPageStart AppDP 0)
-    ;; Where a __near variable is addressed from.  A large-data program
-    ;; reaches its near data through a base register rather than
-    ;; absolutely, so the linker has to be told which memory that base
-    ;; names; for a small-data one nothing refers to it.
-    '(base-address _NearBaseAddress AppBss 0)))
+    ;; Where a __near variable is addressed from, and it is ZERO.
+    ;;
+    ;; A large-data program reaches near data as `stx .near sym`, which
+    ;; the assembler turns into the absolute address `sym -
+    ;; _NearBaseAddress` with DB naming the bank.  The crt sets DB = $00
+    ;; and the loader relocates bank-$00 addresses by pages, so the
+    ;; offsets have to BE those addresses: the base is the bottom of the
+    ;; bank, not the bottom of the program's data.
+    ;;
+    ;; Naming AppBss here instead cost an afternoon and looked like
+    ;; anything but what it was.  Every near access became an offset from
+    ;; $1100 -- so the first store in main went to $0000, the program
+    ;; scribbled the OS's zero page and wedged before it reached its own
+    ;; first statement, and the give-away was in the .G4A header all
+    ;; along: near page fixups fell from fourteen to one, because an
+    ;; offset needs no relocating and an address does.
+    ;; Computed from `near` rather than written as a constant, because
+    ;; mkg4a links three times and one of those moves the near region up
+    ;; a page: a fixed offset would put the base at $0100 in that link,
+    ;; the addresses would differ from the base link's for a reason that
+    ;; is not relocation, and every near byte would look like a fixup.
+    (list 'base-address '_NearBaseAddress 'AppDP (- near))))
 
 (define memories (app-layout #x1000 #x020000 #x800 #x100))

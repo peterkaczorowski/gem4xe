@@ -69,12 +69,22 @@ needs, found by building one (`src/m29_big.c`, `make test-m29`):
     comes from the linker's map now, and `m29_big.g4a` asks for two banks
     where every other program in the tree asks for one.
 
-All of that is done.  **What is not done is running it**: M29.G4A links,
-the loader gives it its two banks, and it does not reach its first
-statement.  `make test-m29` is written and red, and out of `make test`
-until it is not.  The next thing to look at is the crt's
-`data_init_table` walk over `far` and `zfar` -- the one part of start-up
-no program in this tree had ever exercised.  After it, the port
+  * **And `_NearBaseAddress` is ZERO**, which is the one that cost the
+    afternoon.  A large-data program reaches near data as
+    `stx .near sym`, which the assembler turns into `sym -
+    _NearBaseAddress` with DB naming the bank; the crt sets DB = $00 and
+    the loader relocates bank-$00 addresses by pages, so the offsets have
+    to BE those addresses.  Naming the program's own data as the base
+    instead made every near access an offset from it, so the first store
+    in `main` went to $0000 -- the program scribbled the OS's zero page
+    and wedged before reaching its own first statement.  The give-away
+    was in the .G4A header all along: near page fixups fell from fourteen
+    to one, because an offset needs no relocating and an address does.
+
+`make test-m29` runs it: 3,000 words of far bss arriving zeroed, an
+initialised far array arriving initialised, the whole array written and
+summed, and the .G4A asking for two far banks where every other program
+in the tree asks for one.  After it, the port
 is: GACS's `shells/gem/main.c` against gem4xe's `COP` ABI instead of the
 ST's trap, and `fopen`/`fread`/`fwrite` onto GEMDOS -- which is now a
 seam with `Fseek` under it (`docs/phase16.md`).
