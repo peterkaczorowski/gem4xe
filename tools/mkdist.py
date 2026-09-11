@@ -177,7 +177,7 @@ def disk_section(src, dest, kind, prose):
     return "\n".join(lines) + "\n"
 
 
-def build(out, tar=None):
+def build(out, tar=None, require_clean=False):
     if os.path.isdir(out):
         shutil.rmtree(out)
     os.makedirs(out)
@@ -209,6 +209,39 @@ def build(out, tar=None):
     shutil.copyfile(os.path.join(ROOT, "COPYING"),
                     os.path.join(out, "COPYING"))
 
+    # THE SOURCE TRAVELS WITH THE BINARIES, because the GPL says it must
+    # and because there is nowhere else to point: section 3 wants the
+    # source alongside or a written offer, and a URL is neither.
+    # `git archive` is exactly what is committed, so the tarball and the
+    # stamp in this page's title describe the same tree.
+    src_tar = os.path.join(out, "src", "gem4xe-src.tar.gz")
+    os.makedirs(os.path.dirname(src_tar), exist_ok=True)
+    # A DIRTY TREE CANNOT BE RELEASED.  `git archive` writes what is
+    # COMMITTED, so on a dirty tree the tarball would not be the source
+    # these binaries were built from -- which is the one thing it exists
+    # to be.  `make all` and the individual disk targets are what to use
+    # mid-change; this one wants a commit.
+    if require_clean and stamp().endswith("-dirty"):
+        raise SystemExit(
+            "mkdist: the working tree has uncommitted changes, so the "
+            "source tarball would not match the binaries beside it.  "
+            "Commit first (docs/licence.md, 'the source travels with the "
+            "binaries'), or build the disks on their own with `make all`.")
+    ident = "gem4xe-" + stamp()
+    r = subprocess.run(["git", "archive", "--format=tar.gz",
+                        f"--prefix={ident}/", "HEAD"],
+                       cwd=ROOT, capture_output=True)
+    if r.returncode:
+        raise SystemExit("mkdist: git archive failed: "
+                         + r.stderr.decode("utf-8", "replace")[:300])
+    with open(src_tar, "wb") as f:
+        f.write(r.stdout)
+
+    # ...and the stamp on its own, so a tester who has unpacked the
+    # folder and forgotten where it came from can still quote a version.
+    with open(os.path.join(out, "VERSION"), "w") as f:
+        f.write(stamp() + "\n")
+
     disks = "\n".join(made)
     if missing:
         disks += ("\n" + "\n".join(
@@ -237,7 +270,7 @@ def main(argv):
     ap.add_argument("out")
     ap.add_argument("--tar")
     a = ap.parse_args(argv[1:])
-    made, missing = build(a.out, a.tar)
+    made, missing = build(a.out, a.tar, require_clean=True)
     print(f"{a.out}: {len(made)} disk(s), {len(SYSTEM)} system files, "
           f"the kit and the page"
           + (f"; {len(missing)} disk(s) not built" if missing else "")

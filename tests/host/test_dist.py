@@ -10,6 +10,15 @@ every menu item lands in exactly one of the two lists, the files the
 page names are the files on the images, and nothing is left unfilled.
 
 The disks themselves are checked by `make test-boot`, which boots them.
+
+THE PROSE HALF IS CHECKED TOO, NOW.  The generated halves stayed true for
+phases on end while the hand-written "what is not there yet" bullets
+rotted: the page was still promising a machine with one VDI driver and no
+`DESKTOP.INF` after both had been built.  So the claims that name a thing
+in the tree are tied to the tree -- if the printer device exists the page
+may not say there is none, and if the ANTIC driver is in the product the
+page may not say VBXE is required.  A claim nothing checks is a claim
+that will be wrong eventually.
 """
 import os
 import re
@@ -46,6 +55,97 @@ class TestDistribution(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.dir, ignore_errors=True)
+
+    # -- the prose half, against the tree ----------------------------
+    def src(self, *parts):
+        with open(os.path.join(ROOT, *parts)) as f:
+            return f.read()
+
+    def test_the_page_does_not_deny_a_device_the_product_has(self):
+        """src/vdi/vdidev.h's table is the list of devices; the page may
+        not say there is one driver when there are three."""
+        mk = self.src("Makefile")
+        for obj, name, denial in (
+                ("build/dev_print.o", "printer",
+                 "there is one VDI driver"),
+                ("build/dev_antic.o", "ANTIC", "VBXE** | required")):
+            if obj in mk:
+                self.assertNotIn(
+                    denial, self.page,
+                    f"the {name} device is linked into GEM.COM and the "
+                    f"page still says {denial!r}")
+
+    def test_the_page_says_the_printer_is_there_and_undriven(self):
+        """Both halves of it: the device exists, and nothing clicks it.
+        When a Print item appears in the desktop's resource this fails,
+        which is the point -- the page will need rewriting that day."""
+        if "build/dev_print.o" not in self.src("Makefile"):
+            self.skipTest("no printer device in this tree")
+        self.assertRegex(self.page, r"PRINTER=|PRINTTO=",
+                         "the page does not mention the printer's config keys")
+        rsc = self.src("tools", "deskrsc.py")
+        has_print = re.search(r'"[^"]*\bPrint\b', rsc)
+        self.assertFalse(
+            has_print and "nothing prints yet" in self.page,
+            "the desktop's resource has a Print item now, so the page's "
+            "'nothing prints yet' is stale")
+
+    def test_the_page_does_not_deny_a_desktop_inf(self):
+        """src/desk/ writes one (test-m19 reads it back), so the page may
+        not say nothing is written."""
+        if "INF_REV_LEVEL" not in self.src("src", "desk", "desk.h"):
+            self.skipTest("no DESKTOP.INF in this tree")
+        self.assertNotIn(
+            "nothing is written to a `DESKTOP.INF` yet", self.page,
+            "the desktop writes a DESKTOP.INF and the page denies it")
+
+    def test_the_page_warns_about_the_emulator_s_cpu_bugs(self):
+        """tools/altirra/ carries a patch for two 65C816 core faults that
+        hit the PRODUCT, not just the gates.  A page that hands out an
+        Altirra command line has to say so."""
+        patch = os.path.join(ROOT, "tools", "altirra",
+                             "altirra-65c816-native-mode.patch")
+        if not os.path.exists(patch):
+            self.skipTest("the CPU patch is gone: upstream took it?")
+        self.assertIn("AltirraSDL", self.page)
+        self.assertRegex(
+            self.page, r"pull request #88|tools/altirra",
+            "the page gives an Altirra command line and never mentions "
+            "that its 65C816 core needs the patch in tools/altirra/")
+
+    def test_the_source_travels_with_the_binaries(self):
+        """GPL section 3 wants the source alongside or a written offer,
+        and there is no repository to point at, so it goes in the box.
+        It must also be the RIGHT source, which is why mkdist refuses a
+        dirty tree -- see test_a_dirty_tree_is_refused."""
+        tarball = os.path.join(self.out, "src", "gem4xe-src.tar.gz")
+        self.assertTrue(os.path.isfile(tarball),
+                        "the distribution carries no source tarball")
+        import tarfile
+        with tarfile.open(tarball) as t:
+            names = t.getnames()
+        self.assertGreater(len(names), 100,
+                           f"the source tarball holds only {len(names)} entries")
+        for want in ("src/vdi/vdi.c", "src/aes/event.c", "COPYING",
+                     "docs/licence.md", "Makefile"):
+            self.assertTrue(any(n.endswith("/" + want) for n in names),
+                            f"the source tarball is missing {want}")
+
+    def test_the_version_is_written_down_for_a_bug_report(self):
+        with open(os.path.join(self.out, "VERSION")) as f:
+            v = f.read().strip()
+        self.assertRegex(v, r"^\d{4}-\d{2}-\d{2}-")
+        self.assertIn(v, self.page,
+                      "VERSION and the page's stamp disagree")
+
+    def test_a_dirty_tree_is_refused(self):
+        """The check itself, by reading mkdist rather than by dirtying
+        the tree: a release whose source does not match its binaries is
+        worse than no release."""
+        with open(os.path.join(ROOT, "tools", "mkdist.py")) as f:
+            src = f.read()
+        self.assertIn('endswith("-dirty")', src,
+                      "mkdist no longer refuses to package a dirty tree")
 
     def test_the_page_has_nothing_left_unfilled(self):
         """A template placeholder that survives into the artefact is a

@@ -60,18 +60,18 @@ SRC_SDX  ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures
 # needs the patched emulator's --u1mbrom (tools/altirra/), ALTIRRASDL=...
 SRC_U1MB ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['u1mb']['flash'])" 2>/dev/null)
 
-HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/hello.o
-M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m2_vbxe.o build/vbxe.o
+HELLO_OBJS = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/hello.o
+M2_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/m2_vbxe.o build/vbxe.o
 # The context switch on its own: farmem for the parked extents, app_run
 # out of abi.s for the way a context enters its program, and the runner's
 # own stubs for the engine that is deliberately not linked.
-M27_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m27_ctx.o \
+M27_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/m27_ctx.o \
              build/ctx.o build/ctxs.o build/farmem.o build/abis.o
 # The ANTIC surface milestone: no VBXE object at all, which is the point
-M24_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m24_antic.o build/antic.o build/font8x8.o
+M24_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/m24_antic.o build/antic.o build/font8x8.o
 # The VDI on the ANTIC device: the same vdi.c, compiled for the other
 # side of the seam and linked against dev_antic.o.
-M25_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m25_antic_vdi.o \
+M25_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/m25_antic_vdi.o \
              build/vdi.o build/dev_antic.o build/dev_print.o build/emit.o build/antic.o build/pointer.o \
              build/font8x8.o build/font6x6.o build/fillpat.o build/sintbl.o build/font.o \
              build/farmem.o build/irq.o build/irqs.o build/rapidus.o \
@@ -85,7 +85,7 @@ M25_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m25_antic_vdi
 # a page in far memory rather than a screen -- plus the emitters, which
 # are the only reason this milestone needs CIO.  No AES: nothing draws an
 # object tree onto paper here, so the stub answers for the call gate.
-M30_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m30_print.o \
+M30_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/m30_print.o \
              build/vdi.o build/dev_print.o build/emit.o build/pointer.o \
              build/font8x8.o build/fillpat.o build/sintbl.o build/font.o \
              build/farmem.o build/irq.o build/irqs.o build/rapidus.o \
@@ -95,7 +95,7 @@ M30_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/m30_print.o \
              build/wind.o build/ctrl.o build/menu.o build/form.o \
              build/alert.o build/gemdata.o build/lang.o build/lang_rsc.o \
              build/rsrc.o build/apppool.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/m3_vdi.o build/vdi.o build/dev_vbxe.o build/pointer.o build/dev_print.o build/emit.o build/objc.o build/graf.o build/event.o build/proc.o build/ctx.o build/ctxs.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/antic.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/m3_vdi.o build/vdi.o build/dev_vbxe.o build/pointer.o build/dev_print.o build/emit.o build/objc.o build/graf.o build/event.o build/proc.o build/ctx.o build/ctxs.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/antic.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
 
 # GEM.COM, the product (src/gem.c): the runner's objects with the runner
 # itself and its compiled-in test application taken out, linked on the
@@ -246,6 +246,13 @@ build/menu.o: src/aes/menu.c src/aes/aes.h src/vdi/vdi.h
 build/div16.o: src/sys/div16.s
 	@mkdir -p build
 	$(AS) -o $@ $<
+
+# Our own memcpy/memset/str* so that no Apache-2.0 object from the
+# vendor's C library is linked into a GPLv2 binary (src/sys/clib.c has
+# the argument, and docs/licence.md what is still outstanding).
+build/clib.o: src/sys/clib.c
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
 
 build/farmem.o: src/sys/farmem.c src/sys/farmem.h
 	@mkdir -p build
@@ -404,15 +411,29 @@ build/shel.o: src/aes/shel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/d
 # $(call g4a,name,objects,near bss,near bits,stack,more mkg4a args,more targets)
 # The stack is part of the near bss (src/app/gemapp.scm); its size is the
 # linker's --stack-size, so the map shows what each application asked for.
-G4A_LIB = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o
+# build/app/clib.o is src/sys/clib.c -- the same eight ISO C functions the
+# engine uses, for the same reason: Calypsi's are Apache-2.0 and this is a
+# GPLv2 tree (docs/licence.md).  It is part of the LIBRARY and not of a
+# program, so the kit ships it and anybody's application gets it.
+G4A_LIB = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o \
+          build/app/clib.o
 
 # ...and the same three for an application compiled --data-model=large.
 # The linker refuses to mix runtime models, so a large-data program needs
 # a large-data library beside it and Calypsi's own clib-lc-ld.a rather
 # than clib-lc-sd.a.  The SOURCES are the same files: only the model
 # differs (docs/gacs.md).
-G4A_LIB_LD = build/appld/crt_gemapp.o build/appld/gemabi.o build/appld/gemlib.o
+G4A_LIB_LD = build/appld/crt_gemapp.o build/appld/gemabi.o build/appld/gemlib.o \
+             build/appld/clib.o
 LIB_LD     = clib-lc-ld.a
+
+build/app/clib.o: src/sys/clib.c
+	@mkdir -p build/app
+	$(CC) $(CFLAGS) -o $@ $<
+
+build/appld/clib.o: src/sys/clib.c
+	@mkdir -p build/appld
+	$(CC) --code-model=large --data-model=large -O2 -o $@ $<
 
 build/appld/%.o: src/app/%.s
 	@mkdir -p build/appld

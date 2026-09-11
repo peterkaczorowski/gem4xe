@@ -43,7 +43,13 @@ LD  = $(CALYPSI)/bin/ln65816
 CFLAGS = --code-model=large --data-model=small -O2 -I include
 LDLIB  = clib-lc-sd.a
 
-OBJS = build/crt_gemapp.o build/gemabi.o build/gemlib.o build/$(NAME).o
+# build/clib.o is lib/clib.c: memcpy, memset and the str* functions.  They
+# are here rather than taken from clib-lc-sd.a because Calypsi's come from
+# Apache NuttX and Apache 2.0 cannot be linked into a GPLv2 binary -- and
+# gem4xe is GPLv2.  If your program is under something else you may use
+# the library's instead; if it is GPL, use these.
+OBJS = build/crt_gemapp.o build/gemabi.o build/gemlib.o build/clib.o \
+       build/$(NAME).o
 LDOPT = lib/gemapp.scm $(OBJS) $(LDLIB) --rtattr exit=simplified \
         --cstartup gemapp --stack-size $(STACK)
 

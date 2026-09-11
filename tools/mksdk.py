@@ -32,6 +32,7 @@ MANIFEST = [
     ("Makefile",            "tools/sdk/Makefile"),
     ("include/gem.h",       "src/app/gem.h"),
     ("lib/gemlib.c",        "src/app/gemlib.c"),
+    ("lib/clib.c",          "src/sys/clib.c"),
     ("lib/gemabi.s",        "src/app/gemabi.s"),
     ("lib/crt_gemapp.s",    "src/app/crt_gemapp.s"),
     ("lib/gemapp.scm",      "src/app/gemapp.scm"),

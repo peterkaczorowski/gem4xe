@@ -12,7 +12,7 @@ halves are generated from the program itself.
 
 | | |
 |---|---|
-| **VBXE** | required; an **FX core, version 1.26**. gem4xe detects the core by the low nibble of `CORE_REVISION` and writes an overlay priority of `$FF`, because bits 6/7 changed meaning at 1.26 and a priority of `$00` makes the overlay vanish there |
+| **VBXE** | wanted, not required; an **FX core, version 1.26**.  gem4xe detects the core by the low nibble of `CORE_REVISION` and writes an overlay priority of `$FF`, because bits 6/7 changed meaning at 1.26 and a priority of `$00` makes the overlay vanish there.  **Without a VBXE you get 320 x 168 on ANTIC mode F instead** — one `GEM.COM` carries both drivers and picks at start-up, and `VIDEO=ANTIC` in `GEM4XE.CFG` forces the small screen on a machine that has a VBXE its monitor will not show |
 | **a 65C816 with linear RAM** | required. **Rapidus** is the one this is tested on; Antonia should qualify and is not emulated, so it is untested |
 | **Ultimate 1MB** | optional. Its DS1305 is where file timestamps come from, and its flash can hold SpartaDOS X and the PBI BIOS that mounts a CF card |
 
@@ -35,6 +35,19 @@ same devices.  This is the command line the test suite itself uses:
 
 In desktop Altirra the two devices go in **System > Configure System >
 Devices**; the machine is an 800XL, PAL, BASIC off.
+
+**One warning about emulation, and it is not gem4xe's bug.**  Altirra's
+65C816 core has two faults in native mode, which is the only mode gem4xe
+runs in: a taken branch does the 6502's page-crossing dummy read (so code
+in a high bank can put `$D5xx` on the bus and switch a cartridge's bank),
+and `SEI` with an interrupt pending leaves a shadow flag the native-mode
+vectors never clear, which re-enters the handler at every opcode fetch
+until the stack has walked through all of bank `$00`.  Both are fixed by
+the patch in the source tree's `tools/altirra/`, filed upstream as
+[pull request #88](https://github.com/ilmenit/AltirraSDL/pull/88).  A
+stall with the screen frozen, or a machine that reboots itself, is more
+likely to be one of those than anything here — **on real hardware neither
+exists**.
 
 ## Booting
 
@@ -144,16 +157,21 @@ Besides those:
 
 - **one item at a time.**  There is no rubber band and no shift-click,
   so every operation works on the single selected item.
-- **the desktop does not remember its layout across a power cycle.**
-  It keeps window places while it runs a program and gets them back
-  afterwards, but nothing is written to a `DESKTOP.INF` yet — which is
-  what *Save desktop* above would do.
+- **the desktop remembers its layout only when you ask it to.**
+  *Options -> Save desktop* writes a `DESKTOP.INF` and the desktop reads
+  it at start-up; nothing is saved automatically, so a power cycle loses
+  whatever was not saved.
 - **a folder cannot be renamed.**  `XIO 32` renames a file, and both
   SpartaDOS 3.2 and SpartaDOS X answer "file not found" for a
   directory, so Show info shows a folder's name greyed rather than
   offering something the DOS will refuse.
-- **no clipboard and no printer.**  `scrp_read`/`scrp_write` are not
-  implemented, and there is one VDI driver, for the screen.
+- **nothing prints yet, though the printer driver is in there.**  The VDI
+  has a printer device — 640 x 800 dots, which `v_updwk` writes out as
+  PCL 5 or PostScript to wherever `PRINTTO=` names — and `PRINTER=` in
+  `GEM4XE.CFG` turns it on.  What is missing is a *Print* item: no
+  program opens the workstation yet, so there is nothing to click.  An
+  application you write yourself can use it today.
+- **no clipboard.**  `scrp_read`/`scrp_write` are not implemented.
 
 ## Writing a program for it
 
@@ -164,15 +182,29 @@ read its `README.md`, and `make` turns its commented example into a
 
 ## If something is wrong
 
-Worth saying, with the report: which disk, what the machine is (real or
-emulated, and with what), what was on the screen, and what you did.  A
-screenshot settles most of it.  The refusal in step 1 is not a fault;
-anything after step 3 probably is.
+Worth saying, with the report: **the line in `VERSION`** (it is also this
+page's subtitle and the name of the folder this came in), which disk,
+what the machine is (real or emulated, and with what), what was on the
+screen, and what you did.  A screenshot settles most of it.  The refusal
+in step 1 is not a fault; anything after step 3 probably is.
+
+The program itself does not yet show its build anywhere -- the About box
+gives the AES version, which is 1.40 for every build of it -- so
+`VERSION` is the only place the number lives on your side.
 
 ## Licence
 
 gem4xe is **GPLv2 or later** — `COPYING`, and the source carries the
 lineage: EmuTOS, which is the Caldera-GPL'd Digital Research GEM.
+`src/gem4xe-src.tar.gz` is the tree these binaries were built from,
+exactly as committed, because that is what the licence asks for.
+
+One caveat, stated because it is true rather than because anyone will
+ask: the **compiler's own runtime** is linked into these binaries and is
+not ours to give -- Calypsi's library says "permission to use", not
+permission to redistribute.  The source is free to pass on; these
+`.COM` and `.G4A` files are for trying this out, and a proper release
+waits on that grant.  `docs/licence.md` in the source has the detail.
 
 **The DOS on each disk image is not gem4xe's**, and is there so that the
 disk boots.  Whoever owns it owns it; the images are for trying this

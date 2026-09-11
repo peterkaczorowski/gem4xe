@@ -6,3 +6,8 @@ __pycache__/
 fixtures.toml
 *.lst
 *.map
+
+# Stray compiler listings: `-o vdi.s` once put one at the root, and a
+# zero-byte `none` came from a redirect.  Both were committed by accident.
+/vdi.s
+/none

@@ -7,9 +7,10 @@ in principle Antonia), and **Ultimate 1MB**.
 The target surface is **640 × 240, 16 colours** — VBXE's HR overlay, 4bpp chunky.
 That is a better GEM surface than the Atari ST's medium resolution.
 
-**A 65C816 with linear RAM is required.** The 6502 and ANTIC/GTIA paths are
-deferred, not cancelled: the driver seam that would host an ANTIC back end
-exists and is unused.
+**A 65C816 with linear RAM is required.** VBXE is not: one `GEM.COM` carries
+both display drivers and chooses at start-up, so a machine without a VBXE gets
+320×168 on ANTIC mode F instead — `make test-m26` boots the shipped binary three
+ways to prove it. The 6502 path is still deferred.
 
 ## Why it is shaped the way it is
 
@@ -447,13 +448,25 @@ stops.
 
 ## Licence
 
-GPLv2 or later — see `COPYING`. The lineage is EmuTOS, which *is* the
-Caldera-GPL'd Digital Research GEM source carried forward in C, so the licence
-position is inherited rather than chosen. It is v2-or-later **throughout**,
-including the AES: EmuTOS's `vdi/*.c` say "version 2 or at your option any
-later version" and several of its `aes/*.c` name no version at all, and this
-tree resolves that silence the same way for every file rather than shipping
-under two licences.
+GPLv2 or later — see `COPYING`, and **`docs/licence.md` for the position in
+full**, including the one thing still outstanding. The lineage is EmuTOS, which
+*is* the Caldera-GPL'd Digital Research GEM source carried forward in C, so the
+licence is inherited rather than chosen.
+
+It is v2-or-later throughout, including the AES, and the reason is in GPLv2
+itself rather than in an assumption: EmuTOS's `vdi/*.c` say "version 2 or at
+your option any later version", its `aes/*.c` name no version at all, and
+section 9 says that when a program *does not* specify a version "you may choose
+any version ever published by the Free Software Foundation". Silence is the
+recipient's choice, not a v2-only grant.
+
+**The source is freely distributable and the binaries are not yet.** No
+Apache-2.0 object is linked any more — `src/sys/clib.c` supplies the eight ISO
+C functions Calypsi took from NuttX — but the compiler's own runtime is still
+the vendor's, and it says "Permission to use with the Calypsi tool chain is
+hereby granted", which is not permission to redistribute and which no choice of
+GPL version fixes. `tests/host/test_licence.py` reads the linker maps and
+fails if either half regresses.
 
 Where a file follows EmuTOS, its header names the donor file it follows, and
 the two trees are read side by side deliberately — this is a port, not a clean

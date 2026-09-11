@@ -61,6 +61,7 @@ Read in order if you want the argument; jump if you want an answer.
 | | |
 |---|---|
 | [gacs.md](gacs.md) | The applications gem4xe exists for — GACS and RetroWP — and what a port actually needs. Carries the measurement: GACS's engine compiles for the 65C816 in both data models, runs in Calypsi's simulator against the tables it ships, computes a vehicle, and wants 84 bytes of bank $00. `make gacs-check` keeps asking. |
+| [licence.md](licence.md) | Why the tree is GPLv2-or-later including the AES (GPLv2 section 9: silence is the recipient's choice of version), what was unlinked to keep it that way, and the one thing still outstanding — the compiler's own runtime carries permission to *use*, not to redistribute. `tests/host/test_licence.py` reads the maps so neither half regresses quietly. |
 | [shipping.md](shipping.md) | How gem4xe boots, what it lives on and what language it speaks: the floppies and why one had to become double density, the APT/CF card and the three things about a U1MB machine that had to be measured before it would boot, the install layout, and `LANG.RSC`. |
 | [spike-spartados.md](spike-spartados.md) | The reconnaissance behind Phase 13: what SpartaDOS does to memory, measured before any of it was ported. |
 | [bench.md](bench.md) | GEMBench's tests on this machine, in milliseconds. Not a gate — a number to argue with. |
