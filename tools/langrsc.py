@@ -8,7 +8,7 @@ Three outputs from one description, because the three must not disagree:
     lang.rsc      the file.  GEM.COM reads it at start-up and keeps it in
                   far memory; replacing it is how gem4xe is translated
                   (docs/shipping.md, section 5).
-    lang_rsc.c    the same bytes as a `__far` array: the English the
+    lang_rsc.c    the same bytes as a `FAR` array: the English the
                   system falls back on when the file is not there, so a
                   disk without LANG.RSC still speaks.
     lang_rsc.h    the indices, so src/ and this file cannot disagree
@@ -77,8 +77,8 @@ def build(strings=None):
 def c_source(data, path):
     lines = [f"/* {os.path.basename(path)}: LANG.RSC as the system falls back "
              f"on it, {len(data)} bytes.  Generated -- do not edit. */",
-             "#include <stdint.h>",
-             f"const uint8_t __far lang_rsc[{len(data)}] = {{"]
+             "#include <stdint.h>", "#include \"portab.h\"",
+             f"const uint8_t FAR lang_rsc[{len(data)}] = {{"]
     for i in range(0, len(data), 12):
         lines.append("    " + ", ".join(f"0x{b:02X}" for b in data[i:i + 12]) + ",")
     lines.append("};")
@@ -89,11 +89,11 @@ def c_header(data, path):
     lines = [f"/* {os.path.basename(path)}: what the system says, by index.  "
              "Generated -- do not edit. */",
              "#ifndef GEM4XE_LANG_RSC_H", "#define GEM4XE_LANG_RSC_H",
-             "#include <stdint.h>",
+             "#include <stdint.h>", "#include \"portab.h\"",
              f"#define LANG_RSC_SIZE {len(data)}",
              f"#define LANG_NSTRING  {len(STRINGS)}",
              f"#define LANG_MAXLEN   {MAXLEN}",
-             "extern const uint8_t __far lang_rsc[LANG_RSC_SIZE];"]
+             "extern const uint8_t FAR lang_rsc[LANG_RSC_SIZE];"]
     lines += [f"#define LS_{name:<12s} {i}" for i, (name, _) in enumerate(STRINGS)]
     lines.append("#endif")
     return "\n".join(lines) + "\n"

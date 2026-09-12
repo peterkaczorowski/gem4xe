@@ -6,6 +6,7 @@
  * a VDI is the BLITTER, not the CPU, so there is nothing to hand-optimise yet.
  * Measure before moving any of this to as65816.
  */
+#include "portab.h"
 #include "vbxe.h"
 #include "../sys/zwin.h"
 
@@ -99,9 +100,9 @@ volatile uint8_t *vram_win(uint32_t addr)
  * 15 a word.  The window pointer is not volatile: the compiler will not
  * store a word through a volatile pointer without a stack temporary, and
  * a store through a pointer it cannot see past is not one it can drop. */
-static __attribute__((tiny)) uint16_t vw_n;
-static const uint16_t * __attribute__((tiny)) vw_s;
-static uint16_t * __attribute__((tiny)) vw_w;
+static TINY uint16_t vw_n;
+static const uint16_t * TINY vw_s;
+static uint16_t * TINY vw_w;
 
 void vram_write(uint32_t addr, const uint8_t *src, uint16_t len)
 {

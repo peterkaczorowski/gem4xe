@@ -32,6 +32,7 @@
  *
  * NOT HERE YET: the menu bar.
  */
+#include "portab.h"
 #include "aes.h"
 #include "proc.h"
 #include "../sys/farmem.h"
@@ -113,8 +114,8 @@ WINDOW         gl_win[NUM_WIN];
  * second way of doing the same thing.  It is taken ONCE, at AES start-up,
  * because far_alloc is a bump allocator that app_free winds back -- the
  * same rule the shell and the accessories live by. */
-static ORECT __far *gl_olist;
-static ORECT __far *gl_rul;         /* the free rectangles */
+static ORECT FAR *gl_olist;
+static ORECT FAR *gl_rul;         /* the free rectangles */
 static ORECT   gl_mkrect;           /* the rectangle newrect is breaking:
                                      * a value, near, passed by address */
 static TEDINFO gl_aname, gl_ainfo;
@@ -139,7 +140,7 @@ static void or_start(void)
          * did, get_orect answers 0 and the window manager behaves as it
          * does when the pool is empty, which is a documented limit
          * rather than a crash. */
-        gl_olist = (ORECT __far *)far_alloc(
+        gl_olist = (ORECT FAR *)far_alloc(
                         (uint32_t)NUM_ORECT * sizeof(ORECT));
         if (!gl_olist)
             return;
@@ -151,9 +152,9 @@ static void or_start(void)
     }
 }
 
-static ORECT __far *get_orect(void)
+static ORECT FAR *get_orect(void)
 {
-    ORECT __far *po = gl_rul;
+    ORECT FAR *po = gl_rul;
 
     if (po)
         gl_rul = po->o_link;
@@ -169,10 +170,10 @@ static ORECT __far *get_orect(void)
  * linked in front of `old`.  NULL if the pool is empty: that piece is then
  * simply not in the list and never drawn into -- the documented limit of
  * NUM_ORECT (the reference raises instead, so a case that hits it fails). */
-static ORECT __far *mkpiece(WORD tlrb, const ORECT __far *new,
-                            ORECT __far *old)
+static ORECT FAR *mkpiece(WORD tlrb, const ORECT FAR *new,
+                            ORECT FAR *old)
 {
-    ORECT __far *rl = get_orect();
+    ORECT FAR *rl = get_orect();
     WORD x, y, w, h;
     WORD oy2, ny2;
 
@@ -221,12 +222,12 @@ static ORECT __far *mkpiece(WORD tlrb, const ORECT __far *new,
 
 /* Break r around new: the pieces of r not under new replace r in the
  * list after p.  Returns the last piece, or NULL if they do not overlap. */
-static ORECT __far *brkrct(const ORECT __far *new, ORECT __far *r,
-                           ORECT __far *p)
+static ORECT FAR *brkrct(const ORECT FAR *new, ORECT FAR *r,
+                           ORECT FAR *p)
 {
     WORD have_piece[4];
     WORD i;
-    ORECT __far *piece;
+    ORECT FAR *piece;
 
     if (new->o_gr.g_x < r->o_gr.g_x + r->o_gr.g_w &&
         new->o_gr.g_x + new->o_gr.g_w > r->o_gr.g_x &&
@@ -258,7 +259,7 @@ static ORECT __far *brkrct(const ORECT __far *new, ORECT __far *r,
 static void mkrect(OBJECT *tree, WORD wh, WORD sx, WORD sy)
 {
     WINDOW *pwin = &gl_win[wh];
-    ORECT __far *p, *r;
+    ORECT FAR *p, *r;
 
     (void)tree; (void)sx; (void)sy;
     /* o_link is the first field, so the window's own list head can be
@@ -269,13 +270,13 @@ static void mkrect(OBJECT *tree, WORD wh, WORD sx, WORD sy)
      * for the bank and is right to.
      *
      * CAST THE POINTER, NOT AN INTEGER.  Writing the same thing as
-     * `uint32_t a = (uint16_t)&pwin->w_rlist; (ORECT __far *)a` crashes
+     * `uint32_t a = (uint16_t)&pwin->w_rlist; (ORECT FAR *)a` crashes
      * cc65816 5.18 outright -- "internal error:
      * Translator/Compiler/IL/Evaluate.hs:370: Irrefutable pattern failed"
      * -- and it was the first thing tried here.  Converting a near
      * POINTER to a far one is fine; converting an integer VARIABLE to one
      * is what it cannot do. */
-    p = (ORECT __far *)&pwin->w_rlist;
+    p = (ORECT FAR *)&pwin->w_rlist;
     r = p->o_link;
     while (r) {
         p = brkrct(&gl_mkrect, r, p);
@@ -296,13 +297,13 @@ static void mkrect(OBJECT *tree, WORD wh, WORD sx, WORD sy)
 static void newrect(OBJECT *tree, WORD wh, WORD sx, WORD sy)
 {
     WINDOW *pwin = &gl_win[wh];
-    ORECT __far *r, *new;
+    ORECT FAR *r, *new;
 
     (void)sx; (void)sy;
     /* free the old list */
     r = pwin->w_rlist;
     while (r) {
-        ORECT __far *next = r->o_link;
+        ORECT FAR *next = r->o_link;
         r->o_link = gl_rul;
         gl_rul = r;
         r = next;
@@ -389,7 +390,7 @@ static void w_adjust(WORD parent, WORD obj, WORD x, WORD y, WORD w, WORD h)
  * that meets pc (the screen if NULL), with the clip set to the piece. */
 static void do_walk(WORD wh, OBJECT *tree, WORD obj, WORD depth, GRECT *pc)
 {
-    ORECT __far *po;
+    ORECT FAR *po;
     GRECT t;
 
     if (wh == NIL)
@@ -631,7 +632,7 @@ void w_cpwalk(WORD wh, WORD obj, WORD depth, WORD usetrue)
 /* ---- redraw messages ------------------------------------------------------ */
 
 /* pt = the bounding box of window wh's rectangle list; FALSE if empty. */
-static WORD w_union(const ORECT __far *po, GRECT *pt)
+static WORD w_union(const ORECT FAR *po, GRECT *pt)
 {
     if (!po)
         return FALSE;
@@ -873,7 +874,7 @@ static void w_snap(GRECT *pt)
 void wm_init(void)
 {
     WORD i;
-    ORECT __far *po;
+    ORECT FAR *po;
 
     or_start();
     for (i = 0; i < NUM_WIN; i++) {
@@ -1007,7 +1008,7 @@ WORD wm_delete(WORD w_handle)
 /* The rectangle list walk of WF_FIRSTXYWH/WF_NEXTXYWH: the next piece
  * of the list from po that meets pt, into pout, leaving the cursor after
  * it; an empty rectangle when the list is done. */
-static void w_owns(WINDOW *pwin, ORECT __far *po, const GRECT *pt,
+static void w_owns(WINDOW *pwin, ORECT FAR *po, const GRECT *pt,
                    GRECT *pout)
 {
     while (po) {

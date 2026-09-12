@@ -21,7 +21,7 @@ WORD hello_n;
 WORD hello_op[NREC];            /* VDI opcodes as they are, AES over 1000 */
 WORD hello_ret;
 
-__simple_call void vdi_call(VDIPB __far *pb)
+SIMPLE_CALL void vdi_call(VDIPB FAR *pb)
 {
     (void)pb;
     if (hello_n < NREC)
@@ -33,7 +33,7 @@ __simple_call void vdi_call(VDIPB __far *pb)
     }
 }
 
-__simple_call void aes_call(AESPB __far *pb)
+SIMPLE_CALL void aes_call(AESPB FAR *pb)
 {
     (void)pb;
     if (hello_n < NREC)
@@ -41,7 +41,7 @@ __simple_call void aes_call(AESPB __far *pb)
     int_out[0] = 1;
 }
 
-__simple_call void dos_call(GDPB __far *pb)
+SIMPLE_CALL void dos_call(GDPB FAR *pb)
 {
     if (hello_n < NREC)
         hello_op[hello_n++] = (WORD)(2000 + pb->fn);

@@ -28,7 +28,7 @@ full-screen repaints.
 
 | Gate | | |
 |---|---|---|
-| `make test-host` | 128/128 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; the application kit, assembled and built out of a copy of itself in a directory of its own; and the far allocator, asked for the blocks that used to straddle a bank |
+| `make test-host` | 146/146 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; the application kit, assembled and built out of a copy of itself in a directory of its own; and the far allocator, asked for the blocks that used to straddle a bank |
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
@@ -424,7 +424,13 @@ fixed upstream so its workaround can go.
 Needs [Calypsi](https://github.com/hth313/Calypsi-tool-chains) 5.18+ for the
 65816 and Python 3. There is no Atari target in Calypsi, so this tree carries
 its own board support: `src/crt_atari.s`, `src/gem4xe.scm` and
-`tools/mkxex.py`. The GEM system font is extracted from an
+`tools/mkxex.py`. The C itself is compiler-neutral: every word Calypsi adds
+to the language — `__far`, `__attribute__((tiny))`, `__simple_call`, the
+interrupt intrinsics — is mapped once in `src/portab.h` (`FAR`, `TINY`,
+`SIMPLE_CALL`, `cpu_sei()`…) and appears nowhere else, which
+`tests/host/test_portab.py` enforces; a second 65816 compiler needs a second
+block in that header and its own assembly sources, not a sweep through 26,000
+lines. The GEM system font is extracted from an
 [EmuTOS](https://emutos.sourceforge.io/) checkout at build time rather than
 committed here, so point `EMUTOS=` at one; `CALYPSI=` finds the tool chain.
 Both default to `~/dev/…`.

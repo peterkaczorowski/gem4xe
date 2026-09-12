@@ -7,6 +7,7 @@
  * fast the CPU runs, and this one writes bytes because its framebuffer
  * is plain motherboard RAM the accelerator reaches at full speed.
  */
+#include "portab.h"
 #include "antic.h"
 
 /* Character N's row r of a face.  The strip is one byte per character
@@ -23,8 +24,8 @@
  * vdi_font_expand and draw_glyph_cpu use on the other device. */
 static uint8_t an_font_row(uint32_t face, uint16_t ch, uint16_t row)
 {
-    const uint8_t __far *sr =
-        (const uint8_t __far *)(face + (uint32_t)row * AN_FONT_STRIDE);
+    const uint8_t FAR *sr =
+        (const uint8_t FAR *)(face + (uint32_t)row * AN_FONT_STRIDE);
     return sr[ch & 0xFF];
 }
 

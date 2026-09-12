@@ -30,6 +30,7 @@
  * about with `imagemask`'s polarity, which is the sort of thing that is
  * only ever discovered on paper.
  */
+#include "portab.h"
 #include "vdi.h"
 #include "print.h"
 #include "../sys/cio.h"
@@ -48,7 +49,7 @@ static uint8_t row[PR_STRIDE];
 static char    hex[PR_STRIDE * 2 + 2];
 static char    sbuf[80];        /* a literal, on its way through */
 
-static const char __far digits[] = "0123456789ABCDEF";
+static const char FAR digits[] = "0123456789ABCDEF";
 
 /* THE LITERALS ARE FAR.  Bank $00 holds 2.4 KB of near code and rodata
  * for the whole engine and this file's PostScript preamble alone would
@@ -56,7 +57,7 @@ static const char __far digits[] = "0123456789ABCDEF";
  * not find a home for.  So they live in `cfar` beside the system font
  * and come through a near buffer on the way to CIO, which writes from
  * bank $00 and no further. */
-static void put(int16_t fd, const char __far *s)
+static void put(int16_t fd, const char FAR *s)
 {
     uint16_t n = 0;
 
@@ -74,21 +75,21 @@ static void put(int16_t fd, const char __far *s)
 
 /* A number, in as many digits as it has.  No printf here: an application
  * links no libc and neither does this. */
-static const char __far L_PCL_HEAD[] = "\033E\033*t";
-static const char __far L_PCL_RES[] = "R\033*r0A";
-static const char __far L_PCL_SKIP[] = "\033*b";
-static const char __far L_PCL_Y[] = "Y";
-static const char __far L_PCL_W[] = "W";
-static const char __far L_PCL_END[] = "\033*rC\033E";
-static const char __far L_PS1[] = "%!PS-Adobe-3.0\n%%BoundingBox: 76 108 537 684\n"
+static const char FAR L_PCL_HEAD[] = "\033E\033*t";
+static const char FAR L_PCL_RES[] = "R\033*r0A";
+static const char FAR L_PCL_SKIP[] = "\033*b";
+static const char FAR L_PCL_Y[] = "Y";
+static const char FAR L_PCL_W[] = "W";
+static const char FAR L_PCL_END[] = "\033*rC\033E";
+static const char FAR L_PS1[] = "%!PS-Adobe-3.0\n%%BoundingBox: 76 108 537 684\n"
                           "%%Creator: gem4xe\n%%Pages: 1\n%%EndComments\n/picstr ";
-static const char __far L_PS2[] = " string def\ngsave\n76 108 translate\n460.8 576 scale\n";
-static const char __far L_SP[] = " ";
-static const char __far L_SP0[] = " 0 ";
-static const char __far L_PS3[] = " 1 [";
-static const char __far L_PS4[] = " 0 0 -";
-static const char __far L_PS5[] = "]\n{currentfile picstr readhexstring pop} image\n";
-static const char __far L_PS_END[] = "grestore\nshowpage\n%%EOF\n";
+static const char FAR L_PS2[] = " string def\ngsave\n76 108 translate\n460.8 576 scale\n";
+static const char FAR L_SP[] = " ";
+static const char FAR L_SP0[] = " 0 ";
+static const char FAR L_PS3[] = " 1 [";
+static const char FAR L_PS4[] = " 0 0 -";
+static const char FAR L_PS5[] = "]\n{currentfile picstr readhexstring pop} image\n";
+static const char FAR L_PS_END[] = "grestore\nshowpage\n%%EOF\n";
 
 static void putnum(int16_t fd, uint16_t v)
 {
@@ -107,7 +108,7 @@ static void putnum(int16_t fd, uint16_t v)
  * offset is 16 bits (src/vdi/print.h). */
 static void row_get(WORD r)
 {
-    const uint8_t __far *p = pr_page + (uint16_t)((uint16_t)r * PR_STRIDE);
+    const uint8_t FAR *p = pr_page + (uint16_t)((uint16_t)r * PR_STRIDE);
     WORD i;
 
     for (i = 0; i < PR_STRIDE; i++)

@@ -19,6 +19,7 @@
 #ifndef GEM4XE_ABI_H
 #define GEM4XE_ABI_H
 
+#include "portab.h"
 #include <stdint.h>
 
 #define ABI_GEMDOS 0x01     /* COP signature bytes; the app's gemabi.s */
@@ -47,6 +48,6 @@ void gem_entry(void);          /* the C side of the handler */
 
 /* Call an application's entry point (a far address) as a subroutine and
  * return what its main() returned.  abi.s. */
-__attribute__((simple_call)) int16_t app_run(uint32_t entry);
+SIMPLE_CALL int16_t app_run(uint32_t entry);
 
 #endif /* GEM4XE_ABI_H */

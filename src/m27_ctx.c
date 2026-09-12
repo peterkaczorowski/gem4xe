@@ -26,6 +26,7 @@
  * print them: what a switch actually costs is a number this project
  * would rather measure than argue about.
  */
+#include "portab.h"
 #include <stdint.h>
 #include "sys/ctx.h"
 #include "sys/farmem.h"
@@ -115,7 +116,7 @@ static int16_t proc_b(void)
     }
 }
 
-__task void main(void)
+TASK void main(void)
 {
     STATUS[0] = 'C';
     STATUS[1] = 'X';

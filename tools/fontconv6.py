@@ -77,8 +77,9 @@ def emit(data, out):
                 " * character instead; unpacking here is what lets the device\n"
                 " * blit every face with the same code.\n"
                 " */\n"
-                "#include <stdint.h>\n\n"
-                "const uint8_t __far font6x6[%d] = {\n" % (OUT_W, SRC_H, OUT_W, len(data)))
+                "#include <stdint.h>\n"
+                "#include \"portab.h\"\n\n"
+                "const uint8_t FAR font6x6[%d] = {\n" % (OUT_W, SRC_H, OUT_W, len(data)))
         for i in range(0, len(data), 16):
             f.write("    " + ", ".join("0x%02X" % b for b in data[i:i + 16]) + ",\n")
         f.write("};\n")

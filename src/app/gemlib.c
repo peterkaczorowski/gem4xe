@@ -14,6 +14,7 @@
  * up to 80 characters.  An application that adds a binding with larger
  * needs grows them.
  */
+#include "portab.h"
 #include "gem.h"
 
 WORD contrl[12], intin[128], ptsin[16], intout[45], ptsout[12];
@@ -664,7 +665,7 @@ WORD objc_draw(OBJECT *tree, WORD start, WORD depth, WORD x, WORD y, WORD w, WOR
     int_in[3] = y;
     int_in[4] = w;
     int_in[5] = h;
-    addr_in[0] = (LONG)(uint32_t)(OBJECT __far *)tree;
+    addr_in[0] = (LONG)(uint32_t)(OBJECT FAR *)tree;
     return aes(42, 6, 1, 1, 0);
 }
 
@@ -784,7 +785,7 @@ WORD evnt_button(WORD clicks, UWORD mask, UWORD state,
 
 WORD evnt_mesag(WORD *msg)
 {
-    addr_in[0] = (LONG)(uint32_t)(WORD __far *)msg;
+    addr_in[0] = (LONG)(uint32_t)(WORD FAR *)msg;
     return aes(23, 0, 1, 1, 0);
 }
 
@@ -811,7 +812,7 @@ WORD evnt_multi(UWORD flags, WORD bclk, UWORD bmsk, UWORD bst,
         int_in[9 + i] = p[i];
     int_in[14] = (WORD)tlo;
     int_in[15] = (WORD)thi;
-    addr_in[0] = (LONG)(uint32_t)(WORD __far *)msg;
+    addr_in[0] = (LONG)(uint32_t)(WORD FAR *)msg;
     r = aes(25, 16, 7, 1, 0);
     *mx = int_out[1];
     *my = int_out[2];
@@ -827,7 +828,7 @@ WORD evnt_multi(UWORD flags, WORD bclk, UWORD bmsk, UWORD bst,
 
 static LONG tree_addr(OBJECT *tree)
 {
-    return (LONG)(uint32_t)(OBJECT __far *)tree;
+    return (LONG)(uint32_t)(OBJECT FAR *)tree;
 }
 
 WORD menu_bar(OBJECT *tree, WORD showit)
@@ -930,7 +931,7 @@ WORD form_dial(WORD type, WORD x1, WORD y1, WORD w1, WORD h1,
 WORD form_alert(WORD defbut, const char *s)
 {
     int_in[0] = defbut;
-    addr_in[0] = (LONG)(uint32_t)(const char __far *)s;
+    addr_in[0] = (LONG)(uint32_t)(const char FAR *)s;
     return aes(52, 1, 1, 1, 0);
 }
 
@@ -1001,7 +1002,7 @@ WORD graf_dragbox(WORD w, WORD h, WORD sx, WORD sy,
 WORD graf_mouse(WORD mode, const WORD *form)
 {
     int_in[0] = mode;
-    addr_in[0] = (LONG)(uint32_t)(const WORD __far *)form;
+    addr_in[0] = (LONG)(uint32_t)(const WORD FAR *)form;
     return aes(78, 1, 1, 1, 0);
 }
 
@@ -1017,7 +1018,7 @@ WORD graf_mkstate(WORD *mx, WORD *my, WORD *mb, WORD *ks)
 
 WORD rsrc_load(const char *name)
 {
-    addr_in[0] = (LONG)(uint32_t)(const char __far *)name;
+    addr_in[0] = (LONG)(uint32_t)(const char FAR *)name;
     return aes(110, 0, 1, 1, 0);
 }
 
@@ -1041,19 +1042,19 @@ WORD shel_write(WORD doex, WORD isgr, WORD iscr, const char *cmd, const char *ta
     int_in[0] = doex;
     int_in[1] = isgr;
     int_in[2] = iscr;
-    addr_in[0] = (LONG)(uint32_t)(const char __far *)cmd;
-    addr_in[1] = (LONG)(uint32_t)(const char __far *)tail;
+    addr_in[0] = (LONG)(uint32_t)(const char FAR *)cmd;
+    addr_in[1] = (LONG)(uint32_t)(const char FAR *)tail;
     return aes(121, 3, 1, 2, 0);
 }
 
-WORD shel_get(void __far *buffer, WORD len)
+WORD shel_get(void FAR *buffer, WORD len)
 {
     int_in[0] = len;
     addr_in[0] = (LONG)(uint32_t)buffer;
     return aes(122, 1, 1, 1, 0);
 }
 
-WORD shel_put(const void __far *data, WORD len)
+WORD shel_put(const void FAR *data, WORD len)
 {
     int_in[0] = len;
     addr_in[0] = (LONG)(uint32_t)data;
@@ -1073,7 +1074,7 @@ WORD appl_write(WORD id, WORD length, const WORD *msg)
 {
     int_in[0] = id;
     int_in[1] = length;
-    addr_in[0] = (LONG)(uint32_t)(const WORD __far *)msg;
+    addr_in[0] = (LONG)(uint32_t)(const WORD FAR *)msg;
     return aes(12, 2, 1, 1, 0);
 }
 
@@ -1105,14 +1106,14 @@ WORD menu_text(OBJECT *tree, WORD item, const char *text)
 {
     int_in[0] = item;
     addr_in[0] = tree_addr(tree);
-    addr_in[1] = (LONG)(uint32_t)(const char __far *)text;
+    addr_in[1] = (LONG)(uint32_t)(const char FAR *)text;
     return aes(34, 1, 1, 2, 0);
 }
 
 WORD menu_register(WORD pid, const char *str)
 {
     int_in[0] = pid;
-    addr_in[0] = (LONG)(uint32_t)(const char __far *)str;
+    addr_in[0] = (LONG)(uint32_t)(const char FAR *)str;
     return aes(35, 1, 1, 1, 0);
 }
 
@@ -1184,8 +1185,8 @@ WORD graf_watchbox(OBJECT *tree, WORD obj, WORD instate, WORD outstate)
 WORD fsel_input(char *path, char *sel, WORD *button)
 {
     WORD r;
-    addr_in[0] = (LONG)(uint32_t)(char __far *)path;
-    addr_in[1] = (LONG)(uint32_t)(char __far *)sel;
+    addr_in[0] = (LONG)(uint32_t)(char FAR *)path;
+    addr_in[1] = (LONG)(uint32_t)(char FAR *)sel;
     r = aes(90, 0, 2, 2, 0);
     *button = int_out[1];
     return r;
@@ -1194,9 +1195,9 @@ WORD fsel_input(char *path, char *sel, WORD *button)
 WORD fsel_exinput(char *path, char *sel, WORD *button, const char *label)
 {
     WORD r;
-    addr_in[0] = (LONG)(uint32_t)(char __far *)path;
-    addr_in[1] = (LONG)(uint32_t)(char __far *)sel;
-    addr_in[2] = (LONG)(uint32_t)(const char __far *)label;
+    addr_in[0] = (LONG)(uint32_t)(char FAR *)path;
+    addr_in[1] = (LONG)(uint32_t)(char FAR *)sel;
+    addr_in[2] = (LONG)(uint32_t)(const char FAR *)label;
     r = aes(91, 0, 2, 3, 0);
     *button = int_out[1];
     return r;
@@ -1206,7 +1207,7 @@ WORD rsrc_saddr(WORD type, WORD index, void *addr)
 {
     int_in[0] = type;
     int_in[1] = index;
-    addr_in[0] = (LONG)(uint32_t)(void __far *)addr;
+    addr_in[0] = (LONG)(uint32_t)(void FAR *)addr;
     return aes(113, 2, 1, 1, 0);
 }
 
@@ -1219,21 +1220,21 @@ WORD rsrc_obfix(OBJECT *tree, WORD obj)
 
 WORD shel_read(char *cmd, char *tail)
 {
-    addr_in[0] = (LONG)(uint32_t)(char __far *)cmd;
-    addr_in[1] = (LONG)(uint32_t)(char __far *)tail;
+    addr_in[0] = (LONG)(uint32_t)(char FAR *)cmd;
+    addr_in[1] = (LONG)(uint32_t)(char FAR *)tail;
     return aes(120, 0, 1, 2, 0);
 }
 
 WORD shel_find(char *path)
 {
-    addr_in[0] = (LONG)(uint32_t)(char __far *)path;
+    addr_in[0] = (LONG)(uint32_t)(char FAR *)path;
     return aes(124, 0, 1, 1, 0);
 }
 
 WORD shel_envrn(char **value, const char *name)
 {
-    addr_in[0] = (LONG)(uint32_t)(void __far *)value;
-    addr_in[1] = (LONG)(uint32_t)(const char __far *)name;
+    addr_in[0] = (LONG)(uint32_t)(void FAR *)value;
+    addr_in[1] = (LONG)(uint32_t)(const char FAR *)name;
     return aes(125, 0, 1, 2, 0);
 }
 
@@ -1264,53 +1265,53 @@ static LONG dos(WORD fn)
 WORD Sversion(void)                       { return (WORD)dos(0x30); }
 WORD Dgetdrv(void)                        { return (WORD)dos(0x19); }
 WORD Dsetdrv(WORD drive)                  { dw(6, drive); return (WORD)dos(0x0E); }
-LONG Dsetpath(const char __far *path)     { dl(6, (LONG)path); return dos(0x3B); }
-LONG Dcreate(const char __far *path)      { dl(6, (LONG)path); return dos(0x39); }
-LONG Ddelete(const char __far *path)      { dl(6, (LONG)path); return dos(0x3A); }
-LONG Fdelete(const char __far *name)      { dl(6, (LONG)name); return dos(0x41); }
+LONG Dsetpath(const char FAR *path)     { dl(6, (LONG)path); return dos(0x3B); }
+LONG Dcreate(const char FAR *path)      { dl(6, (LONG)path); return dos(0x39); }
+LONG Ddelete(const char FAR *path)      { dl(6, (LONG)path); return dos(0x3A); }
+LONG Fdelete(const char FAR *name)      { dl(6, (LONG)name); return dos(0x41); }
 LONG Fsnext(void)                         { return dos(0x4F); }
 LONG Fclose(WORD handle)                  { dw(6, handle); return dos(0x3E); }
 LONG Malloc(LONG size)                    { dl(6, size); return dos(0x48); }
-LONG Mfree(void __far *block)             { dl(6, (LONG)block); return dos(0x49); }
-void Fsetdta(DTA __far *dta)              { dl(6, (LONG)dta); dos(0x1A); }
-DTA __far *Fgetdta(void)                  { return (DTA __far *)dos(0x2F); }
+LONG Mfree(void FAR *block)             { dl(6, (LONG)block); return dos(0x49); }
+void Fsetdta(DTA FAR *dta)              { dl(6, (LONG)dta); dos(0x1A); }
+DTA FAR *Fgetdta(void)                  { return (DTA FAR *)dos(0x2F); }
 
-LONG Dgetpath(char __far *buf, WORD drive)
+LONG Dgetpath(char FAR *buf, WORD drive)
 {
     dl(6, (LONG)buf);
     dw(10, drive);
     return dos(0x47);
 }
 
-LONG Dfree(DISKINFO __far *info, WORD drive)
+LONG Dfree(DISKINFO FAR *info, WORD drive)
 {
     dl(6, (LONG)info);
     dw(10, drive);
     return dos(0x36);
 }
 
-LONG Fsfirst(const char __far *spec, WORD attr)
+LONG Fsfirst(const char FAR *spec, WORD attr)
 {
     dl(6, (LONG)spec);
     dw(10, attr);
     return dos(0x4E);
 }
 
-LONG Fopen(const char __far *name, WORD mode)
+LONG Fopen(const char FAR *name, WORD mode)
 {
     dl(6, (LONG)name);
     dw(10, mode);
     return dos(0x3D);
 }
 
-LONG Fcreate(const char __far *name, WORD attr)
+LONG Fcreate(const char FAR *name, WORD attr)
 {
     dl(6, (LONG)name);
     dw(10, attr);
     return dos(0x3C);
 }
 
-LONG Fread(WORD handle, LONG count, void __far *buf)
+LONG Fread(WORD handle, LONG count, void FAR *buf)
 {
     dw(6, handle);
     dl(8, count);
@@ -1318,7 +1319,7 @@ LONG Fread(WORD handle, LONG count, void __far *buf)
     return dos(0x3F);
 }
 
-LONG Fwrite(WORD handle, LONG count, const void __far *buf)
+LONG Fwrite(WORD handle, LONG count, const void FAR *buf)
 {
     dw(6, handle);
     dl(8, count);
@@ -1334,7 +1335,7 @@ LONG Fseek(LONG offset, WORD handle, WORD mode)
     return dos(0x42);
 }
 
-LONG Frename(const char __far *oldname, const char __far *newname)
+LONG Frename(const char FAR *oldname, const char FAR *newname)
 {
     dw(6, 0);
     dl(8, (LONG)oldname);
@@ -1342,7 +1343,7 @@ LONG Frename(const char __far *oldname, const char __far *newname)
     return dos(0x56);
 }
 
-LONG Fattrib(const char __far *name, WORD wflag, WORD attr)
+LONG Fattrib(const char FAR *name, WORD wflag, WORD attr)
 {
     dl(6, (LONG)name);
     dw(10, wflag);
@@ -1354,7 +1355,7 @@ LONG Fattrib(const char __far *name, WORD wflag, WORD attr)
  * caught up with (src/sys/gemdos.c). */
 LONG Fdatime(WORD *timeptr, WORD handle, WORD wflag)
 {
-    dl(6, (LONG)(uint32_t)(WORD __far *)timeptr);
+    dl(6, (LONG)(uint32_t)(WORD FAR *)timeptr);
     dw(10, handle);
     dw(12, wflag);
     return dos(0x57);

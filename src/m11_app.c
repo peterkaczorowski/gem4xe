@@ -25,6 +25,7 @@
  * calls so the harness can reconcile gem4xe's COP count with the
  * application's.
  */
+#include "portab.h"
 #include "gem.h"
 
 #define NREC       18
@@ -90,8 +91,8 @@ int main(void)
     WORD pxy[8];
 
     ncalls = 0;
-    tree[1].ob_spec = (LONG)(uint32_t)(char __far *)s_hello;
-    tree[2].ob_spec = (LONG)(uint32_t)(char __far *)s_ok;
+    tree[1].ob_spec = (LONG)(uint32_t)(char FAR *)s_hello;
+    tree[2].ob_spec = (LONG)(uint32_t)(char FAR *)s_ok;
 
     appl_init();                                        record_aes();
     handle = graf_handle(&wchar, &hchar, &wbox, &hbox); record_aes();

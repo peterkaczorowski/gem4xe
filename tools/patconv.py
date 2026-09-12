@@ -50,14 +50,15 @@ def emit(tables, out):
                 " * 16-aligned screen word; a pattern's rows are indexed by y AND\n"
                 " * its row mask (rows - 1).\n"
                 " */\n"
+                "#include \"portab.h\"\n"
                 "#include \"vdi.h\"\n\n")
         for donor, ours, rows, count in TABLES:
             words = tables[ours]
             f.write(f"/* {donor}: {count} patterns of {rows} rows */\n")
-            # __far: the tables are 608 bytes and bank $00 has none to
+            # FAR: the tables are 608 bytes and bank $00 has none to
             # spare, so they live in `cfar` with the far code and are read
             # long (src/gem4xe.scm, and docs/phase24.md for what filled it)
-            f.write(f"const UWORD __far {ours}[{rows * count}] = {{\n")
+            f.write(f"const UWORD FAR {ours}[{rows * count}] = {{\n")
             for i in range(0, len(words), rows):
                 chunk = words[i:i + rows]
                 for j in range(0, len(chunk), 8):

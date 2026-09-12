@@ -1,8 +1,9 @@
 /* farmem.c -- discover and allocate linear RAM above bank $00. */
+#include "portab.h"
 #include "farmem.h"
 
 /* Calypsi wants the address-space qualifier AFTER the base type in a
- * declarator: `uint8_t __far *p`, not `__far uint8_t *p`.  The latter parses
+ * declarator: `uint8_t FAR *p`, not `FAR uint8_t *p`.  The latter parses
  * at file scope but is rejected as a local, which is a confusing way to find
  * out. */
 
@@ -43,26 +44,26 @@ static uint16_t far_first_free_bank(void)
 
 void far_write8(uint32_t addr, uint8_t v)
 {
-    uint8_t __far *p = (uint8_t __far *)addr;
+    uint8_t FAR *p = (uint8_t FAR *)addr;
     *p = v;
 }
 
 uint8_t far_read8(uint32_t addr)
 {
-    uint8_t __far *p = (uint8_t __far *)addr;
+    uint8_t FAR *p = (uint8_t FAR *)addr;
     return *p;
 }
 
 void far_put(uint32_t dst, const uint8_t *src, uint16_t len)
 {
-    uint8_t __far *p = (uint8_t __far *)dst;
+    uint8_t FAR *p = (uint8_t FAR *)dst;
     while (len--)
         *p++ = *src++;
 }
 
 void far_get(uint8_t *dst, uint32_t src, uint16_t len)
 {
-    uint8_t __far *p = (uint8_t __far *)src;
+    uint8_t FAR *p = (uint8_t FAR *)src;
     while (len--)
         *dst++ = *p++;
 }
@@ -71,8 +72,8 @@ void far_get(uint8_t *dst, uint32_t src, uint16_t len)
  * copy of it both live above bank $00 (shel_get, shel_put). */
 void far_copy(uint32_t dst, uint32_t src, uint16_t len)
 {
-    uint8_t __far *d = (uint8_t __far *)dst;
-    const uint8_t __far *s = (const uint8_t __far *)src;
+    uint8_t FAR *d = (uint8_t FAR *)dst;
+    const uint8_t FAR *s = (const uint8_t FAR *)src;
     while (len--)
         *d++ = *s++;
 }
@@ -80,7 +81,7 @@ void far_copy(uint32_t dst, uint32_t src, uint16_t len)
 /* Far fill (the shell buffer's clearing). */
 void far_fill(uint32_t dst, uint8_t v, uint16_t len)
 {
-    uint8_t __far *d = (uint8_t __far *)dst;
+    uint8_t FAR *d = (uint8_t FAR *)dst;
     while (len--)
         *d++ = v;
 }
@@ -90,7 +91,7 @@ void far_fill(uint32_t dst, uint8_t v, uint16_t len)
  * buffers are sized, so neither copy may run past `max` with its NUL. */
 void far_strget(char *dst, uint32_t src, uint16_t max)
 {
-    const char __far *p = (const char __far *)src;
+    const char FAR *p = (const char FAR *)src;
     uint16_t k;
     for (k = 0; k + 1 < max && p[k]; k++)
         dst[k] = p[k];
@@ -99,7 +100,7 @@ void far_strget(char *dst, uint32_t src, uint16_t max)
 
 void far_strput(uint32_t dst, const char *src, uint16_t max)
 {
-    char __far *p = (char __far *)dst;
+    char FAR *p = (char FAR *)dst;
     uint16_t k;
     for (k = 0; k + 1 < max && src[k]; k++)
         p[k] = src[k];
@@ -168,7 +169,7 @@ void farmem_probe(void)
 /* A bump allocator.  gem4xe has no need to free far memory -- the AES's
  * lifetime is the program's -- and a bump pointer over megabytes is both
  * correct and impossible to fragment. */
-/* ⚠ A BLOCK MAY NOT CROSS A BANK BOUNDARY.  Calypsi's `__far` pointer
+/* ⚠ A BLOCK MAY NOT CROSS A BANK BOUNDARY.  Calypsi's `FAR` pointer
  * arithmetic is 16-bit WITHIN a bank -- carrying into the bank byte is
  * what `__huge` is for -- so a buffer that straddles one wraps round to
  * the bottom of its own bank the moment it is indexed past the edge,

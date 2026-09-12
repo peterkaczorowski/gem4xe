@@ -10,6 +10,7 @@
  * out a dialog on a 640x240 VBXE overlay and, later, on ANTIC mode F, and the
  * only thing that knows the difference is the driver behind v_opnwk.
  */
+#include "portab.h"
 #include <string.h>
 #include "aes.h"
 #include "../vdi/vdi.h"
@@ -286,7 +287,7 @@ void gsx_mfform(WORD which, WORD *out)
 {
     if (which < 0 || which >= GEM_MFORMS)
         which = 0;
-    far_get((uint8_t *)out, (uint32_t)(const WORD __far *)gem_mforms[which],
+    far_get((uint8_t *)out, (uint32_t)(const WORD FAR *)gem_mforms[which],
             GEM_MFORM_WORDS * 2);
 }
 

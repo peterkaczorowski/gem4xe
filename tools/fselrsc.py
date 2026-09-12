@@ -138,8 +138,8 @@ def build():
 def c_source(data):
     lines = [f"/* {os.path.basename(sys.argv[0])}: the file selector's .RSC, "
              f"{len(data)} bytes.  Generated -- do not edit. */",
-             "#include <stdint.h>",
-             f"const uint8_t __far fs_rsc[{len(data)}] = {{"]
+             "#include <stdint.h>", "#include \"portab.h\"",
+             f"const uint8_t FAR fs_rsc[{len(data)}] = {{"]
     for i in range(0, len(data), 12):
         lines.append("    " + ", ".join(f"0x{b:02X}" for b in data[i:i + 12])
                      + ",")
@@ -151,9 +151,9 @@ def c_header(data):
     lines = [f"/* {os.path.basename(sys.argv[0])}: the file selector's "
              "object indices.  Generated -- do not edit. */",
              "#ifndef GEM4XE_FSEL_RSC_H", "#define GEM4XE_FSEL_RSC_H",
-             "#include <stdint.h>",
+             "#include <stdint.h>", "#include \"portab.h\"",
              f"#define FS_RSC_SIZE {len(data)}",
-             f"extern const uint8_t __far fs_rsc[FS_RSC_SIZE];"]
+             f"extern const uint8_t FAR fs_rsc[FS_RSC_SIZE];"]
     lines += [f"#define FS_{name:<10s} {value}" for name, value in INDICES]
     lines.append("#endif")
     return "\n".join(lines) + "\n"

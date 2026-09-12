@@ -1,4 +1,5 @@
 /* rapidus.c -- switch the Rapidus SRAM in over bank $00.  See rapidus.h. */
+#include "portab.h"
 #include "rapidus.h"
 #include "vbxe/vbxe.h"          /* MEMAC_WIN_ADDR, MEMAC_WIN_SIZE */
 
@@ -10,13 +11,13 @@ extern char _DirectPageStart;
 
 static uint8_t reg_read(uint32_t a)
 {
-    volatile uint8_t __far *p = (volatile uint8_t __far *)a;
+    volatile uint8_t FAR *p = (volatile uint8_t FAR *)a;
     return *p;
 }
 
 static void reg_write(uint32_t a, uint8_t v)
 {
-    volatile uint8_t __far *p = (volatile uint8_t __far *)a;
+    volatile uint8_t FAR *p = (volatile uint8_t FAR *)a;
     *p = v;
 }
 

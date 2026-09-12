@@ -1,4 +1,5 @@
 /* app.c -- the G4A loader.  See app.h; the format is tools/mkg4a.py's. */
+#include "portab.h"
 #include <string.h>
 #include "sys/app.h"
 #include "sys/abi.h"
@@ -87,24 +88,24 @@ uint16_t pool_room(void)
 
 #define HDR_SIZE 32
 
-static uint16_t rd16(const uint8_t __far *p, uint16_t off)
+static uint16_t rd16(const uint8_t FAR *p, uint16_t off)
 {
     return (uint16_t)(p[off] | ((uint16_t)p[off + 1] << 8));
 }
 
-static uint32_t rd32(const uint8_t __far *p, uint16_t off)
+static uint32_t rd32(const uint8_t FAR *p, uint16_t off)
 {
     return (uint32_t)rd16(p, off) | ((uint32_t)rd16(p, off + 2) << 16);
 }
 
-int16_t app_load(const uint8_t __far *blob, uint32_t len, APP *app)
+int16_t app_load(const uint8_t FAR *blob, uint32_t len, APP *app)
 {
     uint16_t near_size, far_off, n_nhi, n_nbank, n_fhi, n_fbank, k;
     uint32_t far_size, need, lists, entry;
     uint8_t  far_banks, dpage, dbank;
     uint16_t bank;
     uint8_t *near;
-    uint8_t __far *far;
+    uint8_t FAR *far;
 
     memset(app, 0, sizeof *app);     /* a failed load reports zeros */
     if (len < HDR_SIZE)
@@ -150,16 +151,16 @@ int16_t app_load(const uint8_t __far *blob, uint32_t len, APP *app)
      * constant: the high byte of a near address by the page difference,
      * the bank byte of a far address by the bank difference. */
     near = (uint8_t *)app->near_base;
-    far = (uint8_t __far *)app->far_addr;
+    far = (uint8_t FAR *)app->far_addr;
     for (k = 0; k < near_size; k++)
         near[k] = blob[HDR_SIZE + k];
-    __memcpy_far(far, blob + HDR_SIZE + near_size, (size_t)far_size);
+    memcpy_far(far, blob + HDR_SIZE + near_size, (size_t)far_size);
 
     dpage = (uint8_t)((app->near_base - app->link_near) >> 8);
     dbank = (uint8_t)(bank - app->link_bank);
     app->fixups = 0;
     {
-        const uint8_t __far *l = blob + lists;
+        const uint8_t FAR *l = blob + lists;
         for (k = 0; k < n_nhi; k++, l += 2) {
             uint16_t o = rd16(l, 0);
             if (o >= near_size)
@@ -278,7 +279,7 @@ int16_t app_load_file(const char *gemname, APP *app)
         memset(app, 0, sizeof *app);
         return APP_E_FILE;
     }
-    st = app_load((const uint8_t __far *)blob, len, app);
+    st = app_load((const uint8_t FAR *)blob, len, app);
     if (st != APP_OK)
         far_release(mark);              /* the file goes too */
     else

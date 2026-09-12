@@ -21,15 +21,16 @@
  *                       every offset, which is the case a span routine
  *                       usually gets wrong at exactly one offset
  */
+#include "portab.h"
 #include "antic/antic.h"
 #include "vdi/vdi.h"      /* the 8x8 face this milestone draws with */
 
 #define STATUS ((volatile unsigned char *) 0x0600)
 
-__task void main(void)
+TASK void main(void)
 {
     int16_t i;
-    const uint32_t FACE8 = (uint32_t)(const uint8_t __far *)font8x8;
+    const uint32_t FACE8 = (uint32_t)(const uint8_t FAR *)font8x8;
     /* the same eight rows tools/anticref.py has */
     static const uint16_t patt[8] = {
         0xFF00, 0x8080, 0x8080, 0x8080, 0x0FF0, 0x0808, 0x0808, 0x0808

@@ -36,6 +36,7 @@
  * through far pointers and writes the result back, so nothing is copied
  * here.
  */
+#include "portab.h"
 #include "vdi/vdi.h"
 #include "aes/aes.h"
 #include "aes/proc.h"
@@ -74,13 +75,13 @@ typedef struct {
 
 /* ---- VDI ---------------------------------------------------------------- */
 
-static void vdi_entry(const VDIPB_IMG __far *pb)
+static void vdi_entry(const VDIPB_IMG FAR *pb)
 {
-    WORD __far *c  = (WORD __far *)pb->contrl;
-    WORD __far *ii = (WORD __far *)pb->intin;
-    WORD __far *pi = (WORD __far *)pb->ptsin;
-    WORD __far *io = (WORD __far *)pb->intout;
-    WORD __far *po = (WORD __far *)pb->ptsout;
+    WORD FAR *c  = (WORD FAR *)pb->contrl;
+    WORD FAR *ii = (WORD FAR *)pb->intin;
+    WORD FAR *pi = (WORD FAR *)pb->ptsin;
+    WORD FAR *io = (WORD FAR *)pb->intout;
+    WORD FAR *po = (WORD FAR *)pb->ptsout;
     WORD k, n;
 
     for (k = 0; k < CONTRL_SIZE; k++)
@@ -128,7 +129,7 @@ static void *near_of(int32_t a)
  * AES call that returns an address (the donor's ad_rso). */
 static uint32_t ad_rso;
 
-static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
+static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
                      WORD *int_out, const int32_t *addr_in)
 {
     OBJECT *tree = 0;
@@ -164,7 +165,7 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
         break;
     case 12:                        /* appl_write: id, len, buffer */
         {
-            const WORD __far *m = (const WORD __far *)addr_in[0];
+            const WORD FAR *m = (const WORD FAR *)addr_in[0];
             WORD msg[8];
             for (k = 0; k < 8; k++)
                 msg[k] = m[k];
@@ -191,7 +192,7 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
         ev_mouse((const MOBLK *)&int_in[0], &int_out[1]);
         break;
     case 23: {                      /* evnt_mesag: buffer */
-        WORD __far *m = (WORD __far *)addr_in[0];
+        WORD FAR *m = (WORD FAR *)addr_in[0];
         WORD msg[8];
         ev_mesag(msg);
         for (k = 0; k < 8; k++)
@@ -203,7 +204,7 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
                  | ((uint32_t)(uint16_t)int_in[1] << 16));
         break;
     case 25: {                      /* evnt_multi */
-        WORD __far *m = (WORD __far *)addr_in[0];
+        WORD FAR *m = (WORD FAR *)addr_in[0];
         WORD msg[8] = {0, 0, 0, 0, 0, 0, 0, 0};
         uint32_t ms = 0;
         if (int_in[0] & MU_TIMER)
@@ -516,12 +517,12 @@ static WORD crysbind(WORD opcode, WORD __far *global, const WORD *int_in,
     return ret;
 }
 
-static void aes_entry(const AESPB_IMG __far *pb)
+static void aes_entry(const AESPB_IMG FAR *pb)
 {
-    const WORD __far *ctl = (const WORD __far *)pb->control;
-    const WORD __far *ii  = (const WORD __far *)pb->int_in;
-    const int32_t __far *ai  = (const int32_t __far *)pb->addr_in;
-    WORD __far *io = (WORD __far *)pb->int_out;
+    const WORD FAR *ctl = (const WORD FAR *)pb->control;
+    const WORD FAR *ii  = (const WORD FAR *)pb->int_in;
+    const int32_t FAR *ai  = (const int32_t FAR *)pb->addr_in;
+    WORD FAR *io = (WORD FAR *)pb->int_out;
     WORD control[C_SIZE];
     WORD int_in[I_SIZE];
     WORD int_out[O_SIZE];
@@ -547,7 +548,7 @@ static void aes_entry(const AESPB_IMG __far *pb)
     for (k = 0; k < n; k++)
         addr_in[k] = ai[k];
 
-    int_out[0] = crysbind(control[0], (WORD __far *)pb->global,
+    int_out[0] = crysbind(control[0], (WORD FAR *)pb->global,
                           int_in, int_out, addr_in);
 
     n = control[2];
@@ -556,7 +557,7 @@ static void aes_entry(const AESPB_IMG __far *pb)
     for (k = 0; k < n; k++)
         io[k] = int_out[k];
     if (control[0] == 112 && control[4] > 0)
-        *(uint32_t __far *)pb->addr_out = ad_rso;
+        *(uint32_t FAR *)pb->addr_out = ad_rso;
 }
 
 /* ---- the entry ---------------------------------------------------------- */
@@ -574,10 +575,10 @@ void gem_entry(void)
         app_calls++;
     switch (gem_which) {
     case ABI_VDI:
-        vdi_entry((const VDIPB_IMG __far *)gem_pb);
+        vdi_entry((const VDIPB_IMG FAR *)gem_pb);
         break;
     case ABI_AES:
-        aes_entry((const AESPB_IMG __far *)gem_pb);
+        aes_entry((const AESPB_IMG FAR *)gem_pb);
         break;
     case ABI_GEMDOS:
         gemdos_call(gem_pb);

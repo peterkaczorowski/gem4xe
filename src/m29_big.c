@@ -27,6 +27,7 @@
  *   zeroes and nothing else goes wrong, which is exactly the kind of
  *   quiet failure this file exists to make loud.
  */
+#include "portab.h"
 #include "gem.h"
 
 #define BIG  3000
@@ -42,12 +43,12 @@ static WORD seed[8] = { 11, 22, 33, 44, 55, 66, 77, 88 };   /* far: bits */
  * A real shell does the same for the handful of things it hands to the
  * AES, since a tree or a string the AES is given must be in bank $00
  * (src/sys/abi.c, near_of).  Here it is so the gate can read them. */
-__near WORD m29_zeroed;         /* big[] arrived zeroed */
-__near WORD m29_seedok;         /* seed[] arrived initialised */
-__near WORD m29_sum;            /* the pattern's sum, low word */
-__near WORD m29_first, m29_last;/* big[0] and big[BIG-1] after filling */
-__near WORD m29_ran;            /* it got to the end */
-__near WORD m29_step;           /* ...and how far it got, if it did not */
+NEAR WORD m29_zeroed;         /* big[] arrived zeroed */
+NEAR WORD m29_seedok;         /* seed[] arrived initialised */
+NEAR WORD m29_sum;            /* the pattern's sum, low word */
+NEAR WORD m29_first, m29_last;/* big[0] and big[BIG-1] after filling */
+NEAR WORD m29_ran;            /* it got to the end */
+NEAR WORD m29_step;           /* ...and how far it got, if it did not */
 
 int main(void)
 {

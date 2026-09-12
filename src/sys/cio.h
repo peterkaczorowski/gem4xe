@@ -26,6 +26,7 @@
 #ifndef GEM4XE_CIO_H
 #define GEM4XE_CIO_H
 
+#include "portab.h"
 #include <stdint.h>
 
 /* ICCOM */
@@ -115,7 +116,7 @@ uint8_t  cio_xio(uint8_t cmd, const char *name, uint8_t aux1, uint8_t aux2);
 #define CIO_X_CHDIR   44
 
 /* The bare call: the IOCB is filled in already.  src/sys/cio.s. */
-__attribute__((simple_call)) uint16_t cio_call(uint16_t iocb);
+SIMPLE_CALL uint16_t cio_call(uint16_t iocb);
 
 /* ---- the disk, under the file system ---------------------------------- */
 /* One sector, read through the OS's SIO with the DCB in page 3 -- which is
@@ -132,7 +133,7 @@ __attribute__((simple_call)) uint16_t cio_call(uint16_t iocb);
 #define SIO_PERCOM_LEN 12       /* the drive's geometry, as it reports it */
 uint8_t dsk_read(uint8_t unit, uint16_t sector, void *buf, uint16_t len);
 uint8_t dsk_percom(uint8_t unit, void *buf);   /* SIO_PERCOM_LEN bytes */
-__attribute__((simple_call)) uint16_t dsk_call(uint16_t unused);
+SIMPLE_CALL uint16_t dsk_call(uint16_t unused);
 
 extern uint16_t cio_calls;      /* round trips made */
 extern uint8_t  cio_env;        /* bisection knobs (src/sys/cio.s): 1 = leave CRITIC alone */

@@ -262,8 +262,8 @@ def read(path):
 def decl_names(text):
     """The functions a header declares, ignoring the call gates."""
     out = set()
-    for m in re.finditer(r'^(?:__simple_call\s+)?(?:const\s+)?'
-                         r'(?:WORD|UWORD|LONG|void|char|DTA __far \*)\s*\**'
+    for m in re.finditer(r'^(?:SIMPLE_CALL\s+)?(?:const\s+)?'
+                         r'(?:WORD|UWORD|LONG|void|char|DTA FAR \*)\s*\**'
                          r'(\w+)\s*\(', text, re.M):
         out.add(m.group(1))
     return out - {"vdi_call", "aes_call", "dos_call"}
@@ -327,7 +327,8 @@ class TestBlocks(unittest.TestCase):
         for src in (GEMLIB_C, BIND_SIM_C):
             obj = os.path.join(out, os.path.basename(src)[:-2] + ".o")
             subprocess.run([cc, "-g", "--code-model=large", "--data-model=small",
-                            "-O2", "-I", os.path.join(ROOT, "src", "app"),
+                            "-O2", "-I", os.path.join(ROOT, "src"),
+                            "-I", os.path.join(ROOT, "src", "app"),
                             "-o", obj, src], check=True)
             objs.append(obj)
         elf = os.path.join(out, "bind.elf")

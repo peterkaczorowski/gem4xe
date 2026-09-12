@@ -15,6 +15,7 @@
  * builds the items again; the AES's own rectangle list clips every
  * redraw, so a window under another draws only what shows.
  */
+#include "portab.h"
 #include "desk.h"
 
 /* The far arena, Malloc'd once: the DTA the listing reads into, then
@@ -34,7 +35,7 @@ static const WORD win_ycell[NUM_WNODES] = { 6, 8, 10, 13 };
 
 /* -- strings and rectangles -------------------------------------------- */
 
-static char *put_str(char *d, const char __far *s)
+static char *put_str(char *d, const char FAR *s)
 {
     while (*s)
         *d++ = *s++;
@@ -58,7 +59,7 @@ static char *put_num(char *d, LONG n)
     return d;
 }
 
-static WORD far_strcmp(const char __far *a, const char __far *b)
+static WORD far_strcmp(const char FAR *a, const char FAR *b)
 {
     while (*a && *a == *b) {
         a++;
@@ -110,22 +111,22 @@ WORD win_start(void)
     arena = Malloc((LONG)ARENA_SIZE);
     if (arena <= 0)
         return FALSE;
-    G.g_dta = (DTA __far *)arena;
+    G.g_dta = (DTA FAR *)arena;
     Fsetdta(G.g_dta);
     for (i = 0; i < NUM_WNODES; i++) {
         WNODE *pw = &G.g_wlist[i];
         pw->w_id = 0;
         pw->w_root = (WORD)(DROOT + 1 + i);
         pw->w_path.p_flist =
-            (FNODE __far *)(arena + (LONG)sizeof(DTA) + (LONG)i * (NUM_FNODES * sizeof(FNODE)));
+            (FNODE FAR *)(arena + (LONG)sizeof(DTA) + (LONG)i * (NUM_FNODES * sizeof(FNODE)));
     }
-    G.g_cnxsave = (CSAVE __far *)(arena + (LONG)sizeof(DTA)
+    G.g_cnxsave = (CSAVE FAR *)(arena + (LONG)sizeof(DTA)
                                   + (LONG)NUM_WNODES * (NUM_FNODES * sizeof(FNODE)));
-    G.g_shelbuf = (char __far *)G.g_cnxsave + sizeof(CSAVE);
-    G.g_opdta = (DTA __far *)(G.g_shelbuf + SIZE_SHELBUF);
-    G.g_copybuf = (char __far *)(G.g_opdta + MAX_DELLEVEL);
+    G.g_shelbuf = (char FAR *)G.g_cnxsave + sizeof(CSAVE);
+    G.g_opdta = (DTA FAR *)(G.g_shelbuf + SIZE_SHELBUF);
+    G.g_copybuf = (char FAR *)(G.g_opdta + MAX_DELLEVEL);
     {                                           /* the donor's is zeroed */
-        char __far *p = (char __far *)G.g_cnxsave;
+        char FAR *p = (char FAR *)G.g_cnxsave;
         WORD n;
         for (n = 0; n < sizeof(CSAVE); n++)
             *p++ = 0;
@@ -176,7 +177,7 @@ static void win_free(WNODE *pw)
  * are out. */
 static WNODE *win_alloc(void)
 {
-    WSAVE __far *pws;
+    WSAVE FAR *pws;
     WNODE *pw;
     WORD wob;
     GRECT r;
@@ -209,9 +210,9 @@ static WNODE *win_alloc(void)
 /* -- the listing ------------------------------------------------------- */
 
 /* The window's FNODE behind item obj, or NULL. */
-FNODE __far *win_fnode(WNODE *pw, WORD obj)
+FNODE FAR *win_fnode(WNODE *pw, WORD obj)
 {
-    FNODE __far *pf = pw->w_path.p_flist;
+    FNODE FAR *pf = pw->w_path.p_flist;
     WORD i;
 
     for (i = 0; i < pw->w_path.p_count; i++, pf++)
@@ -227,9 +228,9 @@ FNODE __far *win_fnode(WNODE *pw, WORD obj)
  * the tie-break for the rest, so the listing never depends on the order
  * the directory happened to be in.  Except S_NSRT, which is that
  * order. */
-static WORD pn_fcomp(const FNODE *a, const FNODE __far *b)
+static WORD pn_fcomp(const FNODE *a, const FNODE FAR *b)
 {
-    const char __far *ea;
+    const char FAR *ea;
     const char *ta;
     LONG chk = 0;
 
@@ -263,7 +264,7 @@ static WORD pn_fcomp(const FNODE *a, const FNODE __far *b)
 /* Folders first -- unless nothing is being sorted, when the directory's
  * own order is the whole of it -- and then the field: the donor's
  * pn_comp. */
-static WORD pn_comp(const FNODE *a, const FNODE __far *b)
+static WORD pn_comp(const FNODE *a, const FNODE FAR *b)
 {
     if (G.g_isort != S_NSRT && ((a->f_attr ^ b->f_attr) & FA_SUBDIR))
         return (a->f_attr & FA_SUBDIR) ? -1 : 1;
@@ -288,9 +289,9 @@ static WORD pn_open(PNODE *pn, const char *spec)
 /* A near FNODE into a far one, byte by byte: cc65816 5.18 cannot
  * compile a struct assignment between near and far objects over 8 bytes
  * at all (tools/ccbug/README.md, B11); far to far it can. */
-static void fn_copy(FNODE __far *d, const FNODE *s)
+static void fn_copy(FNODE FAR *d, const FNODE *s)
 {
-    char __far *pd = (char __far *)d;
+    char FAR *pd = (char FAR *)d;
     const char *ps = (const char *)s;
     WORD n;
 
@@ -299,10 +300,10 @@ static void fn_copy(FNODE __far *d, const FNODE *s)
 }
 
 /* ...and a far one into a near one, for the same reason. */
-static void fn_read(FNODE *d, const FNODE __far *s)
+static void fn_read(FNODE *d, const FNODE FAR *s)
 {
     char *pd = (char *)d;
-    const char __far *ps = (const char __far *)s;
+    const char FAR *ps = (const char FAR *)s;
     WORD n;
 
     for (n = 0; n < sizeof(FNODE); n++)
@@ -314,8 +315,8 @@ static void fn_read(FNODE *d, const FNODE __far *s)
  * Fsfirst lists nothing. */
 static void pn_active(PNODE *pn)
 {
-    DTA __far *dta = G.g_dta;
-    FNODE __far *pf;
+    DTA FAR *dta = G.g_dta;
+    FNODE FAR *pf;
     FNODE fn;
     LONG ret;
     WORD count = 0, i;
@@ -359,7 +360,7 @@ static void pn_active(PNODE *pn)
  * read, which is the whole reason an FNODE carries f_seq. */
 static void pn_sort(PNODE *pn)
 {
-    FNODE __far *pf;
+    FNODE FAR *pf;
     FNODE fn;
     WORD i, j;
 
@@ -412,9 +413,9 @@ static void win_sinfo(WNODE *pw)
 /* -- the view ---------------------------------------------------------- */
 
 /* Which icon an entry gets: a folder, a program (.G4A), or a document. */
-static WORD win_which(const FNODE __far *pf)
+static WORD win_which(const FNODE FAR *pf)
 {
-    const char __far *s = pf->f_name;
+    const char FAR *s = pf->f_name;
 
     if (pf->f_attr & FA_SUBDIR)
         return IB_FOLDER;
@@ -483,10 +484,10 @@ static void win_num(char *d, WORD n, LONG value, char pad)
  * none of that is written here.  A run shorter than its field truncates
  * it, a longer one pads it.  Anything that is not a placeholder is
  * copied as it stands. */
-static void win_line(char *d, const FNODE __far *pf)
+static void win_line(char *d, const FNODE FAR *pf)
 {
     const char *t = G.g_fline;
-    const char __far *s;
+    const char FAR *s;
     char *end = d + LEN_FNODE - 1;
     WORD n, i;
     char c;
@@ -557,7 +558,7 @@ static void win_bldview(WNODE *pw, const GRECT *r)
 {
     WORD iwspc = (WORD)(G.g_iwext + G.g_iwint);
     WORD ihspc = (WORD)(G.g_ihext + G.g_ihint);
-    FNODE __far *pf;
+    FNODE FAR *pf;
     WORD wfit, hfit, i, n, row, col, obid, which;
 
     obj_wfree(pw->w_root, r->g_x, r->g_y, r->g_w, r->g_h);
@@ -774,7 +775,7 @@ void act_chg(WORD wh, WORD root, WORD obj, WORD set, WORD dodraw)
         return;
     pob->ob_state = state;
     if (root != DROOT) {
-        FNODE __far *pf = win_fnode(&G.g_wlist[root - (DROOT + 1)], obj);
+        FNODE FAR *pf = win_fnode(&G.g_wlist[root - (DROOT + 1)], obj);
         if (pf)
             pf->f_flags = set ? (WORD)(pf->f_flags | F_SELECTED)
                               : (WORD)(pf->f_flags & ~F_SELECTED);
@@ -1017,7 +1018,7 @@ static WORD do_dopen(WORD curr)
 }
 
 /* A folder in a window: its listing in the same window. */
-static WORD do_fopen(WNODE *pw, WORD curr, const char __far *name)
+static WORD do_fopen(WNODE *pw, WORD curr, const char FAR *name)
 {
     char path[LEN_ZPATH];
     const char *spec = pw->w_path.p_spec;
@@ -1054,7 +1055,7 @@ static WORD do_fopen(WNODE *pw, WORD curr, const char __far *name)
  * do_open's frame under every window it opens -- the desktop's deepest
  * stack, 164 bytes deeper (milestone 6).  External, it keeps its own
  * frame, paid only on the way out to a program. */
-WORD do_aopen(WNODE *pw, WORD curr, const char __far *name)
+WORD do_aopen(WNODE *pw, WORD curr, const char FAR *name)
 {
     char app_path[LEN_ZPATH];
     char tail[SH_TAILLEN];
@@ -1100,7 +1101,7 @@ WORD do_aopen(WNODE *pw, WORD curr, const char __far *name)
 WORD do_open(WORD wh, WORD obj)
 {
     WNODE *pw;
-    FNODE __far *pf;
+    FNODE FAR *pf;
 
     if (wh == DESKWH) {
         if (obj_info(obj)->i.blk.ib_char & 0xFF)
@@ -1176,9 +1177,9 @@ static WORD hex_dig(char c)
 
 /* The donor's scan_2: past the spaces, two hex digits (0xFF is -1) or
  * nothing at a CR. */
-static WORD scan_2(const char __far **pp)
+static WORD scan_2(const char FAR **pp)
 {
-    const char __far *p = *pp;
+    const char FAR *p = *pp;
     WORD v = 0;
 
     while (*p == ' ')
@@ -1193,7 +1194,7 @@ static WORD scan_2(const char __far **pp)
     return v;
 }
 
-static char __far *put_hex2(char __far *d, WORD v)
+static char FAR *put_hex2(char FAR *d, WORD v)
 {
     static const char hex[] = "0123456789ABCDEF";
 
@@ -1203,7 +1204,7 @@ static char __far *put_hex2(char __far *d, WORD v)
     return d;
 }
 
-static char __far *put_far(char __far *d, const char __far *s)
+static char FAR *put_far(char FAR *d, const char FAR *s)
 {
     while (*s)
         *d++ = *s++;
@@ -1226,8 +1227,8 @@ static void inf_name(char *name)
 /* The INF text from the slots; its length with the NUL. */
 static WORD inf_write(void)
 {
-    char __far *p = G.g_shelbuf + CPDATA_LEN;
-    WSAVE __far *pws = G.g_cnxsave->cs_wnode;
+    char FAR *p = G.g_shelbuf + CPDATA_LEN;
+    WSAVE FAR *pws = G.g_cnxsave->cs_wnode;
     WORD i;
 
     p = put_far(p, "#R");
@@ -1275,7 +1276,7 @@ static WORD inf_len(WORD len)
 static WORD inf_load(void)
 {
     char name[LEN_ZFNAME + 4];
-    char __far *buf = G.g_shelbuf + CPDATA_LEN;
+    char FAR *buf = G.g_shelbuf + CPDATA_LEN;
     LONG fd, got;
 
     inf_name(name);
@@ -1311,7 +1312,7 @@ static WORD inf_store(WORD len)
  * than the one before, as text for app_start to read like any other. */
 static void build_inf(void)
 {
-    WSAVE __far *pws = G.g_cnxsave->cs_wnode;
+    WSAVE FAR *pws = G.g_cnxsave->cs_wnode;
     WORD i;
 
     for (i = 0; i < NUM_WNODES; i++, pws++) {
@@ -1327,9 +1328,9 @@ static void build_inf(void)
 }
 
 /* The slots from the "#W" lines of INF text. */
-static void inf_parse(const char __far *pcurr)
+static void inf_parse(const char FAR *pcurr)
 {
-    WSAVE __far *pws;
+    WSAVE FAR *pws;
     WORD wincnt = 0, rev, i;
 
     while (*pcurr) {
@@ -1430,7 +1431,7 @@ void app_save(void)
  * them in puts them back as they were. */
 void cnx_put(void)
 {
-    WSAVE __far *pws = G.g_cnxsave->cs_wnode;
+    WSAVE FAR *pws = G.g_cnxsave->cs_wnode;
     WORD wob, n = 0, i;
     GRECT r;
 
@@ -1463,7 +1464,7 @@ void cnx_put(void)
  * at least -- and its view, growing from its drive's icon. */
 void cnx_get(void)
 {
-    WSAVE __far *pws = G.g_cnxsave->cs_wnode;
+    WSAVE FAR *pws = G.g_cnxsave->cs_wnode;
     WNODE *pw;
     WORD nw, obid, i;
     char path[LEN_ZPATH];

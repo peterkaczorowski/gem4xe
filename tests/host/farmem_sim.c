@@ -1,6 +1,6 @@
 /* farmem_sim.c -- far_alloc, asked for the blocks that used to break it.
  *
- * A block may not cross a bank boundary: Calypsi's `__far` pointer
+ * A block may not cross a bank boundary: Calypsi's `FAR` pointer
  * arithmetic is 16 bits WITHIN a bank, so a buffer that straddles one
  * wraps to the bottom of its own bank the moment it is indexed past the
  * edge -- and the bottom of a far bank is the far code image.  That is

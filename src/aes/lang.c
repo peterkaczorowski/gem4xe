@@ -28,6 +28,7 @@
  * still built into the far image (tools/fselrsc.py) for the pool reason
  * in tools/langrsc.py's header, so a translation cannot widen it yet.
  */
+#include "portab.h"
 #include <string.h>
 #include "aes/aes.h"
 #include "sys/cio.h"
@@ -62,7 +63,7 @@ static void lang_builtin(void)
 {
     uint8_t hdr[RSH_SIZE];
 
-    lang_base = (uint32_t)(const uint8_t __far *)lang_rsc;
+    lang_base = (uint32_t)(const uint8_t FAR *)lang_rsc;
     far_get(hdr, lang_base, RSH_SIZE);
     lang_frstr = be16(&hdr[RSH_FRSTR]);
     lang_n = (WORD)be16(&hdr[RSH_NSTRING]);

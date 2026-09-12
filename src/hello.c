@@ -2,6 +2,7 @@
    Writes a signature and a computed value to a fixed address the test
    harness reads back over the Altirra bridge.  No libc, no stdio. */
 
+#include "portab.h"
 #define SIG ((volatile unsigned char *) 0x0600)  /* page 6: free on the Atari and outside every linker region */
 
 /* Something the compiler cannot constant-fold away into the signature:
@@ -14,7 +15,7 @@ static unsigned int checksum(void)
     return acc;
 }
 
-__task void main(void)
+TASK void main(void)
 {
     unsigned int c = checksum();
 

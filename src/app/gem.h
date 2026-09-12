@@ -26,6 +26,7 @@
 #ifndef GEM4XE_APP_GEM_H
 #define GEM4XE_APP_GEM_H
 
+#include "portab.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -36,20 +37,20 @@ typedef long           LONG;
 /* The five VDI arrays and the six AES arrays, by far pointer: 32 bits in
  * memory each, which makes the block the ST's byte for byte. */
 typedef struct {
-    WORD __far *contrl;
-    WORD __far *intin;
-    WORD __far *ptsin;
-    WORD __far *intout;
-    WORD __far *ptsout;
+    WORD FAR *contrl;
+    WORD FAR *intin;
+    WORD FAR *ptsin;
+    WORD FAR *intout;
+    WORD FAR *ptsout;
 } VDIPB;
 
 typedef struct {
-    WORD __far *control;
-    WORD __far *global;
-    WORD __far *int_in;
-    WORD __far *int_out;
-    LONG __far *addr_in;
-    LONG __far *addr_out;
+    WORD FAR *control;
+    WORD FAR *global;
+    WORD FAR *int_in;
+    WORD FAR *int_out;
+    LONG FAR *addr_in;
+    LONG FAR *addr_out;
 } AESPB;
 
 /* GEMDOS's block is the ST's trap #1 stack frame with the result in front
@@ -62,11 +63,11 @@ typedef struct {
     WORD arg[5];
 } GDPB;
 
-/* The three entry points (src/app/gemabi.s).  __simple_call puts the
+/* The three entry points (src/app/gemabi.s).  SIMPLE_CALL puts the
  * block's address in X:C, which is where the COP handler looks. */
-__simple_call void vdi_call(VDIPB __far *pb);
-__simple_call void aes_call(AESPB __far *pb);
-__simple_call void dos_call(GDPB __far *pb);
+SIMPLE_CALL void vdi_call(VDIPB FAR *pb);
+SIMPLE_CALL void aes_call(AESPB FAR *pb);
+SIMPLE_CALL void dos_call(GDPB FAR *pb);
 
 typedef struct {
     WORD g_x, g_y, g_w, g_h;
@@ -452,8 +453,8 @@ WORD shel_write(WORD doex, WORD isgr, WORD iscr, const char *cmd, const char *ta
  * SIZE_SHELBUF), where the desktop leaves its DESKTOP.INF text.  The
  * application's copy may be far -- only bytes cross. */
 #define SIZE_SHELBUF 4192
-WORD shel_get(void __far *buffer, WORD len);
-WORD shel_put(const void __far *data, WORD len);
+WORD shel_get(void FAR *buffer, WORD len);
+WORD shel_put(const void FAR *data, WORD len);
 
 /* The rest of the AES. */
 WORD appl_write(WORD id, WORD length, const WORD *msg);
@@ -516,26 +517,26 @@ typedef struct {                /* Dfree's answer, in clusters of 1 sector */
 WORD Sversion(void);
 WORD Dsetdrv(WORD drive);       /* returns the drive map */
 WORD Dgetdrv(void);
-LONG Dsetpath(const char __far *path);
-LONG Dgetpath(char __far *buf, WORD drive);
-LONG Dcreate(const char __far *path);
-LONG Ddelete(const char __far *path);
-LONG Dfree(DISKINFO __far *info, WORD drive);
-void Fsetdta(DTA __far *dta);
-DTA __far *Fgetdta(void);
-LONG Fsfirst(const char __far *spec, WORD attr);
+LONG Dsetpath(const char FAR *path);
+LONG Dgetpath(char FAR *buf, WORD drive);
+LONG Dcreate(const char FAR *path);
+LONG Ddelete(const char FAR *path);
+LONG Dfree(DISKINFO FAR *info, WORD drive);
+void Fsetdta(DTA FAR *dta);
+DTA FAR *Fgetdta(void);
+LONG Fsfirst(const char FAR *spec, WORD attr);
 LONG Fsnext(void);
-LONG Fopen(const char __far *name, WORD mode);
-LONG Fcreate(const char __far *name, WORD attr);
+LONG Fopen(const char FAR *name, WORD mode);
+LONG Fcreate(const char FAR *name, WORD attr);
 LONG Fclose(WORD handle);
-LONG Fread(WORD handle, LONG count, void __far *buf);
-LONG Fwrite(WORD handle, LONG count, const void __far *buf);
+LONG Fread(WORD handle, LONG count, void FAR *buf);
+LONG Fwrite(WORD handle, LONG count, const void FAR *buf);
 LONG Fseek(LONG offset, WORD handle, WORD mode);
-LONG Fdelete(const char __far *name);
-LONG Frename(const char __far *oldname, const char __far *newname);
-LONG Fattrib(const char __far *name, WORD wflag, WORD attr);
+LONG Fdelete(const char FAR *name);
+LONG Frename(const char FAR *oldname, const char FAR *newname);
+LONG Fattrib(const char FAR *name, WORD wflag, WORD attr);
 LONG Malloc(LONG size);         /* -1 asks how much is left */
-LONG Mfree(void __far *block);
+LONG Mfree(void FAR *block);
 
 LONG Fdatime(WORD *timeptr, WORD handle, WORD wflag);   /* two words: time, date */
 WORD Tgetdate(void);

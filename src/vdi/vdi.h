@@ -15,6 +15,7 @@
 #ifndef GEM4XE_VDI_H
 #define GEM4XE_VDI_H
 
+#include "portab.h"
 #include <stdint.h>
 
 typedef int16_t  WORD;
@@ -120,7 +121,7 @@ typedef struct {
      * it already makes when the drawing changes hands.
      * A void * rather than the real type: vdi.h is included by code that
      * has no business seeing the seam (src/vdi/vdidev.h). */
-    const void __far *dev;
+    const void FAR *dev;
 } Vwk;
 
 /* The physical workstation's handle, by specification; v_opnvwk hands
@@ -133,7 +134,7 @@ typedef struct {
  * the only caller. */
 #define VDI_SIN_ANGLE_MAX 896
 #define VDI_SIN_SIZE      ((VDI_SIN_ANGLE_MAX / 8) + 1)
-extern const UWORD __far vdi_sin_tbl[VDI_SIN_SIZE];
+extern const UWORD FAR vdi_sin_tbl[VDI_SIN_SIZE];
 
 /* A curve is drawn as this many segments, from the larger radius over
  * four and clamped -- fewer than the donor's 32..128, because ptsin
@@ -192,13 +193,13 @@ extern const UWORD __far vdi_sin_tbl[VDI_SIN_SIZE];
 /* The standard tables, generated from the donor by tools/patconv.py into
  * src/vdi/fillpat.c: 8 dithers of 4 rows, 16 OEM patterns of 8, 6 coarse
  * hatches of 8, 6 fine hatches of 16. */
-/* __far, in `cfar` with the far code: 608 bytes of bank $00 is 23% of
+/* FAR, in `cfar` with the far code: 608 bytes of bank $00 is 23% of
  * all the near memory the system has, and these are read a row at a
  * time when a fill's pattern changes, not per pixel (docs/phase24.md). */
-extern const UWORD __far fill_dither[32];
-extern const UWORD __far fill_oem[128];
-extern const UWORD __far fill_hatch0[48];
-extern const UWORD __far fill_hatch1[96];
+extern const UWORD FAR fill_dither[32];
+extern const UWORD FAR fill_oem[128];
+extern const UWORD FAR fill_hatch0[48];
+extern const UWORD FAR fill_hatch1[96];
 
 /* The workstation a call names in contrl[6]: every VDI routine reads and
  * writes this one, and the dispatcher copies the right one in (vdi.c). */
@@ -331,7 +332,7 @@ UWORD style_anchor(UWORD mask, WORD from, WORD dir);
 #define TA_TOP 5
 /* The 8x8 face.  Unsized: how tall a face is is the DEVICE's business
  * now (vdidev.h), and an extern does not need to know. */
-extern const uint8_t __far font8x8[];
+extern const uint8_t FAR font8x8[];
 
 void vdi(void);             /* dispatch on contrl[0]; the GSX "SCREEN" entry */
 void vdi_init(void);        /* one-time bring-up of the physical workstation */

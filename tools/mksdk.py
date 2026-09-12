@@ -31,6 +31,7 @@ MANIFEST = [
     ("COPYING",             "COPYING"),
     ("Makefile",            "tools/sdk/Makefile"),
     ("include/gem.h",       "src/app/gem.h"),
+    ("include/portab.h",    "src/portab.h"),
     ("lib/gemlib.c",        "src/app/gemlib.c"),
     ("lib/clib.c",          "src/sys/clib.c"),
     ("lib/gemabi.s",        "src/app/gemabi.s"),

@@ -167,8 +167,8 @@ def main(path):
                 ' * layout is the 8x8 strip\'s -- 256 bytes a row, eight rows,\n'
                 ' * character N\'s byte on row r at r*256 + N -- with each\n'
                 ' * glyph in the TOP nibble of its byte.\n'
-                ' */\n#include "vdi.h"\n\n'
-                'const uint8_t __far font4x8[%d] = {\n' % (N * FONT_H))
+                ' */\n#include "portab.h"\n#include "vdi.h"\n\n'
+                'const uint8_t FAR font4x8[%d] = {\n' % (N * FONT_H))
         for r in range(FONT_H):
             f.write("    /* row %d */\n" % r)
             for i in range(0, N, 16):

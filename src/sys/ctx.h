@@ -41,6 +41,7 @@
 #ifndef GEM4XE_CTX_H
 #define GEM4XE_CTX_H
 
+#include "portab.h"
 #include <stdint.h>
 
 #define CTX_NEW     0       /* made, never entered */
@@ -72,7 +73,7 @@ extern uint16_t  ctx_over;      /* parks refused for want of room -- a bug */
  * CALL IT FROM THE SHALLOWEST PLACE THAT WILL EVER SWITCH.  The mark it
  * takes is its own caller's S, and no context may ever park above that
  * mark -- src/sys/ctx.s says what happens if one tries. */
-__attribute__((simple_call)) void ctx_init(CTX *first);
+SIMPLE_CALL void ctx_init(CTX *first);
 
 /* FALSE when the compiler's register file has outgrown what a switch
  * carries -- see src/sys/ctx.s.  Ask before ctx_init and refuse to run;
@@ -89,6 +90,6 @@ int16_t ctx_make(CTX *c, uint32_t entry);
  * the ctx_switch() that parked IT, or, the first time, by entering its
  * program.  A context whose program returns is marked done and the
  * caller of ctx_switch is resumed instead. */
-__attribute__((simple_call)) void ctx_switch(CTX *to);
+SIMPLE_CALL void ctx_switch(CTX *to);
 
 #endif /* GEM4XE_CTX_H */

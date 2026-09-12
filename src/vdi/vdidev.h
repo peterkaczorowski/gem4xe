@@ -42,6 +42,7 @@
 #ifndef GEM4XE_VDIDEV_H
 #define GEM4XE_VDIDEV_H
 
+#include "portab.h"
 #include "vdi.h"
 
 /* ---- a device's own geometry -----------------------------------------
@@ -145,7 +146,7 @@ typedef struct {
      * (src/vdi/font.h).  A device that has 53 columns and one that has
      * 80 do not want the same one, and a .FNT loaded later replaces it
      * for whichever is running. */
-    const uint8_t __far *font_face;
+    const uint8_t FAR *font_face;
 
     /* A solid rectangle in the current pen, corners inclusive, already
      * clipped by the caller.  MD_REPLACE's and MD_ERASE's shape; the mode
@@ -194,7 +195,7 @@ typedef struct {
      * fd_addr has been 32 bits since phase 2, but it used to be
      * truncated here on the way in, because a memory form had always
      * been in bank $00. */
-    void (*raster_1bpp)(const uint8_t __far *bits, uint16_t stride,
+    void (*raster_1bpp)(const uint8_t FAR *bits, uint16_t stride,
                         WORD sx, WORD sy, WORD w, WORD h,
                         WORD dx, WORD dy, WORD mode, WORD ink, WORD bg);
 
@@ -325,7 +326,7 @@ typedef struct {
  * FONT_H and dev_fill_rect exactly as they did when there was one device
  * compiled in; the macros below are where those names land now.
  *
- * __far, and so are the tables: each is about 130 bytes, and bank $00
+ * FAR, and so are the tables: each is about 130 bytes, and bank $00
  * has 2,430 for every constant the system owns (src/gem4xe.scm).  Two of
  * them there would be a tenth of it spent on a table read once per
  * primitive, so they live in `cfar` with the far code and the reads are
@@ -335,16 +336,16 @@ typedef struct {
  * dereferences it.  A VDI call before that is a null far read, not a
  * diagnosable error -- which is why setting it is the first line of
  * every bring-up and not something arranged later. */
-extern const VDIDEV __far *vdev;
+extern const VDIDEV FAR *vdev;
 
 /* The two tables, in the two device files.  A build links whichever
  * devices it has a screen for; naming one that is not linked is a link
  * error, which is the right time to find out. */
-extern const VDIDEV __far vdev_vbxe;
-extern const VDIDEV __far vdev_antic;
+extern const VDIDEV FAR vdev_vbxe;
+extern const VDIDEV FAR vdev_antic;
 /* ...and the page, which is a device open BESIDE one of those rather
  * than instead of it: a workstation carries its own (src/vdi/vdi.h). */
-extern const VDIDEV __far vdev_print;
+extern const VDIDEV FAR vdev_print;
 /* ...and the page it draws on, which unlike a screen has to be taken
  * before it can be drawn on and given back after (src/vdi/print.h). */
 int16_t pr_page_open(void);

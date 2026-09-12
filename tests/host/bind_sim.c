@@ -60,7 +60,7 @@ static void pattern(void)
 }
 
 /* The gates: opcode and counts out of the arrays the library filled. */
-__simple_call void vdi_call(VDIPB __far *pb)
+SIMPLE_CALL void vdi_call(VDIPB FAR *pb)
 {
     (void)pb;
     if (rec_blocks)
@@ -69,7 +69,7 @@ __simple_call void vdi_call(VDIPB __far *pb)
         pattern();
 }
 
-__simple_call void aes_call(AESPB __far *pb)
+SIMPLE_CALL void aes_call(AESPB FAR *pb)
 {
     (void)pb;
     if (rec_blocks)
@@ -78,7 +78,7 @@ __simple_call void aes_call(AESPB __far *pb)
         pattern();
 }
 
-__simple_call void dos_call(GDPB __far *pb)
+SIMPLE_CALL void dos_call(GDPB FAR *pb)
 {
     if (rec_blocks)
         put(2, pb->fn, 0, 0, 0, 0);

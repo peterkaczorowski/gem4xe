@@ -37,7 +37,7 @@ LIB       = clib-lc-sd.a
 # file.  Data stays small -- globals and constants are addressed through the
 # data bank register, so they have to remain in bank $00 (see the linker
 # script).
-CFLAGS    = --code-model=large --data-model=small -O2
+CFLAGS    = --code-model=large --data-model=small -O2 -I src
 # --override lets src/sys/div16.o replace the library's _Div16/_Mod16, which
 # leave the wrong flags for the compiler's own `beq` (see that file).
 LDFLAGS   = --rtattr exit=simplified --override _Div16 --override _Mod16
@@ -433,7 +433,7 @@ build/app/clib.o: src/sys/clib.c
 
 build/appld/clib.o: src/sys/clib.c
 	@mkdir -p build/appld
-	$(CC) --code-model=large --data-model=large -O2 -o $@ $<
+	$(CC) --code-model=large --data-model=large -O2 -I src -o $@ $<
 
 build/appld/%.o: src/app/%.s
 	@mkdir -p build/appld
@@ -441,7 +441,7 @@ build/appld/%.o: src/app/%.s
 
 build/appld/%.o: src/app/%.c src/app/gem.h
 	@mkdir -p build/appld
-	$(CC) --code-model=large --data-model=large -O2 -I src/app -o $@ $<
+	$(CC) --code-model=large --data-model=large -O2 -I src -I src/app -o $@ $<
 # $(8), when given, is the runtime library: a --data-model=large program
 # needs clib-lc-ld.a and the large-data half of the application library,
 # because the linker refuses to mix runtime models.
@@ -749,7 +749,7 @@ ACCP_DEPS = build/clockacc.g4a build/clock.rsc
 # pattern rule, because $(CFLAGS) says small.
 build/appld/m29_big.o: src/m29_big.c src/app/gem.h
 	@mkdir -p build/appld
-	$(CC) --code-model=large --data-model=large -O2 -I src/app -o $@ $<
+	$(CC) --code-model=large --data-model=large -O2 -I src -I src/app -o $@ $<
 BIG_OBJS = $(G4A_LIB_LD) build/appld/m29_big.o
 $(eval $(call g4a,m29_big,$(BIG_OBJS),1024,256,384,,,$(LIB_LD)))
 
@@ -1034,7 +1034,7 @@ test-host: build/m11_app.g4a
 # host tests (tests/host/test_sdk.py), which builds it out of a copy of
 # itself in a directory of its own.
 SDK_FILES = tools/mksdk.py tools/sdk/README.md tools/sdk/Makefile \
-            tools/sdk/hello.c src/app/gem.h src/app/gemlib.c \
+            tools/sdk/hello.c src/app/gem.h src/portab.h src/app/gemlib.c \
             src/app/gemabi.s src/app/crt_gemapp.s src/app/gemapp.scm \
             tools/mkg4a.py tools/mkxex.py COPYING
 

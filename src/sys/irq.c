@@ -1,8 +1,8 @@
 /* irq.c -- the OS ROM shadowed into RAM, the native vectors filled, and
  * the interrupt sources switched on.  What and why: irq.h. */
+#include "portab.h"
 #include "irq.h"
 #include "rapidus.h"
-#include <calypsi/intrinsics65816.h>
 
 IRQ_INFO irq;
 uint8_t  irq_cio_swap;
@@ -174,7 +174,7 @@ static void sources_on(void)
     IRQEN  = 0;                     /* drop anything latched while off ... */
     IRQEN  = POKMSK;                /* ... then arm */
     NMIEN  = NMIEN_VBI;
-    __enable_interrupts();
+    cpu_cli();
 }
 
 uint8_t irq_install(void)
@@ -240,7 +240,7 @@ void irq_remove(void)
      * point at.  Long enough at any clock. */
     for (spin = 0; spin < 512; spin++)
         ;
-    __disable_interrupts();
+    cpu_sei();
     os_side();
     irq_cio_swap = 0;
     irq.how  = IRQ_OFF;

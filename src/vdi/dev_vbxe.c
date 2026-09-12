@@ -13,6 +13,7 @@
  * exercises odd x1, odd x2, and rectangles one pixel wide inside a
  * single byte.
  */
+#include "portab.h"
 #include "vdi.h"
 #include "vdidev.h"
 #include "../vbxe/vbxe.h"
@@ -539,8 +540,8 @@ void dev_font_changed(void)
     for (page = 0; page < 2; page++) {
         volatile uint8_t *p = vram_win(VR_FONT + (uint32_t)page * 0x1000);
         for (row = (WORD)(page * 4); row < (WORD)(page * 4 + 4); row++) {
-            const uint8_t __far *sr =
-                (const uint8_t __far *)(vdi_font + (uint32_t)row * FONT_STRIDE);
+            const uint8_t FAR *sr =
+                (const uint8_t FAR *)(vdi_font + (uint32_t)row * FONT_STRIDE);
             for (ch = 0; ch < 256; ch++) {
                 uint8_t b = sr[ch];
                 *p++ = nib2[(b >> 6) & 3];
@@ -558,8 +559,8 @@ void dev_font_changed(void)
         volatile uint8_t *p = vram_win(a);
         uint16_t left = (uint16_t)(MEMAC_WIN_SIZE - (a & (MEMAC_WIN_SIZE - 1)));
         for (row = 0; row < FONT_H; row++) {
-            const uint8_t __far *sr =
-                (const uint8_t __far *)(vdi_font + (uint32_t)row * FONT_STRIDE);
+            const uint8_t FAR *sr =
+                (const uint8_t FAR *)(vdi_font + (uint32_t)row * FONT_STRIDE);
             for (ch = 0; ch < 256; ch++) {
                 uint8_t b = sr[ch];
                 uint8_t out[FONT_OBYTES];
@@ -700,12 +701,12 @@ static const uint8_t bit_of[8] = {0x80, 0x40, 0x20, 0x10, 8, 4, 2, 1};
  * word from the compiler -- the desktop's icons drew as noise and every
  * address on the way in was correct.  Four bytes of direct page and a
  * long read per source byte; a 32-wide icon is four of those a row. */
-static const uint8_t __far * __attribute__((tiny)) r1_s;  /* next source byte */
-static volatile UWORD   * __attribute__((tiny)) r1_w;   /* next strip word  */
-static __attribute__((tiny)) UWORD r1_n;                /* bytes to go      */
-static __attribute__((tiny)) UWORD r1_b;                /* the source byte  */
-static __attribute__((tiny)) UWORD r1_rsh;              /* 8 - shift        */
-static __attribute__((tiny)) UWORD r1_hi, r1_lo;        /* the two nibbles' */
+static const uint8_t FAR * TINY r1_s;  /* next source byte */
+static volatile UWORD   * TINY r1_w;   /* next strip word  */
+static TINY UWORD r1_n;                /* bytes to go      */
+static TINY UWORD r1_b;                /* the source byte  */
+static TINY UWORD r1_rsh;              /* 8 - shift        */
+static TINY UWORD r1_hi, r1_lo;        /* the two nibbles' */
                                                         /* table offsets    */
 /* A strip word from the table, by byte offset: one indexed load, the offset
  * held in the direct page rather than derived at each use. */
@@ -797,7 +798,7 @@ static void edge_byte(WORD i, WORD in_even, WORD in_odd, volatile uint8_t *pv)
 /* source pixel p of a row, as 0 or 1 */
 #define SRC_BIT(row, p) (((row)[(UWORD)(p) >> 3] & bit_of[(p) & 7]) ? 1 : 0)
 
-static void raster_1bpp(const uint8_t __far *bits, uint16_t stride,
+static void raster_1bpp(const uint8_t FAR *bits, uint16_t stride,
                         WORD sx1, WORD sy1, WORD w, WORD h,
                         WORD dx1, WORD dy1, WORD mode, uint8_t fg, uint8_t bg)
 {
@@ -935,7 +936,7 @@ static void draw_glyph_cpu(WORD ch, WORD cx, WORD cy)
     WORD row, mode = (WORD)(vwk.wrt_mode + 1);
     uint8_t ink = (uint8_t)HW(vwk.text_color);
     for (row = 0; row < FONT_H; row++)
-        g[row] = *(const uint8_t __far *)
+        g[row] = *(const uint8_t FAR *)
                   (vdi_font + (uint32_t)row * FONT_STRIDE + (ch & 0xFF));
     raster_1bpp(g, 1, 0, 0, FONT_W, FONT_H, cx, cy, mode, ink,
                 (uint8_t)(mode == MD_ERASE ? ink : HW(0)));
@@ -979,7 +980,7 @@ void dev_glyph(WORD ch, WORD cx, WORD cy, WORD overlay)
 }
 
 /* vrt_cpyfm's one-plane expansion, with the pens mapped here. */
-void dev_raster_1bpp(const uint8_t __far *bits, uint16_t stride,
+void dev_raster_1bpp(const uint8_t FAR *bits, uint16_t stride,
                      WORD sx, WORD sy, WORD w, WORD h,
                      WORD dx, WORD dy, WORD mode, WORD ink, WORD bg)
 {
@@ -1003,18 +1004,18 @@ void dev_raster_1bpp(const uint8_t __far *bits, uint16_t stride,
  * stack locals, ~150 (docs/phase8c.md). */
 #define WIN ((volatile uint8_t *)MEMAC_WIN_ADDR)   /* the window, fixed  */
 
-static __attribute__((tiny)) WORD  ld_x, ld_y, ld_i;
-static __attribute__((tiny)) WORD  ld_dx, ld_dy, ld_ndy, ld_sx, ld_sy, ld_err;
-static __attribute__((tiny)) UWORD ld_n;                /* pixels to go        */
-static __attribute__((tiny)) UWORD ld_m;                /* the style, rotating */
-static __attribute__((tiny)) UWORD ld_cx0, ld_cy0, ld_cw, ld_ch;
-static __attribute__((tiny)) UWORD ld_page;             /* the 4K page mapped  */
-static __attribute__((tiny)) UWORD ld_rpage;            /* the row's page ...  */
-static __attribute__((tiny)) WORD  ld_roff, ld_rstep;   /* ... and offset in it */
-static __attribute__((tiny)) UWORD ld_off, ld_pg;
-static __attribute__((tiny)) UWORD ld_inside;           /* no pixel needs the */
+static TINY WORD  ld_x, ld_y, ld_i;
+static TINY WORD  ld_dx, ld_dy, ld_ndy, ld_sx, ld_sy, ld_err;
+static TINY UWORD ld_n;                /* pixels to go        */
+static TINY UWORD ld_m;                /* the style, rotating */
+static TINY UWORD ld_cx0, ld_cy0, ld_cw, ld_ch;
+static TINY UWORD ld_page;             /* the 4K page mapped  */
+static TINY UWORD ld_rpage;            /* the row's page ...  */
+static TINY WORD  ld_roff, ld_rstep;   /* ... and offset in it */
+static TINY UWORD ld_off, ld_pg;
+static TINY UWORD ld_inside;           /* no pixel needs the */
                                                         /* clip test          */
-static __attribute__((tiny)) uint8_t ld_a, ld_v;
+static TINY uint8_t ld_a, ld_v;
 static uint8_t ld_am[4], ld_xv[4], ld_skip[4];  /* [style bit << 1 | x & 1] */
                                 /* not tiny: cc65816 5.18 dies on an indexed  */
                                 /* direct-page array (docs/phase8c.md)        */
@@ -1303,9 +1304,9 @@ WORD dev_planes(void)
  * whole trade: this file may fold them, and vdi.c may be compiled once
  * for both screens.
  */
-extern const uint8_t __far font8x8[];
+extern const uint8_t FAR font8x8[];
 
-const VDIDEV __far vdev_vbxe = {
+const VDIDEV FAR vdev_vbxe = {
     SCR_W, SCR_H, SCR_STRIDE,
     FONT_W, FONT_H,
     FONT_TOP, FONT_ASCENT, FONT_HALF, FONT_DESCENT, FONT_BOTTOM,

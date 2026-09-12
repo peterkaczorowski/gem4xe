@@ -5,6 +5,7 @@
  * their own machine from the one place they cannot see: the answer to a
  * line it does not understand is to ignore that line and read the next.
  */
+#include "portab.h"
 #include <stdint.h>
 #include "config.h"
 #include "cio.h"
@@ -18,7 +19,7 @@ CONFIG config = { CFG_VIDEO_AUTO, CFG_MOUSE_AUTO, CFG_PRINT_NONE, "P:" };
 /* A value's name and what it means.  One table per key, so that adding a
  * value is one line and cannot forget the parser.
  *
- * __far, and the names are ARRAYS rather than pointers, so that the
+ * FAR, and the names are ARRAYS rather than pointers, so that the
  * whole table lands in `cfar` with the far code.  Bank $00 has 2,430
  * bytes of near memory for every constant the system owns
  * (src/gem4xe.scm) and a boot-time word list has no claim on any of
@@ -31,7 +32,7 @@ typedef struct {
     int16_t value;
 } CFG_WORD;
 
-static const CFG_WORD __far cfg_video[] = {
+static const CFG_WORD FAR cfg_video[] = {
     { "AUTO",  CFG_VIDEO_AUTO  },
     { "VBXE",  CFG_VIDEO_VBXE  },
     { "ANTIC", CFG_VIDEO_ANTIC },
@@ -42,7 +43,7 @@ static const CFG_WORD __far cfg_video[] = {
  * two of them are also known by.  Taken from the enum rather than
  * written out: a number here that had drifted from the one there would
  * pick the wrong device and say nothing about it. */
-static const CFG_WORD __far cfg_mouse[] = {
+static const CFG_WORD FAR cfg_mouse[] = {
     { "AUTO",     CFG_MOUSE_AUTO   },
     { "NONE",     PTR_NONE         },
     { "ST",       PTR_ST_MOUSE     },
@@ -54,7 +55,7 @@ static const CFG_WORD __far cfg_mouse[] = {
     { "MOUSTER",  PTR_XEM1         }     /* likewise */
 };
 
-static const CFG_WORD __far cfg_printer[] = {
+static const CFG_WORD FAR cfg_printer[] = {
     { "NONE", CFG_PRINT_NONE },
     { "PCL",  CFG_PRINT_PCL  },
     { "PCL5", CFG_PRINT_PCL  },          /* what somebody would write */
@@ -62,10 +63,10 @@ static const CFG_WORD __far cfg_printer[] = {
 };
 
 /* ...and the keys themselves, for the same reason. */
-static const char __far k_video[] = "VIDEO";
-static const char __far k_mouse[] = "MOUSE";
-static const char __far k_printer[] = "PRINTER";
-static const char __far k_printto[] = "PRINTTO";
+static const char FAR k_video[] = "VIDEO";
+static const char FAR k_mouse[] = "MOUSE";
+static const char FAR k_printer[] = "PRINTER";
+static const char FAR k_printto[] = "PRINTTO";
 
 static char up(char c)
 {
@@ -79,7 +80,7 @@ static uint8_t blank(char c)
 
 /* Two NUL-terminated strings: the table's, which is far, and the line's,
  * which the caller has already upper-cased. */
-static uint8_t same(const char __far *a, const char *b)
+static uint8_t same(const char FAR *a, const char *b)
 {
     while (*a && *b) {
         if (*a != *b)
@@ -89,7 +90,7 @@ static uint8_t same(const char __far *a, const char *b)
     return (uint8_t)(*a == *b);
 }
 
-static int16_t lookup(const CFG_WORD __far *tbl, WORD n,
+static int16_t lookup(const CFG_WORD FAR *tbl, WORD n,
                       const char *val, int16_t miss)
 {
     WORD i;

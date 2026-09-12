@@ -32,6 +32,7 @@
  * for a drop-down (docs/phase8.md): the alert covers what it covers and
  * puts it back, so an application need not redraw for one.
  */
+#include "portab.h"
 #include <string.h>
 #include "aes.h"
 #include "sys/app.h"
@@ -58,9 +59,9 @@
 static uint32_t al_icon(WORD n)
 {
     switch (n) {
-    case 1:  return (uint32_t)(const uint8_t __far *)gem_icon_note;
-    case 2:  return (uint32_t)(const uint8_t __far *)gem_icon_quest;
-    default: return (uint32_t)(const uint8_t __far *)gem_icon_stop;
+    case 1:  return (uint32_t)(const uint8_t FAR *)gem_icon_note;
+    case 2:  return (uint32_t)(const uint8_t FAR *)gem_icon_quest;
+    default: return (uint32_t)(const uint8_t FAR *)gem_icon_stop;
     }
 }
 

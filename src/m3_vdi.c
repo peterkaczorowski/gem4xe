@@ -32,6 +32,7 @@
  * intout[0].  The host times a script from the VCOUNT the runner stamps at
  * ST_VC_GO and ST_VC_DONE, against the emulator's cycle counter.
  */
+#include "portab.h"
 #include "vdi/vdi.h"
 #include "vdi/pointer.h"
 #include "vdi/font.h"
@@ -92,13 +93,13 @@ extern void _sys_exit(void);
 #ifndef SCRIPT_WORDS
 #define SCRIPT_WORDS 1024
 #endif
-__attribute__((section("teststage")))
+SECTION("teststage")
 volatile WORD vdi_script[SCRIPT_WORDS];
 
 #ifndef SCRATCH_BYTES
 #define SCRATCH_BYTES 2048
 #endif
-__attribute__((section("teststage")))
+SECTION("teststage")
 volatile unsigned char vdi_scratch[SCRATCH_BYTES];
 
 /* Per-call output record, so the harness can check what an opcode RETURNS and
@@ -112,7 +113,7 @@ volatile unsigned char vdi_scratch[SCRATCH_BYTES];
 #ifndef MAX_RESULTS
 #define MAX_RESULTS  48
 #endif
-__attribute__((section("teststage")))
+SECTION("teststage")
 volatile WORD vdi_results[MAX_RESULTS * RESULT_WORDS];
 /* The count is the one word the host polls WHILE a call runs, so it
  * stays in ordinary data, out of $4000-$7FFF: SpartaDOS X banks its
@@ -156,17 +157,17 @@ static uint8_t vcount_period(void)
  * sum in the direct page (Phase 8c): as byte loops with stack locals they
  * cost 24 instructions a byte, which buried the bus behind the loop.
  * Scalars only -- an indexed direct-page array is compiler bug B6. */
-static __attribute__((tiny)) UWORD bench_j;
-static __attribute__((tiny)) UWORD bench_sum;
+static TINY UWORD bench_j;
+static TINY UWORD bench_sum;
 
-static uint8_t __far *bench_place(WORD lo, WORD hi, WORD space, uint8_t *buf)
+static uint8_t FAR *bench_place(WORD lo, WORD hi, WORD space, uint8_t *buf)
 {
     uint32_t a = ((uint32_t)(UWORD)hi << 16) | (UWORD)lo;
     switch (space) {
-    case 1:  return (uint8_t __far *)vram_win(a);
-    case 2:  return (uint8_t __far *)buf;
-    case 3:  return (uint8_t __far *)(buf + BENCH_BYTES);
-    default: return (uint8_t __far *)a;
+    case 1:  return (uint8_t FAR *)vram_win(a);
+    case 2:  return (uint8_t FAR *)buf;
+    case 3:  return (uint8_t FAR *)(buf + BENCH_BYTES);
+    default: return (uint8_t FAR *)a;
     }
 }
 
@@ -206,7 +207,7 @@ static UWORD bench_op(WORD which)
     case 4:                                     /* read */
         bench_sum = 0;
         for (k = 0; k < n; k++) {
-            const UWORD __far *p = (const UWORD __far *)
+            const UWORD FAR *p = (const UWORD FAR *)
                 bench_place(intin[1], intin[2], intin[3], buf);
             bench_j = BENCH_BYTES / 2;
             do bench_sum += *p++; while (--bench_j);
@@ -215,7 +216,7 @@ static UWORD bench_op(WORD which)
         break;
     case 5:                                     /* write */
         for (k = 0; k < n; k++) {
-            UWORD __far *p = (UWORD __far *)
+            UWORD FAR *p = (UWORD FAR *)
                 bench_place(intin[1], intin[2], intin[3], buf);
             bench_j = BENCH_BYTES / 2;
             do *p++ = bench_j; while (--bench_j);
@@ -224,9 +225,9 @@ static UWORD bench_op(WORD which)
         break;
     case 6:                                     /* copy: src, then dst */
         for (k = 0; k < n; k++) {
-            const UWORD __far *s = (const UWORD __far *)
+            const UWORD FAR *s = (const UWORD FAR *)
                 bench_place(intin[1], intin[2], intin[3], buf);
-            UWORD __far *d = (UWORD __far *)
+            UWORD FAR *d = (UWORD FAR *)
                 bench_place(intin[4], intin[5], intin[6], buf);
             bench_j = BENCH_BYTES / 2;
             do *d++ = *s++; while (--bench_j);
@@ -273,7 +274,7 @@ static uint8_t exit_req;
  * to the record: [6] the loader's status, [7] the near base it chose,
  * [8] the far bank, [9] what the application's main() returned, [10] the
  * COP calls the ABI took and [11] the ones it refused. */
-extern const uint8_t __far app_blob[];
+extern const uint8_t FAR app_blob[];
 extern const uint32_t app_blob_len;
 
 static void sys_op(WORD op)
@@ -876,7 +877,7 @@ static void run_script(void)
     }
 }
 
-__task void main(void)
+TASK void main(void)
 {
     /* Touch the scratch area and the result array so the linker keeps
      * them: nothing else on the target references either -- the host is

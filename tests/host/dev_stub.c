@@ -17,6 +17,7 @@
  * something ever does, it will say so by taking the machine to address
  * zero, which is a better answer than a stub that quietly does nothing.
  */
+#include "portab.h"
 #include "vdi/vdidev.h"
 #include "vbxe/vbxe.h"
 
@@ -27,4 +28,4 @@ static const VDIDEV host_dev = {
     0,                          /* no face: nothing here draws a glyph */
 };
 
-const VDIDEV __far *vdev = (const VDIDEV __far *)&host_dev;
+const VDIDEV FAR *vdev = (const VDIDEV FAR *)&host_dev;

@@ -8,7 +8,7 @@
  *
  * THE PAGE IS ONE BANK, and that is the reason every loop below reads
  * like src/antic/antic.c's.  80 bytes a row by 800 rows is 64,000 against
- * a far bank's 65,536, so the page never straddles a bank -- and `__far`
+ * a far bank's 65,536, so the page never straddles a bank -- and `FAR`
  * pointer arithmetic is sixteen bits WITHIN one (docs/phase24.md).  Pick
  * a page an inch taller and every offset here becomes a 24-bit
  * computation that Calypsi will do wrong in one of the ways this tree has
@@ -22,13 +22,14 @@
  * WAS the drawing, and what makes it a page is v_updwk, which is the
  * emitter's business and not this file's.
  */
+#include "portab.h"
 #include "vdi.h"
 #include "vdidev.h"
 #include "print.h"
 #include "font.h"
 #include "../sys/farmem.h"
 
-uint8_t __far *pr_page;
+uint8_t FAR *pr_page;
 
 /* The masks a run's first and last byte are painted through.  Bit 7 is
  * the LEFTMOST dot, which is the one thing about 1bpp that catches
@@ -47,7 +48,7 @@ int16_t pr_page_open(void)
     if (pr_page)
         return 1;                       /* one page; a second workstation
                                          * shares it, as it would a screen */
-    pr_page = (uint8_t __far *)far_alloc(PR_BYTES);
+    pr_page = (uint8_t FAR *)far_alloc(PR_BYTES);
     if (!pr_page)
         return 0;
     for (i = 0; i < PR_BYTES; i++)
@@ -67,14 +68,14 @@ void pr_page_close(void)
 
 /* A byte of the page.  The offset is 16 bits because the page is one
  * bank; see the note at the top. */
-static uint8_t __far *pr_at(WORD x, WORD y)
+static uint8_t FAR *pr_at(WORD x, WORD y)
 {
     return pr_page + (uint16_t)((uint16_t)y * PR_STRIDE + ((UWORD)x >> 3));
 }
 
 static void pr_plot(WORD x, WORD y, uint8_t set)
 {
-    uint8_t __far *p;
+    uint8_t FAR *p;
     uint8_t bit, v;
 
     if (!pr_page || x < 0 || y < 0 || x >= PR_W || y >= PR_H)
@@ -100,7 +101,7 @@ static uint8_t pr_get(WORD x, WORD y)
 static void pr_span(WORD x1, WORD x2, WORD y, UWORD bits, WORD mode,
                     uint8_t pen)
 {
-    uint8_t __far *p;
+    uint8_t FAR *p;
     uint8_t lm, rm, m, src, v;
     WORD b1, b2, b;
 
@@ -200,8 +201,8 @@ void dev_style_line(WORD x1, WORD y1, WORD x2, WORD y2, UWORD mask)
 
 static uint8_t pr_font_row(uint32_t face, WORD ch, WORD row)
 {
-    const uint8_t __far *sr =
-        (const uint8_t __far *)(face + (uint32_t)(UWORD)row * PR_FONT_STRIDE);
+    const uint8_t FAR *sr =
+        (const uint8_t FAR *)(face + (uint32_t)(UWORD)row * PR_FONT_STRIDE);
 
     return sr[(UWORD)ch & 0xFF];
 }
@@ -239,7 +240,7 @@ void dev_font_changed(void)
     /* nothing cached: the face is read a row at a time out of far memory */
 }
 
-void dev_raster_1bpp(const uint8_t __far *bits, uint16_t stride,
+void dev_raster_1bpp(const uint8_t FAR *bits, uint16_t stride,
                      WORD sx, WORD sy, WORD w, WORD h,
                      WORD dx, WORD dy, WORD mode, WORD ink, WORD bg)
 {
@@ -248,7 +249,7 @@ void dev_raster_1bpp(const uint8_t __far *bits, uint16_t stride,
     WORD r, c;
 
     for (r = 0; r < h; r++) {
-        const uint8_t __far *row = bits + (uint16_t)(sy + r) * stride;
+        const uint8_t FAR *row = bits + (uint16_t)(sy + r) * stride;
         WORD y = (WORD)(dy + r);
 
         for (c = 0; c < w; c++) {
@@ -421,7 +422,7 @@ void dev_get_pixel(WORD x, WORD y, WORD *value, WORD *pen)
 
 void dev_read_row(WORD y, uint8_t *px)
 {
-    const uint8_t __far *p = pr_page + (uint16_t)((uint16_t)y * PR_STRIDE);
+    const uint8_t FAR *p = pr_page + (uint16_t)((uint16_t)y * PR_STRIDE);
     WORD i;
 
     for (i = 0; i < PR_STRIDE; i++)
@@ -438,9 +439,9 @@ WORD dev_colours(void)  { return 2; }   /* ink, or no ink */
 WORD dev_planes(void)   { return 1; }
 
 /* ---- the table (vdidev.h) --------------------------------------------- */
-extern const uint8_t __far font8x8[];
+extern const uint8_t FAR font8x8[];
 
-const VDIDEV __far vdev_print = {
+const VDIDEV FAR vdev_print = {
     SCR_W, SCR_H, SCR_STRIDE,
     FONT_W, FONT_H,
     FONT_TOP, FONT_ASCENT, FONT_HALF, FONT_DESCENT, FONT_BOTTOM,

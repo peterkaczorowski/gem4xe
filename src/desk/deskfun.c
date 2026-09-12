@@ -21,6 +21,7 @@
  * things about it a person can change here -- its name, which makes
  * this the desktop's rename, and its read-only bit.
  */
+#include "portab.h"
 #include "desk.h"
 
 /* The path an operation works on: "A:\SUB\*.*", the "*.*" replaced by
@@ -65,7 +66,7 @@ static WORD same_path(const char *a, const char *b)
     return (WORD)(*a == *b);
 }
 
-static char *put_far(char *d, const char __far *s)
+static char *put_far(char *d, const char FAR *s)
 {
     while ((*d = *s++) != 0)
         d++;
@@ -148,7 +149,7 @@ static void inf_dttm(OBJECT *tree, WORD obj, UWORD date, UWORD time)
  * NOT padded out -- "SUB" stays three characters -- because the places
  * left over are where the edit cursor then sits, ready to be typed
  * into rather than backspaced through. */
-static void fmt_name(const char __far *name, char *places)
+static void fmt_name(const char FAR *name, char *places)
 {
     WORD i, j = 0;
 
@@ -242,7 +243,7 @@ static char *path_tail(char *path)
 }
 
 /* "A:\SUB\*.*" -> "A:\SUB\NAME", and the tail to put "*.*" back at. */
-static char *add_fname(char *path, const char __far *name)
+static char *add_fname(char *path, const char FAR *name)
 {
     char *tail = path_tail(path);
 
@@ -266,7 +267,7 @@ static void set_all_files(char *tail)
 }
 
 /* "A:\SUB\*.*" -> "A:\SUB\NAME\*.*", FALSE if that will not fit. */
-static WORD add_path(char *path, const char __far *name)
+static WORD add_path(char *path, const char FAR *name)
 {
     char *tail = path_tail(path);
     char *end = put_far(tail, name);
@@ -345,7 +346,7 @@ static WORD make_dir(void)
 static WORD copy_file(void)
 {
     LONG in, out, got, put;
-    char __far *buf = G.g_copybuf;
+    char FAR *buf = G.g_copybuf;
     WORD ok = TRUE;
 
     in = Fopen(op_path, 0)      /* read */;
@@ -410,7 +411,7 @@ static WORD copy_one(WORD op)
  * they stopped -- the caller is stopping too. */
 static WORD walk(WORD level, WORD op)
 {
-    DTA __far *dta;
+    DTA FAR *dta;
     LONG ret;
     char *tail, *dtail;
 
@@ -498,7 +499,7 @@ static void dlg_title(OBJECT *tree, WORD obj, WORD stnum)
     WORD len;
 
     rsrc_gaddr(R_STRING, stnum, (void **)&str);
-    tree[obj].ob_spec = (LONG)(uint32_t)(char __far *)str;
+    tree[obj].ob_spec = (LONG)(uint32_t)(char FAR *)str;
     for (len = 0; str[len]; len++)
         ;
     len = (WORD)(len * G.g_wchar);
@@ -525,7 +526,7 @@ static void op_title(WORD op)
 static WORD drop_path(WORD dst_wh, WORD dst_obj, char *path)
 {
     WNODE *pd;
-    FNODE __far *pf;
+    FNODE FAR *pf;
 
     if (dst_wh == DESKWH) {
         WORD drive = (WORD)(obj_info(dst_obj)->i.blk.ib_char & 0xFF);
@@ -562,7 +563,7 @@ static WORD drop_path(WORD dst_wh, WORD dst_obj, char *path)
 void fun_file2any(WNODE *pw, WORD dst_wh, WORD dst_obj, WORD kstate)
 {
     OBJECT *tree = G.a_delete;
-    FNODE __far *pf;
+    FNODE FAR *pf;
     char dest[LEN_ZPATH];
     WORD i, ok, op, chose = FALSE;
 
@@ -719,7 +720,7 @@ void fun_mkdir(WNODE *pw)
 void fun_info(WNODE *pw)
 {
     OBJECT *tree = G.a_finfo;
-    FNODE __far *pf;
+    FNODE FAR *pf;
     char places[LEN_ZFNAME], name[LEN_ZFNAME], was[LEN_ZFNAME];
     WORD i, folder, attr, ok, changed = FALSE;
 
@@ -843,7 +844,7 @@ void fun_info(WNODE *pw)
 void fun_del(WNODE *pw)
 {
     OBJECT *tree = G.a_delete;
-    FNODE __far *pf;
+    FNODE FAR *pf;
     WORD i, ok;
 
     ok = FALSE;

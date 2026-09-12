@@ -13,6 +13,7 @@
  * sixteen arrives here as whatever it is; anything but 0 is ink, which
  * is the only sensible reading of "colour 7" on a device that has two.
  */
+#include "portab.h"
 #include "vdi.h"
 #include "vdidev.h"
 #include "../antic/antic.h"
@@ -159,7 +160,7 @@ void dev_glyph(WORD ch, WORD cx, WORD cy, WORD overlay)
  *   XOR          complement where set
  *   erase        bg where CLEAR
  */
-void dev_raster_1bpp(const uint8_t __far *bits, uint16_t stride,
+void dev_raster_1bpp(const uint8_t FAR *bits, uint16_t stride,
                      WORD sx, WORD sy, WORD w, WORD h,
                      WORD dx, WORD dy, WORD mode, WORD ink, WORD bg)
 {
@@ -169,7 +170,7 @@ void dev_raster_1bpp(const uint8_t __far *bits, uint16_t stride,
 
     for (r = 0; r < h; r++) {
         WORD y = (WORD)(dy + r);
-        const uint8_t __far *row = bits + (uint16_t)(sy + r) * stride;
+        const uint8_t FAR *row = bits + (uint16_t)(sy + r) * stride;
 
         if (y < 0 || y >= AN_H)
             continue;
@@ -446,9 +447,9 @@ WORD dev_planes(void)
  * screen -- and the font is Atari's condensed 6x6 rather than the 8x8,
  * because 320 pixels will not carry 80 columns of the other one.
  */
-extern const uint8_t __far font6x6[];
+extern const uint8_t FAR font6x6[];
 
-const VDIDEV __far vdev_antic = {
+const VDIDEV FAR vdev_antic = {
     SCR_W, SCR_H, SCR_STRIDE,
     FONT_W, FONT_H,
     FONT_TOP, FONT_ASCENT, FONT_HALF, FONT_DESCENT, FONT_BOTTOM,

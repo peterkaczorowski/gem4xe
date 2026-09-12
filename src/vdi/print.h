@@ -7,7 +7,7 @@
  * THE SIZE IS THE BANK.  80 bytes a row by 800 rows is 64,000 against a
  * far bank's 65,536, so the page never straddles one -- which matters
  * because far_alloc refuses a block that would (it cannot be indexed
- * past its own bank) and because __far pointer arithmetic is sixteen
+ * past its own bank) and because FAR pointer arithmetic is sixteen
  * bits WITHIN a bank, the trap docs/phase24.md is about.  Inside one bank
  * the whole page is reachable with plain 16-bit offsets, so this device's
  * loops read like src/antic/antic.c's rather than like a class of
@@ -16,6 +16,7 @@
 #ifndef GEM4XE_PRINT_H
 #define GEM4XE_PRINT_H
 
+#include "portab.h"
 #include <stdint.h>
 
 #define PR_W        640                     /* dots across: 80 columns of 8 */
@@ -26,7 +27,7 @@
 
 /* The page itself, 0 until pr_page_open().  One at a time: a second
  * printer workstation shares it, as it would share a screen. */
-extern uint8_t __far *pr_page;
+extern uint8_t FAR *pr_page;
 
 /* What v_updwk writes, and where.  src/gem.c sets both from GEM4XE.CFG;
  * the numbers are CFG_PRINT_* in src/sys/config.h and the two lists must

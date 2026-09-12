@@ -28,6 +28,7 @@
  * way out (src/crt_atari.s, _exit_msg) -- after DOS's own screen is back,
  * so the line is not cleared with the reopen of E:.
  */
+#include "portab.h"
 #include <stdint.h>
 #include "vdi/vdi.h"
 #include "vdi/vdidev.h"             /* the seam: which device, and both */
@@ -65,7 +66,7 @@ extern uint16_t _exit_msg;           /* src/crt_atari.s: a line for the way out 
 static const char no_vbxe[] =
     "gem4xe: VIDEO=VBXE, and no VBXE in this machine\x9b";
 
-__task void main(void)
+TASK void main(void)
 {
     WORD video;
 

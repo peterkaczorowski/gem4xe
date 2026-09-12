@@ -20,6 +20,7 @@
 #ifndef GEM4XE_DESK_H
 #define GEM4XE_DESK_H
 
+#include "portab.h"
 #include "gem.h"
 #include "deskrsc.h"
 
@@ -112,7 +113,7 @@ typedef struct {
     WORD  p_count;                      /* entries listed */
     LONG  p_size;                       /* their bytes together */
     char  p_spec[LEN_ZPATH];            /* "A:\SUB\*.*" */
-    FNODE __far *p_flist;               /* NUM_FNODES of them */
+    FNODE FAR *p_flist;               /* NUM_FNODES of them */
 } PNODE;
 
 /* A folder window.  The one at index k has the box DROOT+1+k in the
@@ -198,14 +199,14 @@ typedef struct {
     LONG     g_opsize;                  /* ...and their bytes together, which
                                          * is what Show info calls a folder's
                                          * size */
-    DTA __far *g_dta;                   /* the listing's DTA, then the FNODEs */
-    DTA __far *g_opdta;                 /* MAX_DELLEVEL of them, one per level
+    DTA FAR *g_dta;                   /* the listing's DTA, then the FNODEs */
+    DTA FAR *g_opdta;                 /* MAX_DELLEVEL of them, one per level
                                          * of the walk: our GEMDOS keeps a
                                          * search's state by the DTA that owns
                                          * it, as the ST does */
-    CSAVE __far *g_cnxsave;             /* the windows' places between programs */
-    char __far *g_shelbuf;              /* the desktop's copy of the shell buffer */
-    char __far *g_copybuf;              /* COPY_BUF of it, for file copies */
+    CSAVE FAR *g_cnxsave;             /* the windows' places between programs */
+    char FAR *g_shelbuf;              /* the desktop's copy of the shell buffer */
+    char FAR *g_copybuf;              /* COPY_BUF of it, for file copies */
     WNODE    g_wlist[NUM_WNODES];       /* by w_root - (DROOT + 1) */
     OBJECT     g_screen[NUM_SOBS];
     SCREENINFO g_screeninfo[NUM_ITEMS]; /* by obid - WOBS_START */
@@ -222,7 +223,7 @@ WORD obj_get_obid(WORD drive);
 SCREENINFO *obj_info(WORD obj);
 WORD obj_text(WORD wparent, WORD x, WORD y, WORD w, WORD h);
 WORD obj_icon(WORD wparent, WORD x, WORD y, WORD which,
-              const char __far *label, WORD letter);
+              const char FAR *label, WORD letter);
 
 /* desktop.c */
 void desk_busy(WORD on);
@@ -249,10 +250,10 @@ WORD act_count(WORD root, WORD *pfirst);
 /* ...and what a rubber band leaves: everything the box touches. */
 void act_allselect(WORD wh, WORD root, const GRECT *box);
 WORD do_open(WORD wh, WORD obj);
-WORD do_aopen(WNODE *pw, WORD curr, const char __far *name);
+WORD do_aopen(WNODE *pw, WORD curr, const char FAR *name);
 void win_rebld(WNODE *pw);
 /* The listing entry an item object shows, or 0. */
-FNODE __far *win_fnode(WNODE *pw, WORD obj);
+FNODE FAR *win_fnode(WNODE *pw, WORD obj);
 void hndl_wmsg(const WORD *msg);
 void app_start(void);
 void app_save(void);

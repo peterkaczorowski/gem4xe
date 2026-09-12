@@ -8,6 +8,7 @@
 #ifndef GEM4XE_AES_H
 #define GEM4XE_AES_H
 
+#include "portab.h"
 #include <stdint.h>
 #include "../vdi/vdi.h"
 
@@ -376,7 +377,7 @@ typedef struct {
 /* A window's visible-rectangle list: what an application may draw into
  * without touching the windows above it.  The pool is gl_olist[]. */
 typedef struct orect {
-    struct orect __far *o_link;
+    struct orect FAR *o_link;
     GRECT               o_gr;
 } ORECT;
 
@@ -394,8 +395,8 @@ typedef struct {
     WORD        w_hslide, w_vslide;     /* 0..1000 */
     WORD        w_hslsiz, w_vslsiz;     /* 0..1000, -1 = the default */
     /* Far, because the rectangle pool is (src/aes/wind.c says why). */
-    ORECT __far *w_rlist;   /* the visible rectangles */
-    ORECT __far *w_rnext;   /* the WF_NEXTXYWH cursor */
+    ORECT FAR *w_rlist;   /* the visible rectangles */
+    ORECT FAR *w_rnext;   /* the WF_NEXTXYWH cursor */
 } WINDOW;
 
 /* ---- AES-wide screen geometry (gemgraf.c's gl_* globals) ---------------

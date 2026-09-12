@@ -17,6 +17,8 @@ the packer.
 ## What is here
 
     include/gem.h       every call the system serves, declared
+    include/portab.h    the compiler's dialect -- FAR, SIMPLE_CALL and
+                        the rest -- in one place, for a second compiler
     lib/gemlib.c        the bindings: they fill a parameter block and
                         make the call
     lib/gemabi.s        the three call gates -- COP #$73 (VDI),

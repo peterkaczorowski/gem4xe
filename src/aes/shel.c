@@ -27,6 +27,7 @@
  * device at all gets its D: (src/sys/cio.c).  Every file the AES opens
  * on an application's behalf goes through it.
  */
+#include "portab.h"
 #include <string.h>
 #include "aes/aes.h"
 #include "sys/app.h"
@@ -311,7 +312,7 @@ static WORD sh_ldapp(void)
     WORD st, was = sh_next;
 
     if (was == SH_DESKTOP) {
-        st = app_load((const uint8_t __far *)sh_desk_blob, sh_desk_len, &app);
+        st = app_load((const uint8_t FAR *)sh_desk_blob, sh_desk_len, &app);
     } else {
         far_strget(cmd, sh_cmd_far, SH_CMDLEN);
         sh_next = SH_DESKTOP;

@@ -137,9 +137,9 @@ _PAT_C = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 def _load_patterns():
     text = open(_PAT_C).read()
     out = {}
-    # __far since the tables moved to `cfar`: bank $00 had no room for
+    # FAR since the tables moved to `cfar`: bank $00 had no room for
     # 608 bytes of them (docs/phase24.md).
-    for m in re.finditer(r"const UWORD (?:__far )?(\w+)\[(\d+)\]\s*=\s*\{(.*?)\};",
+    for m in re.finditer(r"const UWORD (?:FAR )?(\w+)\[(\d+)\]\s*=\s*\{(.*?)\};",
                          text, re.S):
         words = [int(w, 16) for w in re.findall(r"0x([0-9A-Fa-f]{4})", m.group(3))]
         if len(words) != int(m.group(2)):

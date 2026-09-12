@@ -6,6 +6,7 @@
  * chain of them to the head of the free chain -- one relink, however
  * many there are.
  */
+#include "portab.h"
 #include "desk.h"
 
 static const OBJECT gl_sampob[2] = {
@@ -153,7 +154,7 @@ static void obj_clear(SCREENINFO *si)
  * -- the donor's app_blddesk for one ANODE, and win_bldview for one
  * FNODE.  0 when the items are all in use. */
 WORD obj_icon(WORD wparent, WORD x, WORD y, WORD which,
-              const char __far *label, WORD letter)
+              const char FAR *label, WORD letter)
 {
     WORD obid;
     OBJECT *pob;

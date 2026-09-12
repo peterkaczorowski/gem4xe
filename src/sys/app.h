@@ -43,6 +43,7 @@
 #ifndef GEM4XE_APP_H
 #define GEM4XE_APP_H
 
+#include "portab.h"
 #include <stdint.h>
 
 #define APP_OK        0
@@ -86,7 +87,7 @@ extern uint16_t pool_refused;
  * now that an accessory is loaded before the first program. */
 extern uint16_t app_near;                          /* bytes left          */
 
-int16_t app_load(const uint8_t __far *blob, uint32_t len, APP *app);
+int16_t app_load(const uint8_t FAR *blob, uint32_t len, APP *app);
 int16_t app_exec(const APP *app);
 void    app_free(const APP *app);
 

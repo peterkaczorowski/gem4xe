@@ -6,6 +6,7 @@
  * full-screen fill costs 0.51 of a frame through the blitter; the same work
  * through the MEMAC window would be roughly twenty times slower.
  */
+#include "portab.h"
 #include "vdi.h"
 #include "vdidev.h"
 #include "print.h"
@@ -20,7 +21,7 @@
 /* The device this VDI is drawing on (vdidev.h).  The PROGRAM sets it
  * before vdi_init() and it does not move afterwards; every SCR_ and
  * FONT_ name in this file, and every dev_ call, is a read through it. */
-const VDIDEV __far *vdev;
+const VDIDEV FAR *vdev;
 
 WORD contrl[CONTRL_SIZE];
 WORD intin[INTIN_SIZE];
@@ -568,7 +569,7 @@ static WORD vwk_select(WORD h)
         /* ...and the surface it draws on, which need not be the one the
          * last workstation drew on (src/vdi/vdi.h). */
         if (vwk.dev)
-            vdev = (const VDIDEV __far *)vwk.dev;
+            vdev = (const VDIDEV FAR *)vwk.dev;
         /* A user pattern lives in the Vwk, so PAT_USER names a
          * different sixteen rows in every workstation that has one, and
          * the cache cannot tell them apart: what it holds may be the
@@ -596,7 +597,7 @@ static void init_wk(WORD handle)
     /* The surface it will draw on, before anything asks the geometry:
      * whichever device is current, which for every workstation any
      * program opens today is the screen (src/vdi/vdi.h). */
-    vwk.dev        = (const void __far *)vdev;
+    vwk.dev        = (const void FAR *)vdev;
     vwk.xmx_clip   = SCR_W - 1;
     vwk.ymx_clip   = SCR_H - 1;
     vwk.wrt_mode   = MD_REPLACE - 1;
@@ -664,7 +665,7 @@ static void vdi_v_opnvwk(void)
      * page is a virtual workstation on another device, which is exactly
      * what a Vwk carrying its own device is for (src/vdi/vdi.h). */
     WORD devid = (WORD)(contrl[3] > 0 ? intin[0] : 1);
-    const VDIDEV __far *want = (const VDIDEV __far *)vwk_tab[0].dev;
+    const VDIDEV FAR *want = (const VDIDEV FAR *)vwk_tab[0].dev;
 
     for (i = 1; i < NUM_VWK; i++)
         if (vwk_tab[i].handle == 0)
@@ -2087,7 +2088,7 @@ static void vdi_vrt_cpyfm(void)
      * to sixteen here, which was right only while every memory form was
      * in bank $00.  A resource's icons are in far memory now
      * (src/aes/rsrc.c). */
-    dev_raster_1bpp((const uint8_t __far *)src->fd_addr,
+    dev_raster_1bpp((const uint8_t FAR *)src->fd_addr,
                     (uint16_t)((uint16_t)wdwidth * 2u),
                     sx1, sy1, (WORD)(sx2 - sx1 + 1), (WORD)(sy2 - sy1 + 1),
                     ptsin[4], ptsin[5], intin[0], intin[1], intin[2]);

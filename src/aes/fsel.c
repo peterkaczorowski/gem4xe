@@ -50,6 +50,7 @@
  * map worth reading (docs/phase11.md), so all eight are, and a click on
  * a drive with nothing there takes the timeout and comes back.
  */
+#include "portab.h"
 #include <string.h>
 #include "aes/aes.h"
 #include "sys/app.h"
@@ -545,7 +546,7 @@ WORD fs_input(char *pipath, char *pisel, WORD *pbutton, const char *pilabel)
     locold = locstr + LEN_FSPATH;
     mask = locold + LEN_FSPATH;
 
-    far_get((uint8_t *)h, (uint32_t)(const uint8_t __far *)fs_rsc, FS_RSC_SIZE);
+    far_get((uint8_t *)h, (uint32_t)(const uint8_t FAR *)fs_rsc, FS_RSC_SIZE);
     rs_fixit(h);
     tree = (OBJECT *)(uint16_t)*(uint32_t *)((uint8_t *)h + h->rsh_trindex);
 

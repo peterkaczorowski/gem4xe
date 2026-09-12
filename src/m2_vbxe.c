@@ -6,6 +6,7 @@
  * how fast the 65816 runs, so the VDI has to be a blit-list compiler.  This is
  * the first proof that the blit-list path works end to end.
  */
+#include "portab.h"
 #include "vbxe/vbxe.h"
 
 #define STATUS ((volatile unsigned char *) 0x0600)
@@ -32,7 +33,7 @@ static const unsigned char pal16[16 * 3] = {
     0x7F, 0x01, 0x7F    /* 15 odd purple   */
 };
 
-__task void main(void)
+TASK void main(void)
 {
     unsigned int i;
 

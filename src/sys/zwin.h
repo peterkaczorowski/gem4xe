@@ -13,6 +13,8 @@
 #ifndef GEM4XE_ZWIN_H
 #define GEM4XE_ZWIN_H
 
-#define ZWIN __attribute__((section("zwin")))
+#include "portab.h"
+
+#define ZWIN SECTION("zwin")
 
 #endif

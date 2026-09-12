@@ -8,6 +8,7 @@
  * the call ends, and everything that outlives a call -- the DTA's
  * search state, the per-drive directories -- is in far memory.
  */
+#include "portab.h"
 #include <string.h>
 #include "gemdos.h"
 #include "cio.h"
@@ -99,10 +100,10 @@ uint16_t gemdos_calls, gemdos_bad;
 
 /* ---- far memory, typed ---------------------------------------------- */
 
-static UWORD rd16(uint32_t a) { return *(const UWORD __far *)a; }
-static LONG  rd32(uint32_t a) { return *(const LONG __far *)a; }
-static void  wr16(uint32_t a, UWORD v) { *(UWORD __far *)a = v; }
-static void  wr32(uint32_t a, LONG v) { *(LONG __far *)a = v; }
+static UWORD rd16(uint32_t a) { return *(const UWORD FAR *)a; }
+static LONG  rd32(uint32_t a) { return *(const LONG FAR *)a; }
+static void  wr16(uint32_t a, UWORD v) { *(UWORD FAR *)a = v; }
+static void  wr32(uint32_t a, LONG v) { *(LONG FAR *)a = v; }
 
 static uint32_t gd_file(uint8_t iocb)
 {
@@ -120,8 +121,8 @@ static void gd_moved(uint8_t iocb, uint32_t by)
 }
 
 /* The block's arguments, at the ST's offsets plus four. */
-static WORD arg_w(uint8_t off) { return *(const WORD __far *)(gd_pb + off); }
-static LONG arg_l(uint8_t off) { return *(const LONG __far *)(gd_pb + off); }
+static WORD arg_w(uint8_t off) { return *(const WORD FAR *)(gd_pb + off); }
+static LONG arg_l(uint8_t off) { return *(const LONG FAR *)(gd_pb + off); }
 
 /* ---- errors --------------------------------------------------------- */
 

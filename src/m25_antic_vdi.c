@@ -10,6 +10,7 @@
  * is the dispatcher, the workstation state, the clipping and the
  * attributes on top of a device they were not written for.
  */
+#include "portab.h"
 #include "vdi/vdi.h"
 #include "aes/aes.h"
 #include "aes/proc.h"
@@ -40,7 +41,7 @@ static void rect(WORD op, WORD x1, WORD y1, WORD x2, WORD y2)
     call(op, 2, 0);
 }
 
-__task void main(void)
+TASK void main(void)
 {
     STATUS[0] = 'A';
     STATUS[1] = 'V';

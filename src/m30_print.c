@@ -19,6 +19,7 @@
  * that had to reboot the machine to try the second language would be
  * testing DOS.
  */
+#include "portab.h"
 #include "vdi/vdi.h"
 #include "vdi/font.h"
 #include "vdi/vdidev.h"
@@ -68,7 +69,7 @@ static void text(WORD x, WORD y, const char *s)
     call(V_GTEXT, 1, i);
 }
 
-__task void main(void)
+TASK void main(void)
 {
     STATUS[0] = 'A';
     STATUS[1] = 'V';

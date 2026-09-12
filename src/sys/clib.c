@@ -31,6 +31,7 @@
  * drawing path -- so a byte at a time is the right shape, and they go in
  * `farcode` with the rest of the C, costing bank $00 nothing.
  */
+#include "portab.h"
 #include <stddef.h>
 
 void *memcpy(void *dst, const void *src, size_t n)
