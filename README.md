@@ -463,12 +463,15 @@ section 9 says that when a program *does not* specify a version "you may choose
 any version ever published by the Free Software Foundation". Silence is the
 recipient's choice, not a v2-only grant.
 
-**The source is freely distributable and the binaries are not yet.** No
-Apache-2.0 object is linked any more — `src/sys/clib.c` supplies the eight ISO
-C functions Calypsi took from NuttX — but the compiler's own runtime is still
-the vendor's, and it says "Permission to use with the Calypsi tool chain is
-hereby granted", which is not permission to redistribute and which no choice of
-GPL version fixes. `tests/host/test_licence.py` reads the linker maps and
+One corner is not closed. No Apache-2.0 object is linked any more —
+`src/sys/clib.c` supplies the eight ISO C functions Calypsi took from NuttX —
+but **815 bytes of GEM.COM, 0.6% of it, is the compiler's own runtime**, under
+"Permission to use with the Calypsi tool chain is hereby granted". That tool
+chain's licence expressly permits "producing application software for vintage
+and retro computing systems", so the intent is plain; what does not close is
+the GPL's requirement that the *whole* work be GPL-licensable, which is the gap
+GCC's Runtime Library Exception exists to fill. A runtime exception from the
+author would settle it. `tests/host/test_licence.py` reads the linker maps and
 fails if either half regresses.
 
 Where a file follows EmuTOS, its header names the donor file it follows, and

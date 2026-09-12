@@ -81,13 +81,31 @@ Its header reads, in full:
 > Copyright Håkan Thörngren.  This file is part of the Calypsi C library.
 > Permission to use with the Calypsi tool chain is hereby granted.
 
-That is a grant to **use**, not to redistribute, and the tool chain's own
-licence says "you may not ... distribute Software".  **No choice of GPL
-version fixes this**: it is not a GPL-compatibility question but the
-absence of any redistribution permission, which is what a compiler's
-runtime exception normally supplies and what this one does not say.
+That is a grant to **use**, and it does not mention redistribution either
+way.  Read carefully, the position is narrower than it first looks, and
+worth stating in both directions.
 
-Two ways forward, in the order they should be tried:
+**The tool chain's licence almost certainly permits this.**  Its clause 2
+expressly grants "personal non-commercial use, including personal hobby
+and education, **producing application software for vintage and retro
+computing systems**", and the restriction that follows -- "you may not
+... distribute Software" -- is about *Calypsi*, which clause 1 defines as
+"The Software and its documentation".  Not its output.  A licence whose
+stated purpose is producing retro software, read as forbidding anyone
+from being given the retro software, would defeat its own grant.
+
+**What is genuinely unresolved is on the GPL's side, not the vendor's.**
+Distributing a GPL'd binary means being able to licence the WHOLE work
+under the GPL, and 815 bytes of GEM.COM -- 0.6 per cent of it -- is under
+"permission to use", which is not a GPL-compatible licence.  That is
+precisely the gap GCC's Runtime Library Exception exists to close, and
+GPLv2's "system library" carve-out does not cleanly cover a
+cross-compiler's runtime.  No choice of GPL version fixes it, because it
+is not a question of which GPL.
+
+So this is a corner, not an obstacle: the risk of shipping is very low
+and the intent of every party is obvious, but the paperwork does not
+close.  Two ways to close it, in the order they should be tried:
 
 1. **Ask the author for a runtime exception.**  Calypsi has one
    developer, this is the request every compiler vendor fields, and it is
@@ -104,9 +122,11 @@ Two ways forward, in the order they should be tried:
    `src/sys/div16.s` is the precedent for the mechanism -- `--override`,
    and a reproducer in `tools/ccbug/` run under `make check-cc`.
 
-Until one of those happens, **gem4xe's source is freely distributable and
-its binaries are not**, which is the honest statement and the one the
-release page should make.
+Until one of those happens, the honest statement -- and the one the
+release page makes -- is that **the binaries carry 815 bytes that are not
+ours to relicense**, that nobody involved is likely to mind, and that a
+release calling itself properly GPL'd wants the grant in writing first.
+Not that the binaries cannot be handed to a tester.
 
 ## Keeping it true
 

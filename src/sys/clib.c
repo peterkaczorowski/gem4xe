@@ -16,12 +16,14 @@
  * WHAT IS LEFT AFTER THIS, so that nobody reads a clean link as a clean
  * licence: the compiler's own runtime -- _Dp, _Mul16, _UDivMod16,
  * _JmpIndLong, _ValueSwitch16, _MoveLongNear, __memcpy_far, _FillDP2,
- * __initialize_sections and the startup -- is still the library's, and
- * it carries no redistribution grant at all ("Permission to use with the
- * Calypsi tool chain is hereby granted"), which no choice of GPL version
- * fixes.  None of those symbols is documented in the Calypsi guide
- * either, so replacing them means discovering each register contract by
- * experiment.  docs/licence.md has the state of it.
+ * __initialize_sections and the startup -- is still the library's, 815
+ * bytes of it, under "Permission to use with the Calypsi tool chain is
+ * hereby granted".  That is a smaller problem than this one was and of a
+ * different kind: the tool chain's licence expressly permits producing
+ * software for retro machines, so the intent is plain, and what does not
+ * close is the GPL's own requirement that the whole work be
+ * GPL-licensable -- the gap GCC's Runtime Library Exception fills.
+ * docs/licence.md has it in full.
  *
  * These are the ISO C functions, written to the standard's own wording
  * and nothing else's.  They are all cold: six strlen, five strcpy, two

@@ -201,12 +201,15 @@ lineage: EmuTOS, which is the Caldera-GPL'd Digital Research GEM.
 `src/gem4xe-src.tar.gz` is the tree these binaries were built from,
 exactly as committed, because that is what the licence asks for.
 
-One caveat, stated because it is true rather than because anyone will
-ask: the **compiler's own runtime** is linked into these binaries and is
-not ours to give -- Calypsi's library says "permission to use", not
-permission to redistribute.  The source is free to pass on; these
-`.COM` and `.G4A` files are for trying this out, and a proper release
-waits on that grant.  `docs/licence.md` in the source has the detail.
+One footnote, for completeness rather than because it affects you: about
+**815 bytes** of `GEM.COM` is the C compiler's own runtime, which is not
+ours to relicense -- Calypsi's library says "permission to use".  Its
+tool chain licence expressly allows "producing application software for
+vintage and retro computing systems", so nobody involved is likely to
+mind; what has not been got in writing is the runtime exception the GPL
+would want before calling the binary wholly GPL'd.  `docs/licence.md` in
+the source has it in full.  Pass these files on freely as far as gem4xe
+is concerned.
 
 **The DOS on each disk image is not gem4xe's**, and is there so that the
 disk boots.  Whoever owns it owns it; the images are for trying this
