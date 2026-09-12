@@ -67,9 +67,11 @@ PREFITEM = 44                               # 45 separator
 READITEM, SAVEITEM = 46, 47
 NOBS_MENU = 48
 
-# ADDINFO objects
-DEBOX, DETITLE, DEVERSN, DEOK = 0, 1, 5, 13
-NOBS_INFO = 14
+# ADDINFO objects.  DEVERSN and DEOK moved down one when the gem4xe
+# version line went in; they are constants for exactly that reason, and
+# src/desk/desktop.c reads them out of the header this file generates.
+DEBOX, DETITLE, DEVERSN, DEOK = 0, 1, 6, 14
+NOBS_INFO = 15
 
 # ADMKDBOX objects, the donor's names (desk_rsc.h)
 MKBOX, MKTITLE, MKNAME, MKOK, MKCNCL = 0, 1, 2, 3, 4
@@ -252,11 +254,37 @@ ACTIVE_W = 27                               # " Desk " to " Options " inclusive
 
 # The About dialog's lines: (text, x, y) in characters, centred by hand
 # in a 40-column box the way RCS leaves them.
+# gem4xe's own version, from the VERSION file at the root of the tree --
+# ONE place, read here and therefore by tools/deskref.py too, which
+# builds its model of this dialog from this list.  A build stamp was the
+# other candidate and is a silly thing to put in an About box: it would
+# change every day, and the three gates that compare this dialog pixel
+# for pixel would have to be told the date.  A version changes when
+# somebody decides it does.  The dist's own VERSION file carries this
+# number AND the date and commit, which is what a bug report wants.
+ABOUT_W, ABOUT_H = 40, 18
+
+
+def _version():
+    """The number in the VERSION file at the top of the tree."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "..", "VERSION")) as f:
+        return f.read().strip()
+
+
+VERSION = _version()
+VERSION_LINE = "version " + VERSION
+# x for a line centred in the box.  The hand-placed lines below could be
+# out by one and nobody would mind; this one changes length with the
+# version, so it is computed.
+VERSION_X = (ABOUT_W - len(VERSION_LINE)) // 2
+
 ABOUT = [
     ("gem4xe Desktop", 13, 1),
     ("GEM for the Atari XL/XE with VBXE,", 3, 2),
     ("Rapidus and Ultimate 1MB", 8, 3),
-    ("AES version", 12, 5), ("0.00", 24, 5),           # DEVERSN, filled in
+    (VERSION_LINE, VERSION_X, 5),
+    ("AES version", 12, 6), ("0.00", 24, 6),           # DEVERSN, filled in
     ("Based on EmuTOS, 'GPLed' GEM sources", 2, 7),
     ("\xbd 1987 Digital Research, Inc.", 4, 8),
     ("\xbd 1999 Caldera Thin Clients, Inc.", 3, 9),
@@ -265,7 +293,6 @@ ABOUT = [
     ("gem4xe is distributed under the GPL", 2, 13),
     ("See COPYING for the details", 6, 14),
 ]
-ABOUT_W, ABOUT_H = 40, 18
 
 # The two dialogs the file operations put up, in the donor's shape
 # (ADMKDBOX, and ADCPALER cut to what a delete shows).  The templates'

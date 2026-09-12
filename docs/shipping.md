@@ -542,3 +542,26 @@ are cheapest now and dear later:
    it says it in is another.  What a translator still cannot change is
    the file selector's dialog (its tree is in the image, for the pool
    reason in section 5), the keyboard layout, and the date format.
+
+## The version number
+
+`VERSION` at the top of the tree holds it, and **that file is the only
+place it lives**: `tools/deskrsc.py` reads it into the About dialog, so
+`tools/deskref.py`'s model of that dialog reads the same string and the
+three gates that compare it pixel for pixel cannot disagree with the
+product.  `make dist` writes both numbers into the distribution's own
+`VERSION`:
+
+    0.1 (2026-09-11-bd01a07)
+
+They answer different questions.  The release is what a human says out
+loud and what *Desk -> About gem4xe* shows; the date and commit identify
+the build exactly, and `make dist` refuses a dirty tree so that the
+second one is true.  A **build stamp in the About box was the other
+candidate and is the wrong thing**: it would change every day, and every
+gate that compares that dialog would have to be told the date.  A version
+changes when somebody decides it does.
+
+The About box's other number is the **AES version**, 1.40, filled in at
+run time from `global[0]`.  That is the AES gem4xe claims to be -- TOS
+1.04's, which is what EmuTOS reports -- and not gem4xe's own.

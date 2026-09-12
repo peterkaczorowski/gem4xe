@@ -188,9 +188,11 @@ what the machine is (real or emulated, and with what), what was on the
 screen, and what you did.  A screenshot settles most of it.  The refusal
 in step 1 is not a fault; anything after step 3 probably is.
 
-The program itself does not yet show its build anywhere -- the About box
-gives the AES version, which is 1.40 for every build of it -- so
-`VERSION` is the only place the number lives on your side.
+`VERSION` holds two numbers and they answer different questions: the
+release, which is what **Desk -> About gem4xe** shows and what to say out
+loud, and the date and commit, which identify the build exactly.  The
+About box's *other* number, the AES version, is 1.40 for every build --
+it is the AES gem4xe claims to be, not gem4xe's own.
 
 ## Licence
 

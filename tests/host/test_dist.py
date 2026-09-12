@@ -132,11 +132,33 @@ class TestDistribution(unittest.TestCase):
                             f"the source tarball is missing {want}")
 
     def test_the_version_is_written_down_for_a_bug_report(self):
+        """Both numbers: the release, which is what the About box shows,
+        and the date and commit, which identify the build."""
+        import deskrsc
         with open(os.path.join(self.out, "VERSION")) as f:
             v = f.read().strip()
-        self.assertRegex(v, r"^\d{4}-\d{2}-\d{2}-")
-        self.assertIn(v, self.page,
+        self.assertRegex(v, r"^\S+ \(\d{4}-\d{2}-\d{2}-")
+        self.assertTrue(v.startswith(deskrsc.VERSION + " "),
+                        f"the dist says {v!r}, which does not start with "
+                        f"the VERSION file's {deskrsc.VERSION!r}")
+        self.assertIn(v.split(" (")[1].rstrip(")"), self.page,
                       "VERSION and the page's stamp disagree")
+
+    def test_the_about_box_shows_the_same_version(self):
+        """ONE place: tools/deskrsc.py reads the VERSION file, so the
+        resource the desktop loads and the number in the dist cannot
+        drift.  tools/deskref.py's model reads the same list, which is
+        what keeps the pixel gates honest across a version bump."""
+        import deskrsc
+        with open(os.path.join(ROOT, "VERSION")) as f:
+            want = f.read().strip()
+        self.assertEqual(deskrsc.VERSION, want)
+        line = [t for t, x, y in deskrsc.ABOUT if t.startswith("version ")]
+        self.assertEqual(line, ["version " + want],
+                         f"the About box's version line is {line}")
+        # ...and it is centred, since its length moves with the version
+        self.assertEqual(deskrsc.VERSION_X,
+                         (deskrsc.ABOUT_W - len(line[0])) // 2)
 
     def test_a_dirty_tree_is_refused(self):
         """The check itself, by reading mkdist rather than by dirtying

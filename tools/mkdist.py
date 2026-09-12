@@ -237,10 +237,13 @@ def build(out, tar=None, require_clean=False):
     with open(src_tar, "wb") as f:
         f.write(r.stdout)
 
-    # ...and the stamp on its own, so a tester who has unpacked the
-    # folder and forgotten where it came from can still quote a version.
+    # ...and the version on its own, so a tester who has unpacked the
+    # folder and forgotten where it came from can still quote one.  BOTH
+    # numbers, because they answer different questions: the release is
+    # what the About box shows and what a human says out loud, and the
+    # date and commit are what identifies the build exactly.
     with open(os.path.join(out, "VERSION"), "w") as f:
-        f.write(stamp() + "\n")
+        f.write(f"{deskrsc.VERSION} ({stamp()})\n")
 
     disks = "\n".join(made)
     if missing:

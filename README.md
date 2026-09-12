@@ -7,6 +7,9 @@ in principle Antonia), and **Ultimate 1MB**.
 The target surface is **640 × 240, 16 colours** — VBXE's HR overlay, 4bpp chunky.
 That is a better GEM surface than the Atari ST's medium resolution.
 
+Current version **0.1** — `VERSION` at the top of the tree is where it
+lives, and `make dist` stamps a release with it and the commit.
+
 **A 65C816 with linear RAM is required.** VBXE is not: one `GEM.COM` carries
 both display drivers and chooses at start-up, so a machine without a VBXE gets
 320×168 on ANTIC mode F instead — `make test-m26` boots the shipped binary three
