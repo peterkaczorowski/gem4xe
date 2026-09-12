@@ -12,10 +12,12 @@ Two claims:
     at release time.
 
   * **the vendor runtime has not grown.**  The compiler's own support
-    code is still the vendor's and carries no redistribution grant,
-    which is the one thing still outstanding.  The set below is what the
-    link needs TODAY; a new name in it is new exposure and a reason to
-    look, not a reason to edit this list without reading why.
+    code is still the vendor's.  It is distributable -- the GPL's System
+    Library carve-out is written for "a compiler used to produce the
+    work" -- but it is the one part of the binary without GPL source,
+    and the set below is what the link needs TODAY.  A new name in it is
+    something to look at, not a reason to edit this list without reading
+    why.
 """
 import glob
 import os
@@ -26,7 +28,8 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 BUILD = os.path.join(ROOT, "build")
 
 # Håkan Thörngren's own runtime: "Permission to use with the Calypsi tool
-# chain is hereby granted", which is not permission to redistribute.
+# chain is hereby granted".  A System Library in the GPL's terms
+# (docs/licence.md), and the only object code here without GPL source.
 VENDOR_RUNTIME = {
     "pseudoRegisters.o", "integer.o", "controlFlow.o", "vswitch16.o",
     "memory.o", "memcpy_far.o", "memset_far.o", "spill.o", "initialize.o",

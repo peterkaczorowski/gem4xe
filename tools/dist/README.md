@@ -202,14 +202,14 @@ lineage: EmuTOS, which is the Caldera-GPL'd Digital Research GEM.
 exactly as committed, because that is what the licence asks for.
 
 One footnote, for completeness rather than because it affects you: about
-**815 bytes** of `GEM.COM` is the C compiler's own runtime, which is not
-ours to relicense -- Calypsi's library says "permission to use".  Its
-tool chain licence expressly allows "producing application software for
-vintage and retro computing systems", so nobody involved is likely to
-mind; what has not been got in writing is the runtime exception the GPL
-would want before calling the binary wholly GPL'd.  `docs/licence.md` in
-the source has it in full.  Pass these files on freely as far as gem4xe
-is concerned.
+**815 bytes** of `GEM.COM` is the C compiler's own runtime, which is the
+compiler author's rather than ours.  The GPL carves exactly that out --
+a "System Library" of "a compiler used to produce the work" (GPLv3 §1;
+GPLv2 §3 says the same more loosely) is not part of the Corresponding
+Source -- and Calypsi's own licence expressly allows "producing
+application software for vintage and retro computing systems".
+`docs/licence.md` in the source has it in full.  Pass these files on
+freely.
 
 **The DOS on each disk image is not gem4xe's**, and is there so that the
 disk boots.  Whoever owns it owns it; the images are for trying this

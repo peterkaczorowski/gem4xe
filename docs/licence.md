@@ -58,7 +58,7 @@ smaller.
 The applications -- the desktop, the calculator, the clock, the
 accessory -- never linked any of it.
 
-## What is still open, and it is not a code problem
+## The compiler's runtime, and why it is not a problem
 
 The **compiler's own runtime** is still the vendor's, in the engine and
 in every application:
@@ -94,39 +94,68 @@ computing systems**", and the restriction that follows -- "you may not
 stated purpose is producing retro software, read as forbidding anyone
 from being given the retro software, would defeat its own grant.
 
-**What is genuinely unresolved is on the GPL's side, not the vendor's.**
-Distributing a GPL'd binary means being able to licence the WHOLE work
-under the GPL, and 815 bytes of GEM.COM -- 0.6 per cent of it -- is under
-"permission to use", which is not a GPL-compatible licence.  That is
-precisely the gap GCC's Runtime Library Exception exists to close, and
-GPLv2's "system library" carve-out does not cleanly cover a
-cross-compiler's runtime.  No choice of GPL version fixes it, because it
-is not a question of which GPL.
+**And the GPL's side closes too, by the licence's own text.**  An
+earlier draft of this page said the opposite -- that the whole work had
+to be GPL-licensable, that 815 bytes of it was not, and that no choice
+of GPL version fixed it.  That was a misreading.  GPLv3 section 1:
 
-So this is a corner, not an obstacle: the risk of shipping is very low
-and the intent of every party is obvious, but the paperwork does not
-close.  Two ways to close it, in the order they should be tried:
+> The "System Libraries" of an executable work include anything, other
+> than the work as a whole, that (a) is included in the normal form of
+> packaging a Major Component, but which is not part of that Major
+> Component, and (b) serves only to enable use of the work with that
+> Major Component [...]  A "Major Component", in this context, means a
+> major essential component (kernel, window system, and so on) of the
+> specific operating system (if any) on which the executable work runs,
+> **or a compiler used to produce the work**, or an object code
+> interpreter used to run it.
+>
+> The "Corresponding Source" for a work in object code form means all
+> the source code needed to generate, install, and (for an executable
+> work) run the object code and to modify the work [...]  However, it
+> does not include the work's System Libraries [...]
 
-1. **Ask the author for a runtime exception.**  Calypsi has one
-   developer, this is the request every compiler vendor fields, and it is
-   why libgcc has the exception it has.  One message, and it settles the
-   position for every program anyone builds with the tool chain, not just
-   this one.
-2. **Replace it.**  Tractable but not small: *none of those symbols is
-   documented anywhere in the Calypsi guide*, so each register contract
-   has to be discovered by experiment -- compile an expression, read the
-   generated assembly, confirm in the vendor's simulator.
-   `_ValueSwitch16` needs the *data format* of the table the compiler
-   emits, not just a register contract, and `_Dp` needs the size the code
-   generator assumes (`ctx_regs_ok()` already reads that from the linker).
-   `src/sys/div16.s` is the precedent for the mechanism -- `--override`,
-   and a reproducer in `tools/ccbug/` run under `make check-cc`.
+A compiler's runtime library -- shipped with the compiler, not part of
+the compiler, linked into every program it produces and good for nothing
+else -- is the case those words were written for.  The FSF's own FAQ
+says so twice: a GPL program built with Visual C++ may be linked with
+its runtime and distributed, "the runtime libraries are 'System
+Libraries' as GPLv3 defines them"; and for any library meeting the
+criteria, "the requirement to distribute source code for the whole
+program does not include those libraries, **even if you distribute a
+linked executable containing them**".  GPLv2 section 3 has the older,
+looser form of the same carve-out ("the major components (compiler,
+kernel, and so on) of the operating system on which the executable
+runs"); gem4xe is v2-or-later, so every recipient may take v3 and the
+explicit words.  Nor does either version ask that the compiler be free
+software: the licence wants the source of the *work* to travel with the
+binary, and it does.
 
-Until one of those happens, the honest statement -- and the one the
-release page makes -- is that **the binaries carry 815 bytes that are not
-ours to relicense**, that nobody involved is likely to mind, and that a
-release calling itself properly GPL'd wants the grant in writing first.
-Not that the binaries cannot be handed to a tester.
+The one condition attached, in both versions, is that a System Library
+stops being one if it "accompanies the executable" -- the release must
+not bundle Calypsi itself.  It does not.
+
+So this is closed.  Two things would still make it tidier, and neither
+is something a release waits for:
+
+1. **A runtime exception from the author**, in writing.  It would settle
+   the position for every program anyone builds with the tool chain
+   rather than resting it on a reading of section 1.
+2. **Replacing the runtime.**  About a day, not the research project an
+   earlier draft made it sound.  The contracts are not in the guide, but
+   one `--list-file` compile of five functions gives all of them:
+   `_Mul16` takes A and X and returns A; `_UDivMod16` takes the dividend
+   in A and the divisor in X and returns the quotient in X and the
+   remainder in A; `_Mul32` and `_Div32` take their operands in
+   `_Dp..+6`; `_ValueSwitch16` takes the value in A and the table's long
+   address in `_Dp`, and the table is `.word n-1`, `.word default-1`,
+   then ascending `(value, target-1)` pairs, because it returns by RTS.
+   `initialize.o` need not be reimplemented at all: the linker's
+   `--no-data-init-table-section` and the documented `.sectionStart` /
+   `.sectionEnd` symbols let the startup clear and copy its own
+   sections.  `src/sys/div16.s` is the precedent -- `--override`, and a
+   reproducer in `tools/ccbug/` run under `make check-cc`.  What it buys
+   is that every byte of the binary has GPL source, which the licence
+   does not require and the project may want anyway.
 
 ## Keeping it true
 
