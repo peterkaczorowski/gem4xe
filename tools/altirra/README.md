@@ -32,8 +32,10 @@ are rewritten through a helper so they hold on both hosts.
 touched here.
 
 Found by the file tests of the Calypsi Atari board support package
-(`~/dev/Calypsi-65816-Atari`, `test/readwrite.c`), which run against
-an H: directory.  Not yet sent upstream.
+([Calypsi-65816-Atari](https://github.com/slaapliedje/Calypsi-65816-Atari),
+`test/readwrite.c`), which run against an H: directory.  Sent upstream
+as [#91](https://github.com/ilmenit/AltirraSDL/pull/91) on 2026-09-13,
+open.
 
 ## altirra-65c816-native-mode.patch -- two CPU core bugs (merged, #88)
 
