@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The product disks boot into the desktop, with nothing typed at all.
 
-There are two of them and they come up the same way by different means:
+There are three of them and they come up the same way by different means:
 
   build/gem-sp.atr   SpartaDOS 3.2 on an SDFS volume, GEM.COM started by
                      the batch file the DOS runs at boot -- two of them,
@@ -15,7 +15,15 @@ There are two of them and they come up the same way by different means:
                      left beside it, and this floppy is a test vehicle --
                      a real machine runs gem4xe off the card
                      (tools/mkdisk.py --sweep --remove, and
-                     docs/shipping.md section 2).
+                     docs/shipping.md section 2);
+  build/gem-sdx.atr  a double-sided double-density SDFS disk with NO DOS
+                     on it (tools/mkfloppy.py): the one the release
+                     carries, because the other two boot a DOS that is
+                     not gem4xe's to give away.  It boots under SpartaDOS
+                     X from a cartridge (--sdx=CART, the fixture
+                     [spartados].sdx_cart) or from Ultimate 1MB flash,
+                     which reads its AUTOEXEC.BAT.  Without the fixture
+                     its files are still checked; the boot is not.
 
 This gate touches no key -- there is no b.key() in this file -- so what
 comes up is what the disk itself started.  It runs the machine's real
@@ -56,7 +64,7 @@ machine) and the far heap's cursor as the target reports it, because the
 model has to hand the desktop's Malloc a real address -- neither is on
 the screen.
 
-  python3 tests/emu/product_boot.py [--shot] [NAME]
+  python3 tests/emu/product_boot.py [--shot] [--sdx=CART] [NAME]
 """
 import os
 import sys
@@ -91,10 +99,15 @@ STEP = 20                       # frames between screen reads while waiting for
 HEAD = 64                       # and at the head of every chunk: where a DOS
                                 # that loses part of one shows up
 
-# (the image, what starts GEM on it, and how it says so)
+# (the image, what starts GEM on it, how it says so, the batch files an
+# SDFS disk must carry, and whether it wants the SDX cartridge to boot)
 PRODUCTS = [
-    ("gem-sp.atr", "GEM.COM", "SpartaDOS 3.2, STARTUP.BAT and AUTOEXEC.BAT"),
-    ("gem-boot.atr", "AUTORUN.SYS", "a double-density DOS 2, AUTORUN.SYS"),
+    ("gem-sp.atr", "GEM.COM", "SpartaDOS 3.2, STARTUP.BAT and AUTOEXEC.BAT",
+     BOOT_FILES, False),
+    ("gem-boot.atr", "AUTORUN.SYS", "a double-density DOS 2, AUTORUN.SYS",
+     (), False),
+    ("gem-sdx.atr", "GEM.COM", "no DOS on the disk: SpartaDOS X from the "
+     "cartridge, AUTOEXEC.BAT", ("AUTOEXEC.BAT",), True),
 ]
 
 
@@ -170,7 +183,7 @@ def dos2_listing(fs):
                      for e in fs.entries() if e.in_use and e.nameable]}
 
 
-def one(name, progname, how, keep, check):
+def one(name, progname, how, batches, cart, keep, check):
     disk = os.path.abspath(os.path.join(BUILD, name))
     syms = symfile.load(SYMS)
     segs, _ = mkxex.read_elf(ELF)
@@ -211,11 +224,18 @@ def one(name, progname, how, keep, check):
             check(listed[fname] == size,
                   f"{name}: {fname} is {listed[fname]} bytes, not build/{built}'s {size}")
     if sdfs:
-        for batch in BOOT_FILES:
+        for batch in batches:
             check(batch in listed, f"{name}: {batch} is not on the disk")
             if batch in listed:
                 check(fs.read(batch) == BOOT_LINE,
                       f"{name}: {batch} holds {fs.read(batch)!r}, not {BOOT_LINE!r}")
+        # The release floppy carries no DOS: its superblock names no boot
+        # file and its boot sectors are the blank disk's stub.  A DOS on
+        # it would be somebody else's (tools/mkfloppy.py).
+        if cart is not None:
+            check(fs.boot_file_map == 0,
+                  f"{name}: the superblock names a DOS file at map sector "
+                  f"{fs.boot_file_map}, and this disk is meant to carry none")
     else:
         # NO DUP.SYS, deliberately (Makefile, build/gem-boot.atr).  The
         # system outgrew the disk with the DOS's own shell on it -- 681
@@ -247,7 +267,12 @@ def one(name, progname, how, keep, check):
               f"{name}: {fs.free_count()} sectors free -- not even room for "
               f"a DESKTOP.INF")
 
-    emu = launch(tag="product", memsize="1088K", extra_args=["--disk", disk])
+    if cart == "":
+        print(f"  not booted: no SDX cartridge fixture ([spartados].sdx_cart "
+              f"in fixtures.toml), and this disk carries no DOS of its own")
+        return
+    emu = launch(tag="product", memsize="1088K",
+                 extra_args=["--disk", disk] + (["--cart", cart] if cart else []))
     b = emu.bridge
     shot = os.path.join(SHOTDIR, f"product-{name.split('.')[0]}.png")
     try:
@@ -381,6 +406,10 @@ def one(name, progname, how, keep, check):
 def main(argv):
     keep = "--shot" in argv
     only = [a for a in argv if not a.startswith("--")]
+    # --sdx=CART, and `--sdx=` with nothing after it is what the Makefile
+    # passes when fixtures.toml names no cartridge: the floppy that needs
+    # one is then read but not booted, and says so.
+    sdx = next((a[6:] for a in argv if a.startswith("--sdx=")), "")
     fails = []
 
     def check(cond, msg):
@@ -389,10 +418,11 @@ def main(argv):
             print(f"  FAIL: {msg}")
 
     os.makedirs(SHOTDIR, exist_ok=True)
-    for name, progname, how in PRODUCTS:
+    for name, progname, how, batches, wants_cart in PRODUCTS:
         if only and not any(o in name for o in only):
             continue
-        one(name, progname, how, keep, check)
+        one(name, progname, how, batches, sdx if wants_cart else None,
+            keep, check)
     print(f"{'FAIL' if fails else 'PASS'}: the product disks boot into the "
           f"desktop with nothing typed -- the loader switches the CPU "
           f"itself, {len(fails)} problem(s)")

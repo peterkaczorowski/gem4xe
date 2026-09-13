@@ -563,13 +563,17 @@ gate that compares that dialog would have to be told the date.  A version
 changes when somebody decides it does.
 
 `make release` is `make dist` for the public, and the version is its
-name: `build/gem4xe-0.1.tar.gz`, with a `.sha256` beside it for the
-release page, and the inner `VERSION` still carrying the date and commit.
-What it leaves out is the two floppies, because each boots a DOS that is
-not gem4xe's to give away (`fixtures.toml.example`); the card image is
-built from this tree alone and carries no DOS, so it travels.  The page
-says which files are missing and how to make a floppy from `system/`
-rather than pretending the download is the same one a tester gets.
+name: `build/gem4xe-0.1.1.tar.gz`, the same tree again as
+`gem4xe-0.1.1.zip` for Windows, the floppy on its own as
+`gem4xe-0.1.1.atr`, and one `gem4xe-0.1.1.sha256` covering the three for
+the release page; the inner `VERSION` still carries the date and commit.
+What it leaves out is `gem-sp.atr` and `gem-boot.atr`, because each
+boots a DOS that is not gem4xe's to give away (`fixtures.toml.example`);
+the card image and `gem-sdx.atr` are built from this tree alone and
+carry no DOS, so they travel (`docs/media.md`, *The floppy the release
+can carry*).  The page says which files are missing and how to make one
+of the others from `system/` rather than pretending the download is the
+same one a tester gets.
 
 The About box's other number is the **AES version**, 1.40, filled in at
 run time from `global[0]`.  That is the AES gem4xe claims to be -- TOS

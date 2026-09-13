@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Host tests for the release floppy (tools/mkfloppy.py).
+
+The release cannot carry gem-sp.atr or gem-boot.atr, because each boots
+a DOS that is not gem4xe's to give away; gem-sdx.atr is the floppy it
+can carry, and what makes it so is what is NOT on it.  So the checks
+here are as much about absence as presence: no boot file named in the
+superblock, the blank disk's stub in the boot sectors, and otherwise
+exactly the card's system partition -- the same files in the same
+directories with the same AUTOEXEC.BAT, read back byte for byte -- on
+a geometry the machine's drives and loaders read.
+
+Whether it BOOTS is `make test-boot`'s, under the SDX cartridge fixture.
+"""
+import os
+import shutil
+import sys
+import tempfile
+import unittest
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import atr                                  # noqa: E402
+import mkcf                                 # noqa: E402
+import mkfloppy                             # noqa: E402
+
+BUILD = os.path.join(ROOT, "build")
+
+
+class TestFloppy(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        for path, _name in mkcf.SYSTEM:
+            if not os.path.isfile(os.path.join(ROOT, path)):
+                raise unittest.SkipTest(f"{path} is not built")
+        cls.dir = tempfile.mkdtemp(prefix="gem4xe-floppy-")
+        cls.out = os.path.join(cls.dir, "gem-sdx.atr")
+        mkfloppy.build(cls.out)
+        cls.img = atr.ATRImage.load(cls.out)
+        cls.fs = atr.open_fs(cls.img)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.dir, ignore_errors=True)
+
+    def test_the_geometry_is_a_double_sided_double_density_floppy(self):
+        """1440 sectors of 256 bytes, the first three of 128: what an
+        XF551 writes and every SIO emulator and FAT loader reads."""
+        self.assertEqual((self.img.sector_size, self.img.sector_count),
+                         (256, 1440))
+        self.assertTrue(self.img.boot_sectors_128)
+        self.assertEqual(os.path.getsize(self.out), 16 + 3 * 128 + 1437 * 256)
+
+    def test_it_is_an_sdfs_volume_called_gem4xe(self):
+        self.assertIsInstance(self.fs, atr.Sdfs)
+        self.assertEqual(self.fs.volname, "GEM4XE")
+
+    def test_it_carries_no_dos(self):
+        """The whole reason it can be given away: no boot file, and the
+        boot sectors are the blank disk's stub, not somebody's DOS."""
+        self.assertEqual(self.fs.boot_file_map, 0)
+        self.assertEqual(self.img.read_sector(2)[:len(atr.Sdfs.BOOT1)],
+                         atr.Sdfs.BOOT1)
+        names = {e.filename for e in self.fs.entries("")}
+        self.assertFalse({n for n in names if n.endswith(".DOS")
+                          or n.endswith(".SYS")}, names)
+
+    def test_it_is_the_card_s_system_partition(self):
+        """Every file in tools/mkcf.py's table, in its directory, byte
+        for byte -- and nothing else."""
+        want = {}
+        for path, name in mkcf.SYSTEM:
+            with open(os.path.join(ROOT, path), "rb") as f:
+                want[name] = f.read()
+        for name, data in want.items():
+            self.assertEqual(self.fs.read(name), data, name)
+        on_disk = set()
+        for d in mkcf.DIRS:
+            on_disk.update(f"{d}>{e.filename}" for e in self.fs.entries(d))
+        self.assertEqual(on_disk, set(want))
+        root = {e.filename for e in self.fs.entries("")}
+        self.assertEqual(root, set(mkcf.DIRS) | {"AUTOEXEC.BAT"})
+
+    def test_the_boot_file_is_the_card_s(self):
+        self.assertEqual(self.fs.read("AUTOEXEC.BAT"),
+                         b"".join(line.encode("ascii") + b"\x9b"
+                                  for line in mkcf.BOOT))
+        self.assertEqual(mkcf.BOOT, ["CD >GEM", "GEM"])
+
+    def test_there_is_room_left_on_it(self):
+        """A DESKTOP.INF, at least, and a program of somebody's own:
+        the system is 195 KB and the disk 360, so a hundred KB is the
+        floor, and going under it means the system has grown past what
+        a floppy is for (docs/shipping.md, section 1)."""
+        free = self.fs.free_count() * (self.img.sector_size - 2)
+        self.assertGreater(free, 100 * 1024, free)
+
+    def test_the_command_line_adds_a_file(self):
+        out = os.path.join(self.dir, "extra.atr")
+        mkfloppy.main([out, "--add", "COPYING", "APPS>COPYING"])
+        fs = atr.open_fs(atr.ATRImage.load(out))
+        with open(os.path.join(ROOT, "COPYING"), "rb") as f:
+            self.assertEqual(fs.read("APPS>COPYING"), f.read())
+
+
+if __name__ == "__main__":
+    unittest.main()

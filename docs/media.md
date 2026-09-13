@@ -1,6 +1,6 @@
 # Storage: what an Atari can boot gem4xe from, and what to build for it
 
-`make dist` produces three media today — two floppies and a 16 MB CF
+`make dist` produces four media today — three floppies and a 16 MB CF
 card image — and the question this answers is whether that is the right
 set, given what people actually have attached to an Atari in 2026.
 
@@ -98,6 +98,30 @@ floppy's holds, `CD >GEM` and `GEM`.  The floppy keeps 989 sectors
 free, so it is also somewhere to put a program of your own on the way
 past.
 
+## The floppy the release can carry
+
+`gem-sp.atr` boots SpartaDOS 3.2 and `gem-boot.atr` boots a DOS 2, and
+neither DOS is gem4xe's to give away, so the public release
+(`make release`) has had no floppy at all -- the card image and the
+loose files, and a page saying how to make a disk.  **`gem-sdx.atr`**
+(`tools/mkfloppy.py`) is the third floppy and the one that can travel:
+a double-sided double-density SDFS disk, 1440 sectors of 256 bytes,
+carrying the card's system partition -- the same `\GEM\` and
+`\APPS\`, the same `AUTOEXEC.BAT` -- and **no DOS**, its boot sectors
+the blank disk's stub.  It boots under SpartaDOS X, which is the one
+DOS that lives in the machine rather than on the disk: a cartridge, or
+an Ultimate 1MB with it in flash.  SDX comes up, changes to D1: and runs
+the disk's `AUTOEXEC.BAT`, and that is GEM; the loader switches the
+Rapidus as it does from the other two.  `make test-boot` boots it under
+the `[spartados].sdx_cart` fixture, nothing typed, and compares the
+desk with the model as it does the others.
+
+Why double-sided: the system is 195 KB, more than a 180 KB
+double-density disk holds and less than a 360 KB one, with about 158 KB
+to spare.  Every SIO emulator, every FAT loader and an XF551 read the
+geometry.  Under any other SpartaDOS it is what `gem-sp.atr` is above:
+an install disk, laid out as the card is.
+
 The evidence for the FAT-beside-APT card stays written down because it
 is the obvious thing to build if someone asks for a single card a PC can
 also drop files onto, and because the evidence for it being possible is
@@ -108,9 +132,10 @@ here rather than in a forum thread.
 | If you have | Use | Why |
 |---|---|---|
 | U1MB / Incognito, SIDE, SIDE2, SIDE3, IDE Plus 2.0, MyIDE-II | `disks/gem-cf.img` written to a card | APT; the system installs to `\GEM\`, applications to `\APPS\` |
-| An APT drive you have already partitioned | `disks/gem-sp.atr`, and copy `GEM>` and `APPS>` off it | the floppy is laid out as the card is; nothing of yours is touched |
-| SIDE3 / AVGCART / any FAT loader | `disks/gem-sp.atr` on the card you have | the loader mounts it; nothing to install |
-| SDrive-MAX, FujiNet, a real drive | `disks/gem-sp.atr` (SpartaDOS) or `disks/gem-boot.atr` (DOS 2) | plain floppy images |
+| An APT drive you have already partitioned | `disks/gem-sdx.atr` (or `gem-sp.atr`), and copy `GEM>` and `APPS>` off it | the floppies are laid out as the card is; nothing of yours is touched |
+| SIDE3 / AVGCART / any FAT loader, with SpartaDOS X in the machine | `disks/gem-sdx.atr` on the card you have | the loader mounts it; SDX boots it; nothing to install -- and it is the one floppy in the public release |
+| SIDE3 / AVGCART / any FAT loader, without | `disks/gem-sp.atr` on the card you have | the loader mounts it; nothing to install |
+| SDrive-MAX, FujiNet, a real drive | `disks/gem-sdx.atr` (SpartaDOS X in the machine), `disks/gem-sp.atr` (SpartaDOS 3.2) or `disks/gem-boot.atr` (DOS 2) | plain floppy images |
 | A DOS you already like | `system/` -- the loose files | put them where you want; give the disk a start-up that runs `GEM` |
 | MIO, BlackBox, original MyIDE | the floppies | their partitioning is their own; nothing here writes it |
 

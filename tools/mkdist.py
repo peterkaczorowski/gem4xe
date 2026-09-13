@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The gem4xe distribution: what a tester is handed.
 
-    tools/mkdist.py build/gem4xe-<stamp> [--tar out.tar.gz] [--public]
+    tools/mkdist.py build/gem4xe-<stamp> [--tar out.tar.gz] [--zip out.zip]
+                    [--public]
 
 Three things, and a page that explains them:
 
@@ -22,8 +23,11 @@ the images with tools/atr.py, so what the page lists is what is on
 them.
 
 --public is the release (`make release`): the same, without the two
-floppies, which boot a DOS that is not gem4xe's to give away, and with
-the page's few passages about them saying so instead.
+floppies that boot a DOS which is not gem4xe's to give away, and with
+the page's few passages about them saying so instead.  The third floppy,
+gem-sdx.atr, carries no DOS and travels in both.  --zip writes the same
+tree as --tar does, for the people whose machine opens one and not the
+other.
 """
 import argparse
 import datetime
@@ -33,6 +37,7 @@ import subprocess
 import sys
 import tarfile
 import textwrap
+import zipfile
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -44,14 +49,14 @@ import mksdk                                # noqa: E402
 BUILD = os.path.join(ROOT, "build")
 TEMPLATE = os.path.join(ROOT, "tools", "dist", "README.md")
 
-# The two floppies boot a DOS that is not gem4xe's to give away
+# Two of the floppies boot a DOS that is not gem4xe's to give away
 # (fixtures.toml.example: "a commercial or shareware Atari image you
 # already have").  A build handed to a tester in the room carries them;
 # the public release (--public, `make release`) does not, and its page
-# says so and says how to make one.  The card image is built by
-# tools/mkcf.py from this tree's own files and carries no DOS -- the
-# SpartaDOS X it runs under comes from the machine's own flash -- so it
-# travels in both.
+# says so and says how to make one.  The card image (tools/mkcf.py) and
+# the third floppy (tools/mkfloppy.py) are built from this tree's own
+# files and carry no DOS -- the SpartaDOS X they run under comes from the
+# machine's own flash or cartridge -- so they travel in both.
 THIRD_PARTY_DOS = {"gem-sp.atr", "gem-boot.atr"}
 
 # (file in build/, where it goes, how it is read, what it says about itself)
@@ -74,6 +79,16 @@ DISKS = [
      "GEM4XE.CFG is the short form -- the same keys without the prose, "
      "which is on the other two and in system/.  The Desk menu here "
      "holds only the About item."),
+    ("gem-sdx.atr", "disks/gem-sdx.atr", "sdfs",
+     "A double-sided double-density SDFS floppy, 360 KB, with **no DOS on "
+     "it**: the same `\\GEM\\` and `\\APPS\\` as the card, and an "
+     "`AUTOEXEC.BAT` that changes into `\\GEM\\` and runs GEM.  It "
+     "boots under **SpartaDOS X** -- from a cartridge or from Ultimate "
+     "1MB flash -- which is the one DOS that lives in the machine rather "
+     "than on the disk, and that is why this floppy can be given away "
+     "where the other two cannot.  Put it in D1: and turn the machine "
+     "on.  Any other SpartaDOS reads it as an install disk: `\\GEM\\` "
+     "and `\\APPS\\` copy across as directories."),
     ("gem-cf.img", "disks/gem-cf.img", None,
      "A 16 MB CF card: an APT partition table and two SDFS partitions, "
      "with the system and the desk accessory in `\\GEM\\` and the "
@@ -184,12 +199,21 @@ def disk_section(src, dest, kind, prose):
                      f"for programs of your own.")
     elif kind == "sdfs":
         fs = atr.Sdfs(atr.ATRImage.load(src))
-        names = sorted(e.filename + ("\\" if e.is_dir else "")
-                       for e in fs.entries(""))
+        # the root, and what each directory on it holds, one level down:
+        # the install layout is the point of these disks
+        names = []
+        for e in sorted(fs.entries(""), key=lambda e: (e.is_dir, e.filename)):
+            if e.is_dir:
+                inside = sorted(x.filename for x in fs.entries(e.filename))
+                names.append(f"`{e.filename}\\` ("
+                             + ", ".join(f"`{n}`" for n in inside) + ")")
+            else:
+                names.append(f"`{e.filename}`")
         free = fs.free_count()
-        lines.append("Files: " + ", ".join(f"`{n}`" for n in names) + ".")
+        lines.append("Files: " + ", ".join(names) + ".")
         lines.append("")
-        lines.append(f"{free} sectors free — about {free * 128 // 1024} KB.")
+        lines.append(f"{free} sectors free — about "
+                     f"{free * (fs.secsize - 2) // 1024} KB.")
     return "\n".join(lines) + "\n"
 
 
@@ -239,38 +263,51 @@ def public_text():
     boot = " and ".join(f"`{line}`" for line in mkcf.BOOT)
     fill = lambda t: textwrap.fill(t, 72)  # noqa: E731
     return {
-        "emu_disk": "--disk gem.atr",
+        "emu_disk": "--cart SDX.car --disk disks/gem-sdx.atr",
         "emu_note": fill(
-            "`gem.atr` is a disk of your own making, because this download "
-            "carries no DOS (*What is on the disks*, below): a bootable "
-            "SpartaDOS 3.2 or DOS 2 disk with the files in `system/` on "
-            "it, started at boot the way *Booting* describes or by hand "
-            "from the DOS prompt.") + "\n",
+            "`disks/gem-sdx.atr` carries no DOS (*What is on the disks*, "
+            "below): it boots under SpartaDOS X, and `SDX.car` is a "
+            "SpartaDOS X cartridge image, which this download does not "
+            "include -- the SpartaDOS X Upgrade Project offers one for "
+            "emulators at <https://sdx.atari8.info/>, and Altirra reads "
+            "it as it is.  Without one, make a disk of your own: a "
+            "bootable SpartaDOS 3.2 or DOS 2 disk with the files in "
+            "`system/` on it, started at boot the way *Booting* describes "
+            "or by hand from the DOS prompt, and `--disk` that "
+            "instead.") + "\n",
         "install": fill(
             "**If you already have an APT drive**, do not write the card "
-            "image over it: make `\\GEM\\` and `\\APPS\\` on it and "
-            "copy the files in `system/` the way the card has them -- "
-            f"{gemdir} into `\\GEM\\`; {appsdir} into `\\APPS\\` -- "
-            f"plus an `AUTOEXEC.BAT` of two lines, {boot}.") + "\n\n" + fill(
+            "image over it.  `gem-sdx.atr` is an install disk: it holds "
+            "the same `\\GEM\\` and `\\APPS\\` the card does, so "
+            "putting gem4xe on your own drive is a directory copy --") +
+            "\n\n    COPY D1:>GEM>*.* D2:>GEM>*.*\n"
+            "    COPY D1:>APPS>*.* D2:>APPS>*.*\n\n" + fill(
+            f"-- plus an `AUTOEXEC.BAT` of two lines, {boot}.  Or by hand "
+            f"from `system/`, the way the card has them: {gemdir} into "
+            f"`\\GEM\\`; {appsdir} into `\\APPS\\`.") + "\n\n" + fill(
             "If what you have is a **loader that reads FAT** -- a SIDE3, an "
             "AVGCART -- or an SDrive-MAX, a FujiNet or a real drive, then "
-            "a floppy is what you want, and this download has none: the "
-            "two that `make dist` builds boot a DOS that is not gem4xe's "
-            "to give away.  Put the files in `system/` on a SpartaDOS 3.2 "
-            "or DOS 2 disk of your own -- from the source tree, `make "
-            "dist` does exactly that, given your DOS images in "
-            "`fixtures.toml` -- and `docs/media.md` there has the whole "
+            "a floppy is what you want.  On a machine that runs SpartaDOS "
+            "X -- a cartridge, or an Ultimate 1MB with it in flash -- that "
+            "is `gem-sdx.atr`: copy it onto the card you already have and "
+            "load it like anything else.  On one that does not, put the "
+            "files in `system/` on a SpartaDOS 3.2 or DOS 2 disk of your "
+            "own -- this download carries no such disk, because each "
+            "would boot a DOS that is not gem4xe's to give away; from the "
+            "source tree, `make dist` builds both, given your DOS images "
+            "in `fixtures.toml` -- and `docs/media.md` there has the whole "
             "matrix and the reasoning."),
         "dosnote": fill(
             "**No disk in this download carries a DOS.**  The card image "
-            "runs under the SpartaDOS X in your Ultimate 1MB's flash, and "
-            "the two floppies `make dist` also builds, `gem-sp.atr` and "
+            "and `gem-sdx.atr` both run under the SpartaDOS X in your "
+            "machine -- Ultimate 1MB flash or a cartridge -- and the two "
+            "floppies `make dist` also builds, `gem-sp.atr` and "
             "`gem-boot.atr`, are not here because each boots a DOS that is "
             "not gem4xe's to give away."),
     }
 
 
-def build(out, tar=None, require_clean=False, public=False):
+def build(out, tar=None, require_clean=False, public=False, zip_path=None):
     if os.path.isdir(out):
         shutil.rmtree(out)
     os.makedirs(out)
@@ -349,10 +386,11 @@ def build(out, tar=None, require_clean=False, public=False):
             for d, s in missing) + "\n")
     if left_out:
         disks += ("\n*(" + " and ".join(f"`{d}`" for d in left_out)
-                  + ", the floppies `make dist` builds, are not in this "
-                  "download: each boots a DOS that is not gem4xe's to give "
-                  "away.  *On real storage*, above, says how to make one "
-                  "from `system/`.)*\n")
+                  + ", the other floppies `make dist` builds, are not in "
+                  "this download: each boots a DOS that is not gem4xe's to "
+                  "give away.  `disks/gem-sdx.atr` carries none, which is "
+                  "why it is here; *On real storage*, above, says how to "
+                  "make one of the others from `system/`.)*\n")
 
     items = menu_items()
     with open(TEMPLATE) as f:
@@ -368,6 +406,17 @@ def build(out, tar=None, require_clean=False, public=False):
     if tar:
         with tarfile.open(tar, "w:gz") as t:
             t.add(out, arcname=os.path.basename(out))
+    # The same tree as a zip, for Windows, where a .tar.gz is a second
+    # program away.  Directory entries are left out, and the members are
+    # sorted so two builds of the same tree zip alike.
+    if zip_path:
+        base = os.path.basename(out)
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+            for dirpath, dirnames, filenames in os.walk(out):
+                dirnames.sort()
+                for fn in sorted(filenames):
+                    full = os.path.join(dirpath, fn)
+                    z.write(full, os.path.join(base, os.path.relpath(full, out)))
     return made, missing
 
 
@@ -375,16 +424,19 @@ def main(argv):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("out")
     ap.add_argument("--tar")
+    ap.add_argument("--zip", help="the same tree as a zip, for Windows")
     ap.add_argument("--public", action="store_true",
                     help="the release: without the floppies that boot a "
                          "DOS which is not gem4xe's to give away")
     a = ap.parse_args(argv[1:])
-    made, missing = build(a.out, a.tar, require_clean=True, public=a.public)
+    made, missing = build(a.out, a.tar, require_clean=True, public=a.public,
+                          zip_path=a.zip)
     print(f"{a.out}: {len(made)} disk(s), {len(SYSTEM)} system files, "
           f"the kit and the page"
           + (f"; {len(missing)} disk(s) not built" if missing else "")
-          + ("; the floppies left out" if a.public else "")
-          + (f"; {a.tar}" if a.tar else ""))
+          + ("; the DOS-bearing floppies left out" if a.public else "")
+          + (f"; {a.tar}" if a.tar else "")
+          + (f"; {a.zip}" if a.zip else ""))
     return 0
 
 

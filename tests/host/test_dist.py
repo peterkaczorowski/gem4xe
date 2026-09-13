@@ -279,6 +279,50 @@ class TestDistribution(unittest.TestCase):
         self.assertIn("--disk disks/gem-sp.atr", self.page)
         self.assertNotIn("not gem4xe's to give away", self.page)
 
+    def test_the_release_carries_the_floppy_that_has_no_dos(self):
+        """gem-sdx.atr (tools/mkfloppy.py) is the one floppy the release
+        can carry, and the page has to say what boots it -- SpartaDOS X,
+        from a cartridge it does not include -- and where that comes
+        from, without pretending the download is self-sufficient."""
+        if not built("gem-sdx.atr"):
+            self.skipTest("build/gem-sdx.atr is not built")
+        out = os.path.join(self.dir, "gem4xe-public-floppy")
+        mkdist.build(out, public=True)
+        with open(os.path.join(out, "README.md")) as f:
+            page = f.read()
+        p = os.path.join(out, "disks", "gem-sdx.atr")
+        self.assertTrue(os.path.isfile(p))
+        fs = atr.open_fs(atr.ATRImage.load(p))
+        self.assertEqual(fs.boot_file_map, 0, "the release floppy names a DOS")
+        self.assertIn("--cart SDX.car --disk disks/gem-sdx.atr", page)
+        self.assertIn("https://sdx.atari8.info/", page)
+        self.assertIn("does not include", page)
+        section = page.split("### `disks/gem-sdx.atr`")[1].split("###")[0]
+        self.assertIn("no DOS", section)
+        self.assertIn("`GEM\\` (", section)
+        self.assertIn("`APPS\\` (", section)
+
+    def test_the_zip_is_the_tarball_s_tree(self):
+        """The same files, the same bytes, the same top-level name:
+        a Windows user and a Linux user unpack the same thing."""
+        import tarfile
+        import zipfile
+        out = os.path.join(self.dir, "gem4xe-both")
+        tgz, zp = out + ".tar.gz", out + ".zip"
+        mkdist.build(out, tar=tgz, zip_path=zp)
+        with tarfile.open(tgz) as t:
+            tar_files = {m.name: t.extractfile(m).read()
+                         for m in t.getmembers() if m.isfile()}
+        with zipfile.ZipFile(zp) as z:
+            zip_files = {i.filename: z.read(i) for i in z.infolist()
+                         if not i.is_dir()}
+        self.assertEqual(set(tar_files), set(zip_files))
+        for name, data in tar_files.items():
+            self.assertEqual(zip_files[name], data, name)
+        self.assertTrue(all(n.startswith("gem4xe-both/") for n in zip_files))
+        self.assertIn("gem4xe-both/README.md", zip_files)
+        self.assertIn("gem4xe-both/system/GEM.COM", zip_files)
+
 
 if __name__ == "__main__":
     unittest.main()

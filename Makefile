@@ -123,7 +123,7 @@ APP_STACK  = 256
 # linker map).
 all: build/hello-boot.atr build/m2-boot.atr build/m3-boot.atr build/m6split-boot.atr \
      build/m12-d2.atr build/m14-boot.atr build/m17-boot.atr build/gem-boot.atr build/gem-sp.atr \
-     build/gem-cf.img
+     build/gem-sdx.atr build/gem-cf.img
 
 build/%.o: src/%.s
 	@mkdir -p build
@@ -902,9 +902,20 @@ build/gem-sp.atr: build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg $(
 # tools/apt.py writes the table, tests/host/test_apt.py checks it against
 # the rules Altirra's own parser applies, and test-cf boots it.
 build/gem-cf.img: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a \
-                  build/lang.rsc build/gem4xe.cfg $(APP_DEPS) $(ACCP_DEPS) tools/mkcf.py tools/apt.py tools/atr.py
+                  build/lang.rsc build/gem4xe.cfg build/816.com $(APP_DEPS) $(ACCP_DEPS) tools/mkcf.py tools/apt.py tools/atr.py
 	@rm -f $@
 	python3 tools/mkcf.py $@
+
+# The release floppy: the card's system partition on a double-sided
+# double-density SDFS disk, and NO DOS -- it boots under the SpartaDOS X
+# in a cartridge or in U1MB flash, which is the one DOS that lives in the
+# machine rather than on the disk, so the disk is gem4xe's to give away
+# where gem-sp.atr and gem-boot.atr are not.  Needs no fixture to build;
+# test-boot boots it when [spartados].sdx_cart names a cartridge.
+build/gem-sdx.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a \
+                   build/lang.rsc build/gem4xe.cfg build/816.com $(APP_DEPS) $(ACCP_DEPS) tools/mkfloppy.py tools/mkcf.py tools/atr.py
+	@rm -f $@
+	python3 tools/mkfloppy.py $@
 
 # The SpartaDOS disk: a fresh SDFS volume booting the 3.2 fixture's DOS,
 # the same files as the DOS 2 disk, the shell's applications and a
@@ -1049,7 +1060,7 @@ build/gem4xe-sdk.tar.gz: $(SDK_FILES)
 # that could go stale cannot).  DIST is the name it takes: the date and
 # the commit unless you say otherwise.
 DIST ?= build/gem4xe-$(shell date +%F)-$(shell git rev-parse --short HEAD 2>/dev/null || echo local)
-DIST_DISKS = build/gem-sp.atr build/gem-boot.atr build/gem-cf.img
+DIST_DISKS = build/gem-sp.atr build/gem-boot.atr build/gem-sdx.atr build/gem-cf.img
 DIST_SYS   = build/gem.xex build/desktop.g4a build/desktop.rsc \
              build/lang.rsc build/816.com build/m11_app.g4a build/gem4xe.cfg \
              $(APP_DEPS) $(ACCP_DEPS)
@@ -1059,18 +1070,21 @@ dist: $(DIST_SYS) $(DIST_DISKS) build/gem4xe-sdk.tar.gz \
 	python3 tools/mkdist.py $(DIST) --tar $(DIST).tar.gz
 
 # The release: the distribution for the public.  What differs is what it
-# does NOT carry -- the two floppies boot a DOS that is not gem4xe's to
-# give away (fixtures.toml.example), so they stay home and the page says
-# so and says how to make one -- and the name, which is the version in
-# VERSION rather than the date.  A checksum travels with the tarball, for
-# the release page.
+# does NOT carry -- gem-sp.atr and gem-boot.atr boot a DOS that is not
+# gem4xe's to give away (fixtures.toml.example), so they stay home and
+# the page says so -- and the name, which is the version in VERSION
+# rather than the date.  It comes as a tarball and, for Windows, the same
+# tree as a zip; the DOS-less floppy travels on its own as well, under the
+# release's name, for whoever wants the disk and nothing else.  One
+# checksum file covers the three, for the release page.
 VERSION := $(shell cat VERSION)
 RELEASE  = build/gem4xe-$(VERSION)
 
-release: $(DIST_SYS) build/gem-cf.img build/gem4xe-sdk.tar.gz \
+release: $(DIST_SYS) build/gem-cf.img build/gem-sdx.atr build/gem4xe-sdk.tar.gz \
          tools/mkdist.py tools/dist/README.md tools/mksdk.py
-	python3 tools/mkdist.py $(RELEASE) --public --tar $(RELEASE).tar.gz
-	cd build && sha256sum gem4xe-$(VERSION).tar.gz > gem4xe-$(VERSION).tar.gz.sha256
+	python3 tools/mkdist.py $(RELEASE) --public --tar $(RELEASE).tar.gz --zip $(RELEASE).zip
+	cp build/gem-sdx.atr $(RELEASE).atr
+	cd build && sha256sum gem4xe-$(VERSION).tar.gz gem4xe-$(VERSION).zip gem4xe-$(VERSION).atr > gem4xe-$(VERSION).sha256
 
 test-emu: 
 	python3 tests/emu/p0_probe.py
@@ -1270,8 +1284,11 @@ test-m21: build/m3-boot.atr build/inv.fnt
 # the other stale whenever GEM.COM was rebuilt -- which looked exactly
 # like the far image being mangled by the DOS, and cost an afternoon
 # twice (docs/phase16.md).
-test-boot: build/gem-sp.atr build/gem-boot.atr build/desktop.g4a build/desktop.sym
-	python3 tests/emu/product_boot.py
+# The third disk, gem-sdx.atr, carries no DOS and boots under the SDX
+# cartridge fixture; with none named it is read but not booted, and the
+# gate says so rather than failing (tests/emu/product_boot.py).
+test-boot: build/gem-sp.atr build/gem-boot.atr build/gem-sdx.atr build/desktop.g4a build/desktop.sym
+	python3 tests/emu/product_boot.py --sdx="$(SRC_SDX)"
 
 # The same boot off the product CF card, on the machine this project is
 # for: the U1MB flash's SpartaDOS X and PBI BIOS, a SIDE 2 with the card

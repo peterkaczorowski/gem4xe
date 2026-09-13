@@ -38,6 +38,9 @@ SYSTEM = [("build/gem.xex", "GEM>GEM.COM"),
           ("build/desktop.rsc", "GEM>DESKTOP.RSC"),
           ("build/lang.rsc", "GEM>LANG.RSC"),
           ("build/gem4xe.cfg", "GEM>GEM4XE.CFG"),
+          # the escape hatch the page promises "on the disk": switches a
+          # Rapidus by hand if the loader somehow did not (tools/mk816.py)
+          ("build/816.com", "GEM>816.COM"),
           # the desk accessory: in the system's directory, which is where
           # the AES looks for *.ACC, and not in \APPS\ with the programs
           ("build/clockacc.g4a", "GEM>CLOCK.ACC"),
