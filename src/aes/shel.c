@@ -312,6 +312,10 @@ static WORD sh_ldapp(void)
     WORD st, was = sh_next;
 
     if (was == SH_DESKTOP) {
+        /* The last program ran in its own directory (the desktop's
+         * do_aopen set it, src/desk/deskwin.c); the desktop's files are
+         * in the system's, and its DESKTOP.RSC is a bare name. */
+        gemdos_home();
         st = app_load((const uint8_t FAR *)sh_desk_blob, sh_desk_len, &app);
     } else {
         far_strget(cmd, sh_cmd_far, SH_CMDLEN);

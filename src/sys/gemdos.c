@@ -1182,6 +1182,24 @@ void gemdos_init(void)
     gd_age = 0;
 }
 
+/* Back to where the boot left the DOS: drive A, and every drive's
+ * directory unset, so that a bare name goes to CIO as it did before any
+ * Dsetpath -- which is how the system's own files were found the first
+ * time.  The shell does this before it runs the desktop again
+ * (src/aes/shel.c), as the donor's sh_chdef changes back to the
+ * desktop's directory; without it the desktop came back in the last
+ * program's directory, where its resource is not. */
+void gemdos_home(void)
+{
+    WORD i;
+
+    for (i = 0; i < GD_DRIVES; i++) {
+        far_write8(gd_dirs + (uint32_t)i * GD_DIRMAX, 0);
+        gd_dirset[i] = 0;
+    }
+    gd_drive = 0;
+}
+
 /* The RUNNING process's files, searches and DTA.  app_free calls it when
  * a program has ended, and at that moment the running process is that
  * program -- an application is process 0 and the shell runs in its

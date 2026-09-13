@@ -126,6 +126,15 @@ def inputs(memo):
     return [open_a, window_a, full, folder]
 
 
+def poll_nonzero(b, addr, limit=2000, step=10):
+    """Frames until the word at addr is not 0; -1 if it never is."""
+    for t in range(0, limit, step):
+        if b.peek16(addr):
+            return t
+        b.frames(step)
+    return -1
+
+
 def model(mark, brk, pointer, drvmap):
     """The prelude and the desktop against the model: (v, a, want, d, memo)."""
     v, a, want = aesref.run(PRELUDE, [], {}, pointer=pointer, pool=mark)
@@ -351,8 +360,18 @@ def main(argv):
               f"{PROGRAM}'s main() returned {b.peek16(lastret)}, not 0")
         check(b.peek16(lastrc) == 0, f"the last load's status {b.peek16(lastrc)}")
         if t >= 0:
+            # ...and UP: its menu bar showing, which is after its resource
+            # has loaded.  The shell counts the run before the desktop's
+            # main() and a load that fails is main()'s alert, not a load
+            # status: without this the gate passed while the desktop came
+            # back saying DESKTOP.RSC was not on the boot disk, because it
+            # looked in the folder the program had been run from.
+            t2 = poll_nonzero(b, syms["gl_mntree"], 2000)
+            check(t2 >= 0, "after Quit the desktop's menu bar never came back: "
+                           "its resource was not found")
             b.frames(SETTLE * 4)
-            print(f"  the desktop again {t} frames after Quit, in call {read()}")
+            print(f"  the desktop again {t} frames after Quit, its bar "
+                  f"{t2} after that, in call {read()}")
 
         print(f"after:  {b.peek16(runs)} programs run, {read()} ABI calls")
     finally:

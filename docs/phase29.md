@@ -202,3 +202,36 @@ comparison writes the model's own picture out beside the screenshot
 (`vbxeref.save_rgb`), because a count of differing pixels says nothing
 about what differs -- that is what turned "169 px" into "the OK and the
 pointer are missing" here.
+
+## The third bug on the same path, found taking pictures
+
+Open a folder, launch the program in it, use it -- and **quit it**.  The
+desktop came back saying
+
+> DESKTOP.RSC is not on the boot disk.
+
+with a Quit button and nothing else, on the tester's disk and on the
+shipped one alike.  Found on the day after 0.1 went out, by
+`tests/emu/shots.py`, whose only job is to photograph the product being
+used, and which could not get past the calculator's Quit to photograph
+the accessory.
+
+The cause is the fix before it.  Phase 28's tail made a bare resource
+name resolve through GEMDOS's current directory so that a program could
+find its own resource in the folder the desktop had `Dsetpath`ed into
+before running it.  The desktop's own `DESKTOP.RSC` is a bare name too,
+and when the shell ran the desktop again it ran it in the program's
+folder.  The donor is explicit about this: `sh_chdef` changes drive and
+directory back to the desktop's (`sh_cdir`, the boot drive's root) before
+every run of the desktop.  `gemdos_home()` (`src/sys/gemdos.c`) is that
+step here -- drive A, every drive's directory unset, so a bare name goes
+to CIO as it did at boot -- and `sh_ldapp` calls it before it loads the
+desktop.
+
+Why eight gates missed the third bug on a path two of them walk:
+`test-m23` checked that the desktop *ran* again after Quit -- `sh_runs`
+reaching 3 -- and the shell counts the run before the desktop's `main()`,
+where the load that fails is not a load status but an alert.  The gate
+now waits for `gl_mntree`, the menu bar the desktop installs once its
+resource is in; without the fix it reports "the desktop's menu bar never
+came back", with it the bar is up 70 frames after the run is counted.
