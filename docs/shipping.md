@@ -562,6 +562,15 @@ candidate and is the wrong thing**: it would change every day, and every
 gate that compares that dialog would have to be told the date.  A version
 changes when somebody decides it does.
 
+`make release` is `make dist` for the public, and the version is its
+name: `build/gem4xe-0.1.tar.gz`, with a `.sha256` beside it for the
+release page, and the inner `VERSION` still carrying the date and commit.
+What it leaves out is the two floppies, because each boots a DOS that is
+not gem4xe's to give away (`fixtures.toml.example`); the card image is
+built from this tree alone and carries no DOS, so it travels.  The page
+says which files are missing and how to make a floppy from `system/`
+rather than pretending the download is the same one a tester gets.
+
 The About box's other number is the **AES version**, 1.40, filled in at
 run time from `global[0]`.  That is the AES gem4xe claims to be -- TOS
 1.04's, which is what EmuTOS reports -- and not gem4xe's own.

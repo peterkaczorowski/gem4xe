@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The gem4xe distribution: what a tester is handed.
 
-    tools/mkdist.py build/gem4xe-<stamp> [--tar out.tar.gz]
+    tools/mkdist.py build/gem4xe-<stamp> [--tar out.tar.gz] [--public]
 
 Three things, and a page that explains them:
 
@@ -20,6 +20,10 @@ what they offer DISABLED -- so the honest half of "what works" cannot
 drift from the resource; and the disks' contents are read back out of
 the images with tools/atr.py, so what the page lists is what is on
 them.
+
+--public is the release (`make release`): the same, without the two
+floppies, which boot a DOS that is not gem4xe's to give away, and with
+the page's few passages about them saying so instead.
 """
 import argparse
 import datetime
@@ -28,15 +32,27 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import textwrap
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import atr                                  # noqa: E402
 import deskrsc                              # noqa: E402
+import mkcf                                 # noqa: E402
 import mksdk                                # noqa: E402
 
 BUILD = os.path.join(ROOT, "build")
 TEMPLATE = os.path.join(ROOT, "tools", "dist", "README.md")
+
+# The two floppies boot a DOS that is not gem4xe's to give away
+# (fixtures.toml.example: "a commercial or shareware Atari image you
+# already have").  A build handed to a tester in the room carries them;
+# the public release (--public, `make release`) does not, and its page
+# says so and says how to make one.  The card image is built by
+# tools/mkcf.py from this tree's own files and carries no DOS -- the
+# SpartaDOS X it runs under comes from the machine's own flash -- so it
+# travels in both.
+THIRD_PARTY_DOS = {"gem-sp.atr", "gem-boot.atr"}
 
 # (file in build/, where it goes, how it is read, what it says about itself)
 DISKS = [
@@ -177,14 +193,94 @@ def disk_section(src, dest, kind, prose):
     return "\n".join(lines) + "\n"
 
 
-def build(out, tar=None, require_clean=False):
+def card_layout():
+    """What goes in which directory of the card, read from the tool that
+    builds it, so the page's install-by-hand recipe is the card's own."""
+    dirs = {}
+    for _path, name in mkcf.SYSTEM:
+        d, n = name.split(">")
+        dirs.setdefault(d, []).append(n)
+    return dirs
+
+
+# The passages of the page that differ between the build handed to a
+# tester (which has the floppies) and the public release (which has not).
+# Everything else on the page is the same text.
+TESTER = {
+    "emu_disk": "--disk disks/gem-sp.atr",
+    "emu_note": "",
+    "install": (
+        "**If you already have an APT drive**, do not write the card image "
+        "over\nit.  `gem-sp.atr` is an install disk: it holds the same "
+        "`\\GEM\\` and\n`\\APPS\\` the card does, so putting gem4xe on your "
+        "own drive is a\ndirectory copy --\n\n"
+        "    COPY D1:>GEM>*.* D2:>GEM>*.*\n"
+        "    COPY D1:>APPS>*.* D2:>APPS>*.*\n\n"
+        "-- plus an `AUTOEXEC.BAT` holding the two lines the floppy's "
+        "holds,\n`CD >GEM` and `GEM`.\n\n"
+        "If what you have is a **loader that reads FAT** -- a SIDE3, an "
+        "AVGCART\n-- or an SDrive-MAX, a FujiNet or a real drive, then the "
+        "floppies are\nwhat you want: copy `gem-sp.atr` onto the card you "
+        "already have and\nload it like anything else.  `docs/media.md` in "
+        "the source tree has the\nwhole matrix and the reasoning."),
+    "dosnote": (
+        "**The DOS on each disk image is not gem4xe's**, and is there so "
+        "that the\ndisk boots.  Whoever owns it owns it; the images are for "
+        "trying this\nout, not for redistribution."),
+}
+
+
+def public_text():
+    """The same passages for the release, wrapped here because two of
+    them carry lists read out of tools/mkcf.py."""
+    layout = card_layout()
+    gemdir = ", ".join(f"`{n}`" for n in layout["GEM"])
+    appsdir = ", ".join(f"`{n}`" for n in layout["APPS"])
+    boot = " and ".join(f"`{line}`" for line in mkcf.BOOT)
+    fill = lambda t: textwrap.fill(t, 72)  # noqa: E731
+    return {
+        "emu_disk": "--disk gem.atr",
+        "emu_note": fill(
+            "`gem.atr` is a disk of your own making, because this download "
+            "carries no DOS (*What is on the disks*, below): a bootable "
+            "SpartaDOS 3.2 or DOS 2 disk with the files in `system/` on "
+            "it, started at boot the way *Booting* describes or by hand "
+            "from the DOS prompt.") + "\n",
+        "install": fill(
+            "**If you already have an APT drive**, do not write the card "
+            "image over it: make `\\GEM\\` and `\\APPS\\` on it and "
+            "copy the files in `system/` the way the card has them -- "
+            f"{gemdir} into `\\GEM\\`; {appsdir} into `\\APPS\\` -- "
+            f"plus an `AUTOEXEC.BAT` of two lines, {boot}.") + "\n\n" + fill(
+            "If what you have is a **loader that reads FAT** -- a SIDE3, an "
+            "AVGCART -- or an SDrive-MAX, a FujiNet or a real drive, then "
+            "a floppy is what you want, and this download has none: the "
+            "two that `make dist` builds boot a DOS that is not gem4xe's "
+            "to give away.  Put the files in `system/` on a SpartaDOS 3.2 "
+            "or DOS 2 disk of your own -- from the source tree, `make "
+            "dist` does exactly that, given your DOS images in "
+            "`fixtures.toml` -- and `docs/media.md` there has the whole "
+            "matrix and the reasoning."),
+        "dosnote": fill(
+            "**No disk in this download carries a DOS.**  The card image "
+            "runs under the SpartaDOS X in your Ultimate 1MB's flash, and "
+            "the two floppies `make dist` also builds, `gem-sp.atr` and "
+            "`gem-boot.atr`, are not here because each boots a DOS that is "
+            "not gem4xe's to give away."),
+    }
+
+
+def build(out, tar=None, require_clean=False, public=False):
     if os.path.isdir(out):
         shutil.rmtree(out)
     os.makedirs(out)
-    made, missing = [], []
+    made, missing, left_out = [], [], []
 
     for src, dest, kind, prose in DISKS:
         p = os.path.join(BUILD, src)
+        if public and src in THIRD_PARTY_DOS:
+            left_out.append(dest)
+            continue
         if not os.path.isfile(p):
             missing.append((dest, src))
             continue
@@ -251,14 +347,21 @@ def build(out, tar=None, require_clean=False):
             f"*(`{d}` is not in this build: `build/{s}` was not made — it "
             f"needs a DOS image this tree did not have.)*"
             for d, s in missing) + "\n")
+    if left_out:
+        disks += ("\n*(" + " and ".join(f"`{d}`" for d in left_out)
+                  + ", the floppies `make dist` builds, are not in this "
+                  "download: each boots a DOS that is not gem4xe's to give "
+                  "away.  *On real storage*, above, says how to make one "
+                  "from `system/`.)*\n")
 
     items = menu_items()
     with open(TEMPLATE) as f:
         page = f.read()
-    page = page.format(stamp=stamp(), disks=disks,
+    page = page.format(version=deskrsc.VERSION, stamp=stamp(), disks=disks,
                        system="\n".join(sysrows),
                        works=bullets(items, True),
-                       notyet=bullets(items, False))
+                       notyet=bullets(items, False),
+                       **(public_text() if public else TESTER))
     with open(os.path.join(out, "README.md"), "w") as f:
         f.write(page)
 
@@ -272,11 +375,15 @@ def main(argv):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("out")
     ap.add_argument("--tar")
+    ap.add_argument("--public", action="store_true",
+                    help="the release: without the floppies that boot a "
+                         "DOS which is not gem4xe's to give away")
     a = ap.parse_args(argv[1:])
-    made, missing = build(a.out, a.tar, require_clean=True)
+    made, missing = build(a.out, a.tar, require_clean=True, public=a.public)
     print(f"{a.out}: {len(made)} disk(s), {len(SYSTEM)} system files, "
           f"the kit and the page"
           + (f"; {len(missing)} disk(s) not built" if missing else "")
+          + ("; the floppies left out" if a.public else "")
           + (f"; {a.tar}" if a.tar else ""))
     return 0
 

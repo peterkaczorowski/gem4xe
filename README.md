@@ -8,7 +8,9 @@ The target surface is **640 × 240, 16 colours** — VBXE's HR overlay, 4bpp chu
 That is a better GEM surface than the Atari ST's medium resolution.
 
 Current version **0.1** — `VERSION` at the top of the tree is where it
-lives, and `make dist` stamps a release with it and the commit.
+lives; `make dist` stamps a build with it and the commit, and `make
+release` is the same for the public, without the floppies (their DOS is
+not gem4xe's to give away) and named by the version alone.
 
 **A 65C816 with linear RAM is required.** VBXE is not: one `GEM.COM` carries
 both display drivers and chooses at start-up, so a machine without a VBXE gets
@@ -28,7 +30,7 @@ full-screen repaints.
 
 | Gate | | |
 |---|---|---|
-| `make test-host` | 146/146 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; the application kit, assembled and built out of a copy of itself in a directory of its own; and the far allocator, asked for the blocks that used to straddle a bank |
+| `make test-host` | 147/147 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; the application kit, assembled and built out of a copy of itself in a directory of its own; the far allocator, asked for the blocks that used to straddle a bank; and the distribution, built both ways, with the release checked for the floppies it must not carry and for what its page says instead |
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
@@ -438,6 +440,7 @@ Both default to `~/dev/…`.
     make            # build
     make sdk        # the application kit, for writing a program that runs on it
     make dist       # what a tester is handed: the disks, the kit, and how to try it
+    make release    # the same for the public: no floppies, named by VERSION, with a checksum
     make test-host  # the host tests: no emulator, no fixtures
 
 The emulated gates need [AltirraSDL](https://github.com/ilmenit/AltirraSDL),

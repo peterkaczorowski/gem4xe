@@ -249,6 +249,36 @@ class TestDistribution(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(out, "disks",
                                                      "no-such.atr")))
 
+    def test_the_release_leaves_the_third_party_dos_at_home(self):
+        """`make release` is the public download: the floppies boot a DOS
+        that is not gem4xe's to give away (fixtures.toml.example), so
+        they stay out and the page says so -- and the install-by-hand
+        recipe that replaces them is read from the card's own layout."""
+        import mkcf
+        out = os.path.join(self.dir, "gem4xe-public")
+        mkdist.build(out, public=True)
+        with open(os.path.join(out, "README.md")) as f:
+            page = f.read()
+        for src, dest, _kind, _prose in mkdist.DISKS:
+            p = os.path.join(out, dest)
+            if src in mkdist.THIRD_PARTY_DOS:
+                self.assertFalse(os.path.exists(p), f"{dest} is in the release")
+                self.assertIn(f"`{dest}`", page, f"the page does not say "
+                              f"{dest} was left out")
+            elif built(src):
+                self.assertTrue(os.path.isfile(p), dest)
+        self.assertIn("not gem4xe's to give away", page)
+        self.assertNotIn("--disk disks/gem-sp.atr", page)
+        self.assertNotIn("not for redistribution", page)
+        self.assertNotRegex(page, r"\{[a-z_]+\}")
+        for _path, name in mkcf.SYSTEM:
+            d, n = name.split(">")
+            self.assertRegex(page, rf"`{n}`[^;]*into\s+`\\{d}\\`",
+                             f"the recipe does not put {n} in \\{d}\\")
+        # ...and the tester's build still has what the tree built
+        self.assertIn("--disk disks/gem-sp.atr", self.page)
+        self.assertNotIn("not gem4xe's to give away", self.page)
+
 
 if __name__ == "__main__":
     unittest.main()

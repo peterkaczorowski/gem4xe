@@ -1051,11 +1051,26 @@ build/gem4xe-sdk.tar.gz: $(SDK_FILES)
 DIST ?= build/gem4xe-$(shell date +%F)-$(shell git rev-parse --short HEAD 2>/dev/null || echo local)
 DIST_DISKS = build/gem-sp.atr build/gem-boot.atr build/gem-cf.img
 DIST_SYS   = build/gem.xex build/desktop.g4a build/desktop.rsc \
-             build/lang.rsc build/816.com build/m11_app.g4a build/gem4xe.cfg
+             build/lang.rsc build/816.com build/m11_app.g4a build/gem4xe.cfg \
+             $(APP_DEPS) $(ACCP_DEPS)
 
 dist: $(DIST_SYS) $(DIST_DISKS) build/gem4xe-sdk.tar.gz \
       tools/mkdist.py tools/dist/README.md tools/mksdk.py
 	python3 tools/mkdist.py $(DIST) --tar $(DIST).tar.gz
+
+# The release: the distribution for the public.  What differs is what it
+# does NOT carry -- the two floppies boot a DOS that is not gem4xe's to
+# give away (fixtures.toml.example), so they stay home and the page says
+# so and says how to make one -- and the name, which is the version in
+# VERSION rather than the date.  A checksum travels with the tarball, for
+# the release page.
+VERSION := $(shell cat VERSION)
+RELEASE  = build/gem4xe-$(VERSION)
+
+release: $(DIST_SYS) build/gem-cf.img build/gem4xe-sdk.tar.gz \
+         tools/mkdist.py tools/dist/README.md tools/mksdk.py
+	python3 tools/mkdist.py $(RELEASE) --public --tar $(RELEASE).tar.gz
+	cd build && sha256sum gem4xe-$(VERSION).tar.gz > gem4xe-$(VERSION).tar.gz.sha256
 
 test-emu: 
 	python3 tests/emu/p0_probe.py
@@ -1298,4 +1313,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist memcheck gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release memcheck gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-boot test-cf demo movie bench emu-stop clean

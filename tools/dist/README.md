@@ -1,6 +1,6 @@
 # gem4xe — how to try it
 
-**{stamp}**
+**Version {version}** — build {stamp}
 
 GEM on an Atari XL/XE: the VDI, the AES and a desktop, at 640 x 240 in
 16 colours on VBXE's HR overlay, running native on a 65C816.  It is a
@@ -31,8 +31,9 @@ same devices.  This is the command line the test suite itself uses:
         --memsize 1088K --cleardevices \
         --adddevice "vbxe,version=126,alt_page=false,shared_mem=false" \
         --adddevice rapidus \
-        --disk disks/gem-sp.atr
+        {emu_disk}
 
+{emu_note}
 In desktop Altirra the two devices go in **System > Configure System >
 Devices**; the machine is an 800XL, PAL, BASIC off.
 
@@ -42,9 +43,11 @@ runs in: a taken branch does the 6502's page-crossing dummy read (so code
 in a high bank can put `$D5xx` on the bus and switch a cartridge's bank),
 and `SEI` with an interrupt pending leaves a shadow flag the native-mode
 vectors never clear, which re-enters the handler at every opcode fetch
-until the stack has walked through all of bank `$00`.  Both are fixed by
-the patch in the source tree's `tools/altirra/`, filed upstream as
-[pull request #88](https://github.com/ilmenit/AltirraSDL/pull/88).  A
+until the stack has walked through all of bank `$00`.  Both are fixed
+upstream — [pull request #88](https://github.com/ilmenit/AltirraSDL/pull/88),
+merged 2026-09-06, so an AltirraSDL built from `main` at 46567a14
+(2026-09-09) or later has the fixes; for an older build, the patch is in
+the source tree's `tools/altirra/`.  On an emulator without them, a
 stall with the screen frozen, or a machine that reboots itself, is more
 likely to be one of those than anything here — **on real hardware neither
 exists**.
@@ -101,22 +104,7 @@ it a card of its own.
 
     dd if=disks/gem-cf.img of=/dev/sdX bs=1M conv=fsync    # sdX, not sdX1
 
-**If you already have an APT drive**, do not write the card image over
-it.  `gem-sp.atr` is an install disk: it holds the same `\GEM\` and
-`\APPS\` the card does, so putting gem4xe on your own drive is a
-directory copy --
-
-    COPY D1:>GEM>*.* D2:>GEM>*.*
-    COPY D1:>APPS>*.* D2:>APPS>*.*
-
--- plus an `AUTOEXEC.BAT` holding the two lines the floppy's holds,
-`CD >GEM` and `GEM`.
-
-If what you have is a **loader that reads FAT** -- a SIDE3, an AVGCART
--- or an SDrive-MAX, a FujiNet or a real drive, then the floppies are
-what you want: copy `gem-sp.atr` onto the card you already have and
-load it like anything else.  `docs/media.md` in the source tree has the
-whole matrix and the reasoning.
+{install}
 
 ## What is on the disks
 
@@ -199,7 +187,9 @@ it is the AES gem4xe claims to be, not gem4xe's own.
 gem4xe is **GPLv2 or later** — `COPYING`, and the source carries the
 lineage: EmuTOS, which is the Caldera-GPL'd Digital Research GEM.
 `src/gem4xe-src.tar.gz` is the tree these binaries were built from,
-exactly as committed, because that is what the licence asks for.
+exactly as committed, because that is what the licence asks for; the
+tree itself lives at <https://github.com/slaapliedje/gem4xe>, and the
+build stamp at the top of this page names the commit.
 
 One footnote, for completeness rather than because it affects you: about
 **815 bytes** of `GEM.COM` is the C compiler's own runtime, which is the
@@ -237,6 +227,4 @@ in NuttX and carry a notice the BSD licence asks to be reproduced here:
 > (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 > OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-**The DOS on each disk image is not gem4xe's**, and is there so that the
-disk boots.  Whoever owns it owns it; the images are for trying this
-out, not for redistribution.
+{dosnote}
