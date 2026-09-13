@@ -122,6 +122,7 @@ EXPECT = [
     ("vq_key_s",         VDI, 128, 0, 0, 0, H),
     ("vs_clip",          VDI, 129, 0, 2, 1, H),
     ("vqt_name",         VDI, 130, 0, 0, 1, H),
+    ("vqt_fontinfo",     VDI, 131, 0, 0, 0, H),
 
     ("appl_init",        AES, 10, 0, 1, 0, 0),
     ("appl_write",       AES, 12, 2, 1, 1, 0),
@@ -251,6 +252,15 @@ ANSWERS = [
 # v_updwk are nops too and DO have bindings, because every GEM program
 # calls them and a screen has nothing to close or write out.
 VDI_NOP_OK = {10, 27, 29, 34}            # cell array twice, valuator, and 34
+
+# Bindings that issue NO system call at all, and so build no parameter block
+# for EXPECT to describe. There is exactly one, and it is not a local
+# peculiarity: vq_gdos() has "OPCODE N/A" in the Compendium too (7.92) --
+# on the ST it is a magic `move.l #-2,d0; trap #2` rather than a VDI call,
+# and here, where there is no GDOS to find, it is a constant. It is still
+# exercised by bind_sim.c, because the point of that check is that no
+# declared function goes unlooked-at.
+NO_CALL_OK = {"vq_gdos"}
 AES_NO_BINDING = set()                   # every opcode the shim serves is bound
 
 
@@ -287,7 +297,7 @@ class TestBindingsAreComplete(unittest.TestCase):
     def test_every_exercised_binding_is_in_the_table(self):
         called = called_names(read(BIND_SIM_C))
         table = {n for n, *_ in EXPECT}
-        self.assertEqual(sorted(called - table), [],
+        self.assertEqual(sorted(called - table - NO_CALL_OK), [],
                          "called by bind_sim.c and not in EXPECT")
 
     def test_every_vdi_opcode_the_driver_serves_has_a_binding(self):

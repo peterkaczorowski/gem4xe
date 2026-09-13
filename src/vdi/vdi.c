@@ -2376,6 +2376,44 @@ static void vdi_vqt_name(void)
     contrl[4] = 33;
 }
 
+/* vqt_fontinfo (131) -- the current font's vertical distances, which is how
+ * a portable layout engine asks what a line of this face costs. retroplat's
+ * Atari backend reads dist[3] as the ascent and dist[1] as the descent and
+ * turns them into twips; without this it has no metrics at all.
+ *
+ * THE BINDING FILLS FOUR DISTANCES, NOT FIVE. The Compendium's prose says
+ * "dist points to an array of 5 WORDs" and its own binding listing (7.111)
+ * writes dist[0..3] from ptsout[1], [3], [5] and [7]; dist[4], the top
+ * line, is simply never transferred. We answer what the binding reads.
+ *
+ *      dist[3]  ptsout[7]   ascent    baseline to the top of a capital
+ *      dist[2]  ptsout[5]   half      baseline to the top of an x
+ *      dist[1]  ptsout[3]   descent   baseline to the bottom of a g
+ *      dist[0]  ptsout[1]   bottom    baseline to the bottom of the cell
+ *
+ * The effects offsets in ptsout[2], [4] and [6] are the extra width a
+ * skewed or thickened glyph needs. This device's effects are drawn inside
+ * the cell -- dev_vbxe.c's FONT_OBYTES shifts a copy by one bit for the
+ * odd column rather than widening anything -- so they are zero, which is
+ * the honest answer and not a placeholder. */
+static void vdi_vqt_fontinfo(void)
+{
+    intout[0] = 32;                 /* first character in the face */
+    intout[1] = 255;                /* ...and the last */
+
+    ptsout[0] = FONT_W;             /* widest cell, effects excluded */
+    ptsout[1] = FONT_BOTTOM;        /* dist[0] */
+    ptsout[2] = 0;                  /* effects[0]: left slant */
+    ptsout[3] = FONT_DESCENT;       /* dist[1] */
+    ptsout[4] = 0;                  /* effects[1]: right slant */
+    ptsout[5] = FONT_HALF;          /* dist[2] */
+    ptsout[6] = 0;                  /* effects[2] = [0] + [1] */
+    ptsout[7] = FONT_ASCENT;        /* dist[3] */
+
+    contrl[2] = 4;                  /* four ptsout PAIRS */
+    contrl[4] = 2;
+}
+
 /* vst_alignment.  The pair chosen is what comes back, and an out-of-range
  * request becomes the default -- the donor's rule, and the reason a caller
  * must use the answer rather than the request. */
@@ -2578,7 +2616,8 @@ static const VDI_OP jmptb2[] = {
     vdi_vex_curv,    /* 127 */
     vdi_vq_key_s,    /* 128 */
     vdi_vs_clip,     /* 129 */
-    vdi_vqt_name     /* 130 */
+    vdi_vqt_name,    /* 130 */
+    vdi_vqt_fontinfo /* 131 */
 };
 
 #define N1 ((WORD)(sizeof jmptb1 / sizeof jmptb1[0]))

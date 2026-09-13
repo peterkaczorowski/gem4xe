@@ -181,6 +181,15 @@ int main(void)
     vq_key_s(H, &a);
     vs_clip(H, 1, w4);
     vqt_name(H, 1, name);
+    vqt_fontinfo(H, &a, &b, w4, &c, w16);
+    /* vq_gdos builds no parameter block at all -- on the ST it is not a VDI
+       opcode but a magic trap, and here it is a constant. Called so the
+       "every declared binding is exercised" test can see it; it records
+       nothing, so it needs no EXPECT row. Called BARE, with the result
+       dropped, because called_names() matches a name at four spaces of
+       indent and a (void) cast in front of it hides the call from the very
+       check this line exists to satisfy. */
+    vq_gdos();
 
     /* -- AES, in opcode order ------------------------------------------ */
     appl_init();

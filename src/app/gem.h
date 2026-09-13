@@ -34,6 +34,14 @@ typedef short          WORD;
 typedef unsigned short UWORD;
 typedef long           LONG;
 
+/* gemlib's spelling for a workstation handle. The ST's bindings declare
+ * every VDI entry point as taking one of these rather than a bare WORD,
+ * so a portable backend written against them names the type -- retroplat's
+ * Atari backend does, in the one line it takes to say
+ * `void atari_select_font(VdiHdl vdi, ...)`. Adding it costs nothing here
+ * and is the difference between that backend compiling and not. */
+typedef short          VdiHdl;
+
 /* The five VDI arrays and the six AES arrays, by far pointer: 32 bits in
  * memory each, which makes the block the ST's byte for byte. */
 typedef struct {
@@ -95,6 +103,30 @@ typedef struct {
 #define G_ICON     31
 #define G_TITLE    32
 
+/* The VDI's standard colour indices. Object types and colour indices
+ * share the G_ prefix and nothing else; these are what vsf_color(),
+ * vst_color() and vsl_color() take, and a portable backend written
+ * against the ST's bindings uses the names rather than the numbers.
+ * Values are gemlib's (mt_gem.h) and the VDI's own default palette
+ * order: white is 0 and black is 1, which is the pair that surprises
+ * anyone expecting the reverse. */
+#define G_WHITE     0
+#define G_BLACK     1
+#define G_RED       2
+#define G_GREEN     3
+#define G_BLUE      4
+#define G_CYAN      5
+#define G_YELLOW    6
+#define G_MAGENTA   7
+#define G_LWHITE    8
+#define G_LBLACK    9
+#define G_LRED     10
+#define G_LGREEN   11
+#define G_LBLUE    12
+#define G_LCYAN    13
+#define G_LYELLOW  14
+#define G_LMAGENTA 15
+
 #define NONE       0x0000
 #define SELECTABLE 0x0001
 #define DEFAULT    0x0002
@@ -117,6 +149,71 @@ typedef struct {
 #define FALSE      0
 #define ROOT       0
 #define MAX_DEPTH  8
+
+/* gemlib's spellings for the same object flags and states. The ST's own
+ * bindings carry both -- the bare names above are the AES's originals and
+ * the prefixed ones are what mt_gem.h adds -- and portable code written
+ * against a modern ST toolchain uses the prefixed set. Aliases, not new
+ * values: OF_SELECTABLE IS SELECTABLE. */
+#define OF_NONE       NONE
+#define OF_SELECTABLE SELECTABLE
+#define OF_DEFAULT    DEFAULT
+#define OF_EXIT       EXIT
+#define OF_EDITABLE   EDITABLE
+#define OF_RBUTTON    RBUTTON
+#define OF_LASTOB     LASTOB
+#define OF_TOUCHEXIT  TOUCHEXIT
+#define OF_HIDETREE   HIDETREE
+#define OS_NORMAL     NORMAL
+#define OS_SELECTED   SELECTED
+#define OS_CROSSED    CROSSED
+#define OS_CHECKED    CHECKED
+#define OS_DISABLED   DISABLED
+#define OS_OUTLINED   OUTLINED
+#define OS_SHADOWED   SHADOWED
+#define OS_WHITEBAK   WHITEBAK
+
+/* VDI attribute constants -- what vsf_interior(), vsf_style() and
+ * vst_effects() take. Values are the VDI's own (gemlib mt_gem.h); note
+ * IP_SOLID is 7 and FIS_SOLID is 1, which are different things: the first
+ * is a FILL PATTERN INDEX within a style, the second is the style. */
+#define FIS_HOLLOW      0
+#define FIS_SOLID       1
+#define FIS_PATTERN     2
+#define FIS_HATCH       3
+#define FIS_USER        4
+
+#define IP_HOLLOW       0
+#define IP_SOLID        7
+
+#define TXT_NORMAL      0x0000
+#define TXT_THICKENED   0x0001
+#define TXT_LIGHT       0x0002
+#define TXT_SKEWED      0x0004
+#define TXT_UNDERLINED  0x0008
+#define TXT_OUTLINED    0x0010
+#define TXT_SHADOWED    0x0020
+
+/* The sixteen raster operations vro_cpyfm() and vrt_cpyfm() take. S_ONLY
+ * is the plain copy and the one a blit almost always wants; D_INVERT and
+ * NOT_D are two names for the same 10, which is gemlib's own doing. */
+#define ALL_WHITE   0
+#define S_AND_D     1
+#define S_AND_NOTD  2
+#define S_ONLY      3
+#define NOTS_AND_D  4
+#define D_ONLY      5
+#define S_XOR_D     6
+#define S_OR_D      7
+#define NOT_SORD    8
+#define NOT_SXORD   9
+#define D_INVERT   10
+#define NOT_D      10
+#define S_OR_NOTD  11
+#define NOT_S      12
+#define NOTS_OR_D  13
+#define NOT_SANDD  14
+#define ALL_BLACK  15
 
 /* ICONBLK, what a G_ICON's ob_spec points at: 34 bytes, the ST's.  The
  * three pointers are LONGs holding bank-$00 addresses; the mask and the
@@ -358,6 +455,21 @@ void vex_butv(WORD handle, LONG newv, LONG *oldv);
 void vex_motv(WORD handle, LONG newv, LONG *oldv);
 void vex_curv(WORD handle, LONG newv, LONG *oldv);
 WORD vst_load_fonts(WORD handle, WORD select);
+
+/* Is GDOS installed? On the ST this is not a VDI opcode at all -- it is a
+ * magic `move.l #-2,d0; trap #2` (Compendium 7.92, "OPCODE N/A"), and the
+ * answer distinguishes FontGDOS from SpeedoGDOS from none. gem4xe has no
+ * GDOS: the VDI's device independence lives in v_opnwk's device id here,
+ * not in a loadable driver layer. So this answers 0, which is what the
+ * older bindings return for "none" and what a caller guarding a
+ * vst_load_fonts() with it needs to hear. */
+WORD vq_gdos(void);
+
+/* The current font's vertical distances -- dist[3] is the ascent and
+ * dist[1] the descent, which is what a layout engine needs to turn a face
+ * into a line height. FOUR distances are written, not five: see gemlib.c. */
+void vqt_fontinfo(WORD handle, WORD *first, WORD *last, WORD *dist,
+                  WORD *width, WORD *effects);
 void vst_unload_fonts(WORD handle, WORD select);
 void vrt_cpyfm(WORD handle, WORD mode, const WORD *pxy, const MFDB *src,
                const MFDB *dst, const WORD *color);

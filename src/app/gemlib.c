@@ -106,6 +106,12 @@ static WORD attr1(WORD op, WORD handle, WORD v)
 }
 
 WORD vsf_color(WORD handle, WORD color)    { return attr1(25, handle, color); }
+
+/* No GDOS here, and that is a property of the design rather than a gap:
+ * the VDI's device independence is in v_opnwk's device id, so a printer
+ * is a second driver rasterising the same opcodes, not a loadable one.
+ * See gem.h -- this is not a VDI opcode on the ST either. */
+WORD vq_gdos(void) { return 0; }
 WORD vsf_interior(WORD handle, WORD style) { return attr1(23, handle, style); }
 WORD vsl_color(WORD handle, WORD color)    { return attr1(17, handle, color); }
 WORD vst_color(WORD handle, WORD color)    { return attr1(22, handle, color); }
@@ -534,6 +540,30 @@ void vqt_extent(WORD handle, const char *s, WORD *extent)
     WORD n = str_in(s, 0);
     vdi(116, 0, n, handle);
     ptsx(extent, 8);
+}
+
+/* vqt_fontinfo (131) -- the current font's vertical distances.
+ *
+ * The unpacking is the Compendium's own binding (7.111) and it is not a
+ * straight copy: the distances are the ODD ptsout entries and the effects
+ * offsets are the even ones between them, so dist[i] comes from
+ * ptsout[2i+1]. FOUR distances are transferred, not the five the prose
+ * describes -- dist[4], the top line, is never written by the binding, so
+ * a caller wanting it has none. */
+void vqt_fontinfo(WORD handle, WORD *first, WORD *last, WORD *dist,
+                  WORD *width, WORD *effects)
+{
+    vdi(131, 0, 0, handle);
+    *first   = intout[0];
+    *last    = intout[1];
+    *width   = ptsout[0];
+    dist[0]  = ptsout[1];
+    dist[1]  = ptsout[3];
+    dist[2]  = ptsout[5];
+    dist[3]  = ptsout[7];
+    effects[0] = ptsout[2];
+    effects[1] = ptsout[4];
+    effects[2] = ptsout[6];
 }
 
 /* Three points, and the deltas are a point apart -- [0] the cell, [2]
