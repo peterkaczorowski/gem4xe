@@ -17,6 +17,13 @@ both display drivers and chooses at start-up, so a machine without a VBXE gets
 320×168 on ANTIC mode F instead — `make test-m26` boots the shipped binary three
 ways to prove it. The 6502 path is still deferred.
 
+Nothing here has run on a real board yet: the first report from hardware was a
+white screen (`docs/phase39.md`). The boot screen's **Vectors** line says what
+the machine found under its OS ROM and how the Rapidus was set up, and `make
+diag` builds `GEMDIAG.COM` — `GEM.COM` with a digit and a tone per start-up
+step and OPTION/SELECT/START to skip and single-step — for a machine with no
+emulator bridge to ask.
+
 ## Pictures
 
 The product booted and used, photographed under AltirraSDL by `make shots`
@@ -47,7 +54,7 @@ full-screen repaints.
 
 | Gate | | |
 |---|---|---|
-| `make test-host` | 147/147 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; the application kit, assembled and built out of a copy of itself in a directory of its own; the far allocator, asked for the blocks that used to straddle a bank; and the distribution, built both ways, with the release checked for the floppies it must not carry and for what its page says instead |
+| `make test-host` | 170/170 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; the application kit, assembled and built out of a copy of itself in a directory of its own; the far allocator, asked for the blocks that used to straddle a bank; and the distribution, built both ways, with the release checked for the floppies it must not carry and for what its page says instead |
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |

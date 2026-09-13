@@ -84,6 +84,16 @@ STRINGS = [
     ("BOOT_PTR_XEM1", "mouSTer (XEM1)"),
     ("BOOT_BANKS", "banks"),
     ("BOOT_HOLD", "Hold SHIFT to pause this screen"),
+    # the vectors line (src/sys/irq.h: how irq_install() reached them, or
+    # why not), and the refusal that follows a "why not" on the way out
+    ("BOOT_IRQ", "Vectors"),
+    ("BOOT_IRQ_COPIED", "OS copied"),
+    ("BOOT_IRQ_RAM", "OS in RAM"),
+    ("BOOT_IRQ_NOCOPY", "no RAM under ROM"),
+    ("BOOT_IRQ_NOVEC", "vectors not kept"),
+    ("EXIT_NOCOPY", "gem4xe: no RAM under the OS ROM"),
+    ("EXIT_NOVEC", "gem4xe: the vectors did not take"),
+    ("EXIT_NOIRQ", "gem4xe: no interrupt vectors installed"),
 ]
 
 # The longest string the system will ever copy into its near buffer, and
@@ -92,7 +102,7 @@ MAXLEN = max(len(s) for _, s in STRINGS)
 # The boot screen's labels, and the columns a label gets before it is cut
 # (src/sys/bootinfo.c draws them; the other BOOT_ strings are values).
 BOOT_LABELS = tuple("BOOT_" + n for n in
-                    "VERSION CPU MEMORY DOS CONFIG LANG VIDEO CLOCK POINTER PRINTER".split())
+                    "VERSION CPU IRQ MEMORY DOS CONFIG LANG VIDEO CLOCK POINTER PRINTER".split())
 BOOT_LABEL = 9
 assert all(len(s) <= BOOT_LABEL for n, s in STRINGS if n in BOOT_LABELS), \
     "a boot-screen label is wider than its column"

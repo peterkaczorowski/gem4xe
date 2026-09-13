@@ -287,6 +287,31 @@ void boot_begin(void)
     *p = '\0';
     line(LS_BOOT_CPU, v);
 
+    /* The vectors: how irq_install() reached them, or why it could not
+     * (src/sys/irq.h) -- and on a Rapidus the MCR and CMCR as the
+     * firmware left them, which is the board's setup in two bytes.  A
+     * report from a machine no emulator has been near needs this line
+     * more than any other: the native-mode vectors are what every
+     * application calls in through, and this is the one place that
+     * says whether they exist. */
+    p = app(v, lang_str(irq.how == IRQ_ROM_COPIED ? LS_BOOT_IRQ_COPIED
+                      : irq.how == IRQ_RAM_FOUND  ? LS_BOOT_IRQ_RAM
+                      : irq.fail == IRQ_FAIL_COPY ? LS_BOOT_IRQ_NOCOPY
+                      : irq.fail == IRQ_FAIL_VEC  ? LS_BOOT_IRQ_NOVEC
+                                                  : LS_BOOT_NONE));
+    if (rapidus.present) {
+        *p++ = ' ';
+        *p++ = '(';
+        *p++ = '$';
+        p = hex2(p, rapidus.mcr_before);
+        *p++ = '/';
+        *p++ = '$';
+        p = hex2(p, rapidus.cmcr_before);
+        *p++ = ')';
+    }
+    *p = '\0';
+    line(LS_BOOT_IRQ, v);
+
     /* Sixteen banks to the megabyte; one decimal, rounded. */
     tenths = (uint16_t)(((uint16_t)farmem.banks * 10 + 8) / 16);
     p = dec(v, (uint16_t)(tenths / 10));

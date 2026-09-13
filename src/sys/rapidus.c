@@ -53,6 +53,7 @@ void rapidus_speedup(void)
     mcr  = reg_read(RAP_MCR);
     cmcr = reg_read(RAP_CMCR);
     rapidus.mcr_before = mcr;
+    rapidus.cmcr_before = cmcr;
 
     /* The windows that must not go fast: whatever the MEMAC window spans,
      * and the OS/hardware window, which is not ours to decide. */

@@ -104,6 +104,8 @@ BOOT_WAIT = 3000                # frames from the CPU switch to give it to appea
 BOOT_INK, BOOT_PAPER = "$00", "$0e"     # src/sys/bootinfo.c INK, PAPER, as HWSTATE prints them
 REFUSAL = "gem4xe needs"        # src/farload.s msg_no816
 FARMEM_BRK = 8                  # the cursor's offset in FARMEM (src/sys/farmem.h)
+RAPIDUS_MCR_BEFORE = 1          # and in RAPIDUS (src/sys/rapidus.h): the MCR ...
+RAPIDUS_CMCR_BEFORE = 5         # ... and the CMCR as the firmware left them
 SEAM = 8                        # bytes checked either side of a chunk seam
 STEP = 20                       # frames between screen reads while waiting for
                                 # the refusal: see the poll in one()
@@ -231,6 +233,15 @@ def check_boot(name, report, gtia, b, syms, check):
         check(report.get(label) == want,
               f"{name}: the boot screen says {label} '{report.get(label)}', "
               f"not '{want}'")
+    # The vectors line: the regime irq_install() reached, and the Rapidus
+    # MCR/CMCR as the firmware left them (src/sys/bootinfo.c).  With the
+    # OS ROM in and window 3 slow at boot, the ROM is copied under itself.
+    rap = syms["rapidus"]
+    mcr, cmcr = b.peek(rap + RAPIDUS_MCR_BEFORE), b.peek(rap + RAPIDUS_CMCR_BEFORE)
+    want = f"{L('IRQ_COPIED')} (${mcr:02X}/${cmcr:02X})"
+    check(report.get(L("IRQ")) == want,
+          f"{name}: the boot screen says {L('IRQ')} '{report.get(L('IRQ'))}', "
+          f"not '{want}'")
     kind = b.peek(syms["dos"])
     check(report.get(L("DOS")) == DOS_NAME[kind],
           f"{name}: the boot screen says DOS '{report.get(L('DOS'))}' on a "

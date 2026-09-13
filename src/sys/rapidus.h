@@ -69,6 +69,8 @@ typedef struct {
     uint8_t mcr_after;
     uint8_t cmcr_after;
     uint8_t synced;         /* bit per window re-synced before going fast */
+    uint8_t cmcr_before;    /* the CMCR as found: with mcr_before, the
+                               firmware's setup, which the boot screen shows */
 } RAPIDUS;
 
 extern RAPIDUS rapidus;

@@ -58,7 +58,18 @@
 #include "vdi/print.h"
 #include "sys/gemdos.h"
 #include "vbxe/vbxe.h"
+#include "lang_rsc.h"              /* LS_*, LANG_MAXLEN */
 #include "antic/antic.h"
+#ifdef GEM_DIAG
+#include "sys/diag.h"
+/* GEMDIAG.COM: a mark before each step, and two steps it can leave out.
+ * GEM.COM compiles the same file with the marks empty. */
+#define MARK(n)       diag_mark(n)
+#define UNLESS(bit)   if (!(diag_keys & (bit)))
+#else
+#define MARK(n)
+#define UNLESS(bit)
+#endif
 
 extern void _sys_exit(void);
 extern uint16_t _exit_msg;           /* src/crt_atari.s: a line for the way out */
@@ -78,17 +89,36 @@ extern uint16_t _exit_msg;           /* src/crt_atari.s: a line for the way out 
 static const char no_vbxe[] =
     "gem4xe: VIDEO=VBXE, and no VBXE in this machine\x9b";
 
+/* A refusal in LANG.RSC's words: the line, EOL-terminated, in bank $00
+ * where _sys_exit can reach it after the far memory is nobody's. */
+static char exit_line[LANG_MAXLEN + 2];
+
+static void exit_say(WORD n)
+{
+    const char *s = lang_str(n);
+    WORD i;
+
+    for (i = 0; s[i]; i++)
+        exit_line[i] = s[i];
+    exit_line[i] = (char)0x9B;
+    exit_line[i + 1] = '\0';
+    _exit_msg = (uint16_t)exit_line;
+}
+
 TASK void main(void)
 {
     WORD video, pointer;
 
-    dos_ident();
-    rapidus_speedup();
-    irq_install();
-    config_read();              /* before the screen: it says which one */
-    farmem_probe();             /* LANG.RSC goes in far memory ... */
-    lang_init();                /* ... and the boot screen is in its words */
-    boot_begin();               /* version, CPU, memory, DOS, the two files */
+#ifdef GEM_DIAG
+    diag_init();
+#endif
+    MARK(0);  dos_ident();
+    MARK(1);  UNLESS(DIAG_SKIP_SPEEDUP) rapidus_speedup();
+    MARK(2);  UNLESS(DIAG_SKIP_IRQ) irq_install();
+    MARK(3);  config_read();    /* before the screen: it says which one */
+    MARK(4);  farmem_probe();   /* LANG.RSC goes in far memory ... */
+    MARK(5);  lang_init();      /* ... and the boot screen is in its words */
+    MARK(6);  boot_begin();     /* version, CPU, memory, DOS, the two files */
 
     /* WHICH SCREEN.  AUTO takes the VBXE when the machine has one, which
      * is the only case that needs no file.  VBXE asked for and not found
@@ -110,6 +140,23 @@ TASK void main(void)
     boot_printer();
     boot_end();                 /* three seconds, or a key */
 
+    /* NO VECTORS, NO DESKTOP.  Every application, the desktop first,
+     * calls in through COP (src/sys/abi.s), and the native-mode COP
+     * vector is one of the vectors irq_install() places -- so the
+     * polled regime, which can draw and read the mouse, cannot run a
+     * program: the first call jumps through whatever the OS ROM holds
+     * at $FFE4.  Say so and go back.  Going on instead clears the
+     * screen and hangs at that first call, which is a white screen and
+     * nothing after it -- what the first real Rapidus this met showed. */
+    if (irq.how == IRQ_OFF) {
+        rapidus_restore();
+        exit_say(irq.fail == IRQ_FAIL_COPY ? LS_EXIT_NOCOPY
+               : irq.fail == IRQ_FAIL_VEC  ? LS_EXIT_NOVEC
+                                           : LS_EXIT_NOIRQ);
+        _sys_exit();
+    }
+
+    MARK(7);
     if (video == CFG_VIDEO_VBXE) {
         vdev = &vdev_vbxe;
         /* A blit list started in uninitialised VRAM ($FF) never stops,
@@ -123,9 +170,9 @@ TASK void main(void)
         antic_init(AN_INK, AN_PAPER);       /* builds the list and clears */
     }
 
-    vdi_font_default();         /* the device's own face, into the device */
-    vdi_init();
-    ptr_init(pointer, SCR_W / 2, SCR_H / 2);
+    MARK(8);  vdi_font_default();   /* the device's own face, into the device */
+    MARK(9);  vdi_init();
+    MARK(10); ptr_init(pointer, SCR_W / 2, SCR_H / 2);
     /* The printer, which is a destination and a language and nothing
      * else until a program opens the workstation. */
     pr_kind = config.printer;
@@ -141,17 +188,17 @@ TASK void main(void)
         _sys_exit();
     ctx_init(&proc_app->p_ctx);
     gemdos_init();              /* its far state below any application's */
-    dev_clear_screen();         /* whichever screen it is */
+    MARK(11); dev_clear_screen();   /* whichever screen it is */
 
-    gsx_start();
+    MARK(12); gsx_start();
     ev_init();
     wm_init();
     mn_init();
     mn_start();     /* the registry: once, before any accessory */
     sh_init();                  /* far buffers: before any app_load */
-    lang_font();                /* SYSTEM.FNT, now there is a device for it */
+    MARK(13); lang_font();      /* SYSTEM.FNT, now there is a device for it */
     fs_start();
-    sh_main();
+    MARK(14); sh_main();
 
     /* The way back, in the reverse of the way in: interrupts off and the
      * ROM in, the screen off, the accelerator's windows written back and

@@ -324,9 +324,10 @@ build/dos.o: src/sys/dos.c src/sys/dos.h src/sys/cio.h
 # rebuilt when the seam moves.
 build/gem.o: src/gem.c src/vdi/vdi.h src/vdi/vdidev.h src/vdi/pointer.h \
              src/vdi/font.h src/vdi/print.h src/aes/aes.h src/sys/config.h \
-             src/sys/bootinfo.h src/vbxe/vbxe.h src/antic/antic.h
+             src/sys/bootinfo.h src/vbxe/vbxe.h src/antic/antic.h \
+             build/lang_rsc.h
 	@mkdir -p build
-	$(CC) $(CFLAGS) -I src -o $@ $<
+	$(CC) $(CFLAGS) -I src -I build -o $@ $<
 
 # GEM4XE.CFG: what the machine should be told before it has a screen.
 build/config.o: src/sys/config.c src/sys/config.h src/sys/cio.h src/vdi/pointer.h
@@ -674,6 +675,30 @@ build/gem.elf: $(GEM_OBJS) src/gem4xe.scm
 
 build/gem.xex: build/gem.elf
 	python3 tools/mkxex.py $< $@ --entry _atari_entry --syms build/gem.sym
+
+# GEMDIAG.COM: GEM.COM with a mark before every start-up step and the
+# console keys bisecting the two things only Altirra has ever run
+# (src/sys/diag.h) -- for a machine no emulator has been near.  The same
+# objects on the same layout; src/gem.c compiled once more with the marks
+# in.  Not part of any disk: it is copied next to GEM.COM by hand.
+DIAG_OBJS  = $(filter-out build/gem.o,$(GEM_OBJS)) build/gem_diag.o build/diag.o
+
+build/gem_diag.o: src/gem.c src/sys/diag.h build/lang_rsc.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -DGEM_DIAG -I src -I build -o $@ $<
+
+build/diag.o: src/sys/diag.c src/sys/diag.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+build/gemdiag.elf: $(DIAG_OBJS) src/gem4xe.scm
+	$(LD) src/gem4xe.scm $(DIAG_OBJS) -o $@ $(LIB) $(LDFLAGS) --list-file build/gemdiag.map \
+	      --memories-expression "(layout #x010000 #x7fff)"
+
+build/gemdiag.com: build/gemdiag.elf
+	python3 tools/mkxex.py $< $@ --entry _atari_entry --syms build/gemdiag.sym
+
+diag: build/gemdiag.com
 
 # --syms lets the conformance harness find vdi_script by name instead of
 # hard-coding an address that moves on every rebuild.
@@ -1349,4 +1374,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-boot test-cf demo movie bench emu-stop clean

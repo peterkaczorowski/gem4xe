@@ -72,17 +72,22 @@ class Resource(unittest.TestCase):
         got = bytes(int(t, 16) for t in body.replace("\n", "").split(",") if t.strip())
         self.assertEqual(got, self.data)
 
-    def test_every_text_is_an_alert_or_a_label(self):
+    def test_every_text_is_an_alert_or_a_label_or_a_line(self):
         """An alert is [icon][text][buttons], which is the grammar
         fm_alert parses -- a translation that loses a bracket loses the
         alert.  The boot screen's labels (BOOT_*) are plain text, cut at
         BOOT_LABEL columns, so one wider than that is a label that would
-        never be read whole."""
+        never be read whole.  An EXIT_ line is printed on E: on the way
+        back to DOS, one line of a 40-column screen with an EOL put after
+        it, so it has no EOL of its own and fits the line."""
         for name, s in langrsc.STRINGS:
             if name.startswith("BOOT_"):
                 self.assertNotIn("[", s, name)
                 if name in langrsc.BOOT_LABELS:
                     self.assertLessEqual(len(s), langrsc.BOOT_LABEL, name)
+            elif name.startswith("EXIT_"):
+                self.assertNotIn("\x9b", s, name)
+                self.assertLessEqual(len(s), 40, name)
             else:
                 self.assertRegex(s, r"^\[[0-3]\]\[.+\]\[.+\]$", name)
 
@@ -103,6 +108,8 @@ def german(name, text):
         return ("Prozessor" if name == "BOOT_CPU" else text + "e")[:langrsc.BOOT_LABEL]
     if name.startswith("BOOT_"):
         return text + " (deutsch)"
+    if name.startswith("EXIT_"):
+        return ("gem4xe: " + text[len("gem4xe: "):] + " (de)")[:40]
     return ("[1][Diese Anwendung meldet einen Fehler|"
             + ("in der Ausfuehrung|Fehler Nummer #00" if name == "ERRTOS"
                else text[text.index("][") + 2:text.rindex("][")])
@@ -133,7 +140,9 @@ class Translated(unittest.TestCase):
         moves everything else: form_alert's grammar, and one '#' with
         room for two digits after it in ERRTOS."""
         for name, s in self.STRINGS:
-            if not name.startswith("BOOT_"):
+            if name.startswith("EXIT_"):
+                self.assertLessEqual(len(s), 40, name)
+            elif not name.startswith("BOOT_"):
                 self.assertRegex(s, r"^\[[0-3]\]\[.+\]\[.+\]$", name)
         s = dict(self.STRINGS)["ERRTOS"]
         self.assertEqual(s.count("#"), 1)
