@@ -19,22 +19,50 @@ FAR SEGMENTS
 A .xex segment header is two 16-bit addresses, so an Atari DOS loader cannot
 place anything above $FFFF -- but gem4xe links its code into the banks above
 it, one linker memory per bank from $01 up (src/gem4xe.scm), so a far
-segment per bank the image reached.  Those segments therefore travel as CHUNKS: each is aimed at the staging buffer that
-src/farload.s reserves in bank $00, followed by a two-byte segment that writes
-INITAD, which makes DOS call the copier.  The copier moves the chunk to its
-real home and returns, and by the time DOS reaches the run vector the far image
-is assembled.
+segment per bank the image reached.  Those segments therefore travel as
+CHUNKS: each is aimed at the staging buffer that src/farload.s reserves in
+bank $00, followed by a two-byte segment that writes INITAD, which makes DOS
+call the loader.  The loader unpacks the chunk to its real home and returns,
+and by the time DOS reaches the run vector the far image is assembled.
 
 Writing INITAD after every chunk rather than once at the start is deliberate.
 DOSes disagree about whether INITAD is called after EVERY segment or only after
 one that writes to it; rewriting it per chunk is correct under both readings,
-and the copier zeroes its own length field so a spurious extra call does
+and the loader zeroes its own count field so a spurious extra call does
 nothing.
 
-A chunk is always a whole number of 256-byte pages, which is what lets the
-copier be a flat page loop.  The tail of a segment is handled by sliding the
-last chunk BACKWARDS to a page multiple -- recopying a few bytes already
-placed -- rather than by padding forwards into whatever follows.
+THE CHUNKS ARE PACKED.  The far image is two thirds of a double-density
+floppy and most of a minute of a 1050's reading, and it is code and tables,
+which an LZ77 makes a third smaller.  Each far segment is packed on its own
+as one stream of TOKENS, and the stream is cut into chunks at token
+boundaries, so a chunk unpacks on its own given only where it goes -- what
+a match reaches back into is output the loader already wrote, in the banks
+above, and the segment before this one is never referenced.  A token is:
+
+    byte       LLLL MMMM   L literal bytes follow; a match of M+4 bytes after
+    bytes      if L == 15: added to L, one after another, until one is not 255
+    L bytes    the literals
+    word       the match's offset, little-endian, 1..65535: it copies from
+               (the output so far) minus this, which may overlap what it
+               writes -- that is how a run is encoded.  Or 0: NO match, the
+               token was only its literals (M is 0 and nothing follows) --
+               how a long stretch of incompressible bytes is carried, a
+               thousand literals at a time, so that no token outgrows the
+               staging buffer
+    bytes      if M == 15: added to M as above
+
+The last token of a chunk may stop after its literals, without even the
+offset word.  Nothing marks that: the chunk's header carries how many bytes
+come OUT of it, the loader stops when it has written that many, and the
+packer cuts only at token boundaries, so the count runs out exactly where a
+token ends.  The header is five bytes, a 24-bit destination and that 16-bit
+count, and it sits immediately before the payload so that a chunk is ONE
+.xex segment.
+
+unpack() below is the loader written in Python, and the packer checks its
+own output through it before writing a byte of the .xex: a format mistake
+fails the build here, not a boot there.  tests/host/test_mkxex.py loads the
+.xex the way a DOS does and requires the image back byte for byte.
 
 The staging layout is not repeated here: _fl_hdr, _fl_buf and _fl_end come out
 of the ELF symbol table, so src/farload.s and src/gem4xe.scm remain the only
@@ -45,6 +73,7 @@ Usage: mkxex.py in.elf out.xex [--entry SYMBOL] [--syms out.sym]
 --syms writes "NAME ADDR" lines for every symbol, so a test harness can find
 buffers by name instead of hard-coding addresses that drift on every rebuild.
 """
+import functools
 import struct
 import sys
 
@@ -101,32 +130,223 @@ def seg(addr, data):
     return struct.pack("<HH", addr, addr + len(data) - 1) + data
 
 
-def far_chunks(vaddr, data, chunk):
-    """Split a far segment into whole-page pieces inside the staging buffer.
+MIN_MATCH = 4          # a match shorter than this costs more than its literals
+MAX_OFFSET = 0xFFFF    # the offset is a word
+MAX_LITERALS = 1024    # per token, so that no token outgrows a chunk
+MAX_MATCH = 1024       # ...and no chunk's output outgrows its 16-bit count
+HASH = 4               # bytes a candidate match is found by
 
-    Every piece is a multiple of 256 bytes so the copier can be a flat page
-    loop.  The tail is made whole by sliding the final piece BACKWARDS -- it
-    recopies a few bytes that the previous piece already placed, which costs
-    microseconds and cannot touch anything outside this segment.  Padding
-    forwards would write past the end into whoever is next.
+
+@functools.lru_cache(maxsize=16)
+def pack(data):
+    """LZ77 the bytes into a list of tokens, each the bytes of one token.
+
+    A hash of the next four bytes finds earlier places they occurred; the
+    longest match among them wins, unless starting one byte later would find
+    a longer one (the usual lazy step).  Simple and deterministic, which
+    matters more than the last few percent: the gates recompute the chunking
+    from the ELF and expect the same seams.
     """
     n = len(data)
-    off = 0
-    while off < n:
-        rem = n - off
-        if rem >= chunk:
-            yield vaddr + off, data[off:off + chunk]
-            off += chunk
-            continue
-        take = (rem + 255) & ~0xFF
-        if take <= n:
-            start = n - take
-            yield vaddr + start, data[start:]
+    tokens = []
+    heads = {}
+
+    def note(i):
+        if i + HASH <= n:
+            heads.setdefault(data[i:i + HASH], []).append(i)
+
+    def longest(i):
+        if i + MIN_MATCH > n:
+            return 0, 0
+        best, off = 0, 0
+        lim = min(n - i, MAX_MATCH)
+        for p in reversed(heads.get(data[i:i + HASH], ())):
+            if i - p > MAX_OFFSET:
+                break
+            k = HASH
+            while k < lim and data[p + k] == data[i + k]:
+                k += 1
+            if k > best:
+                best, off = k, i - p
+                if k >= lim:
+                    break
+        return best, off
+
+    def token(lits, mlen, off):
+        L, M = len(lits), mlen - MIN_MATCH if mlen else 0
+        out = bytearray([(min(L, 15) << 4) | min(M, 15)])
+        if L >= 15:
+            r = L - 15
+            while r >= 255:
+                out.append(255)
+                r -= 255
+            out.append(r)
+        out += lits
+        out += struct.pack("<H", off)          # 0: no match follows
+        if mlen:
+            if M >= 15:
+                r = M - 15
+                while r >= 255:
+                    out.append(255)
+                    r -= 255
+                out.append(r)
+        tokens.append(bytes(out))
+
+    i = 0
+    lits = bytearray()
+    while i < n:
+        mlen, off = longest(i)
+        if mlen >= MIN_MATCH and i + 1 < n:
+            later, _ = longest(i + 1)
+            if later > mlen + 1:
+                mlen = 0                       # take this byte; match next time
+        if len(lits) >= MAX_LITERALS:
+            token(lits, 0, 0)
+            lits = bytearray()
+        if mlen >= MIN_MATCH:
+            token(lits, mlen, off)
+            lits = bytearray()
+            for k in range(i, i + mlen):
+                note(k)
+            i += mlen
         else:
-            # Shorter than one page in total, so there is nothing to slide
-            # back into.  Pad, and let the caller police the overrun.
-            yield vaddr + off, data[off:] + b"\x00" * (take - rem)
-        off = n
+            lits.append(data[i])
+            note(i)
+            i += 1
+    if lits:
+        token(lits, 0, 0)
+    return tokens
+
+
+def literals(tok):
+    """A token's literal count, and where in it the offset word starts."""
+    i = 1
+    L = tok[0] >> 4
+    if L == 15:
+        while True:
+            L += tok[i]
+            i += 1
+            if tok[i - 1] != 255:
+                break
+    return L, i + L
+
+
+def literal_only(tok):
+    """True if the token carries no match: it ends in the no-match word."""
+    L, i = literals(tok)
+    return i + 2 == len(tok) and tok[i] | tok[i + 1] == 0
+
+
+def join(tokens):
+    """The tokens as one chunk's payload.
+
+    A chunk's last token stops after its literals if it has no match, so the
+    no-match word that marks that mid-chunk is left off the end.
+    """
+    if tokens and literal_only(tokens[-1]):
+        tokens = tokens[:-1] + [tokens[-1][:-2]]
+    return b"".join(tokens)
+
+
+def token_out(tok):
+    """How many bytes a token writes: its literals plus its match."""
+    L, i = literals(tok)
+    if i >= len(tok) or tok[i] | tok[i + 1] == 0:
+        return L
+    i += 2
+    M = (tok[0] & 15) + MIN_MATCH
+    if (tok[0] & 15) == 15:
+        while True:
+            M += tok[i]
+            i += 1
+            if tok[i - 1] != 255:
+                break
+    return L + M
+
+
+def unpack(packed, count, before=b""):
+    """src/farload.s in Python: `count` bytes out of `packed`.
+
+    `before` is the output the loader has already written ahead of this
+    chunk's destination, which is what a match may reach back into.
+    """
+    out = bytearray(before)
+    end = len(out) + count
+    i = 0
+    while len(out) < end:
+        tok = packed[i]
+        i += 1
+        L = tok >> 4
+        if L == 15:
+            while True:
+                L += packed[i]
+                i += 1
+                if packed[i - 1] != 255:
+                    break
+        out += packed[i:i + L]
+        i += L
+        if len(out) >= end:
+            break
+        off = packed[i] | (packed[i + 1] << 8)
+        i += 2
+        if off == 0:
+            if tok & 15:
+                raise ValueError(f"no-match token with a match length at {i - 2}")
+            continue
+        M = (tok & 15) + MIN_MATCH
+        if (tok & 15) == 15:
+            while True:
+                M += packed[i]
+                i += 1
+                if packed[i - 1] != 255:
+                    break
+        if not 1 <= off <= len(out):
+            raise ValueError(f"match reaches {off} bytes back at output {len(out)}")
+        for _ in range(M):
+            out.append(out[-off])
+    if len(out) != end or i != len(packed):
+        raise ValueError(f"chunk unpacked to {len(out) - len(before)} bytes of "
+                         f"{count}, using {i} of {len(packed)}")
+    return bytes(out[len(before):])
+
+
+def far_chunks(vaddr, data, chunk):
+    """Pack a far segment and cut it into chunks that fit the staging buffer.
+
+    Yields (destination, the bytes the chunk unpacks to, the packed bytes).
+    Cuts are at token boundaries only, and a chunk's output is kept under
+    what its 16-bit count can say.  Every chunk is unpacked again here, on
+    top of what came before it, and must give back the segment's own bytes.
+    """
+    tokens = pack(data)
+    done = 0
+    piece, out = [], 0
+
+    def cut():
+        packed = join(piece)
+        got = unpack(packed, out, data[:done])
+        if got != data[done:done + out]:
+            raise SystemExit(f"packer bug: chunk at ${vaddr + done:06X} "
+                             f"does not unpack to what went in")
+        return vaddr + done, got, packed
+
+    for tok in tokens:
+        t_out = token_out(tok)
+        if piece and (sum(map(len, piece)) + len(tok) > chunk
+                      or out + t_out > 0xFFFF):
+            yield cut()
+            done += out
+            piece, out = [], 0
+        if len(tok) > chunk:
+            raise SystemExit(f"a {len(tok)}-byte token cannot fit a "
+                             f"{chunk}-byte staging buffer")
+        piece.append(tok)
+        out += t_out
+    if piece:
+        yield cut()
+        done += out
+    if done != len(data):
+        raise SystemExit(f"packer bug: {done} of {len(data)} bytes chunked")
 
 
 def build_xex(segs, entry, syms):
@@ -145,7 +365,8 @@ def build_xex(segs, entry, syms):
     for vaddr, data in near:
         out += seg(vaddr, data)
     if far:
-        out += stage_far(far, syms)
+        staged, _ = stage_far(far, syms)
+        out += staged
     out += seg(RUNAD, struct.pack("<H", entry))
     return bytes(out), near, far
 
@@ -157,33 +378,32 @@ def stage_far(far, syms):
     if missing:
         raise SystemExit(
             f"far segments need src/farload.s linked in; missing {', '.join(missing)}")
-    hdr, buf, scr, copier = (syms[n] for n in need)
+    hdr, buf, scr, loader = (syms[n] for n in need)
     chunk = scr - buf
-    if chunk <= 0 or chunk % 256:
+    if chunk <= 0:
+        raise SystemExit(f"staging buffer is {chunk} bytes")
+    if buf != hdr + HDR:
         raise SystemExit(
-            f"staging buffer is {chunk} bytes; it must be a positive multiple of 256")
-    if buf != hdr + 4:
-        raise SystemExit(
-            f"_fl_buf (${buf:04X}) must follow _fl_hdr (${hdr:04X}) immediately, "
-            f"so that a header and its payload are one .xex segment")
+            f"_fl_buf (${buf:04X}) must follow the {HDR}-byte header at _fl_hdr "
+            f"(${hdr:04X}) immediately, so that a chunk is one .xex segment")
 
-    starts = sorted(a for a, _ in far)
     out = bytearray()
-    # Zero the length field while INITAD is still unset, so that the first
-    # trigger cannot act on whatever the staging buffer happened to contain.
-    out += seg(hdr, b"\x00" * 4)
+    # Zero the count while INITAD is still unset, so that the first trigger
+    # cannot act on whatever the staging buffer happened to contain.
+    out += seg(hdr, b"\x00" * HDR)
+    stats = []
     for vaddr, data in far:
-        for dst, piece in far_chunks(vaddr, data, chunk):
-            over = dst + len(piece)
-            if over > vaddr + len(data):
-                clash = [a for a in starts if vaddr + len(data) <= a < over]
-                if clash:
-                    raise SystemExit(
-                        f"padding ${vaddr:06X} would overwrite ${clash[0]:06X}")
-            out += seg(hdr, struct.pack("<HBB", dst & 0xFFFF, dst >> 16,
-                                        len(piece) // 256) + piece)
-            out += seg(INITAD, struct.pack("<H", copier))
-    return bytes(out)
+        n = 0
+        for dst, plain, packed in far_chunks(vaddr, data, chunk):
+            out += seg(hdr, struct.pack("<HBH", dst & 0xFFFF, dst >> 16, len(plain))
+                       + packed)
+            out += seg(INITAD, struct.pack("<H", loader))
+            n += 1
+        stats.append(n)
+    return bytes(out), stats
+
+
+HDR = 5    # the chunk header: a 24-bit destination and a 16-bit output count
 
 
 def main(argv):
@@ -223,8 +443,10 @@ def main(argv):
               f"staged through ${syms['_fl_buf']:04X}")
     if far:
         chunk = syms["_fl_end"] - syms["_fl_buf"]
-        print(f"    {nearb} bytes in bank $00, {farb} copied up in "
-              f"{-(-farb // chunk)} chunk(s) of {chunk}")
+        staged, chunks = stage_far(far, syms)
+        packed = len(staged) - sum(chunks) * (4 + HDR + 6) - (4 + HDR)
+        print(f"    {nearb} bytes in bank $00, {farb} far packed to {packed} "
+              f"({100 * packed // farb}%) in {sum(chunks)} chunk(s) of up to {chunk}")
     return 0
 
 

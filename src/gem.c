@@ -24,6 +24,17 @@
  * refuses the machine before its first store).  The ANTIC device is the
  * answer to "no VBXE", not to "no Rapidus".
  *
+ * BEFORE EITHER SCREEN there is the boot screen (src/sys/bootinfo.h): on
+ * the OS's text screen, a line for each thing the start-up settled, in
+ * the order it settled them, held for three seconds the way EmuTOS
+ * holds its.  That is why the far-memory probe and the reading of
+ * LANG.RSC come before the screen is chosen rather than after the AES
+ * is up, where they used to be: the screen is written in LANG.RSC's
+ * words, and LANG.RSC lives in far memory.  Both are safe that early --
+ * the probe touches no bank the program is in, and the strings need
+ * nothing of the VDI.  The FONT half of a translation, SYSTEM.FNT,
+ * still waits for the device it is loaded into (lang_font).
+ *
  * The one message it can print is a refusal, and _sys_exit says it on the
  * way out (src/crt_atari.s, _exit_msg) -- after DOS's own screen is back,
  * so the line is not cleared with the reopen of E:.
@@ -43,6 +54,7 @@
 #include "sys/cio.h"
 #include "sys/dos.h"
 #include "sys/config.h"
+#include "sys/bootinfo.h"
 #include "vdi/print.h"
 #include "sys/gemdos.h"
 #include "vbxe/vbxe.h"
@@ -68,12 +80,15 @@ static const char no_vbxe[] =
 
 TASK void main(void)
 {
-    WORD video;
+    WORD video, pointer;
 
     dos_ident();
     rapidus_speedup();
     irq_install();
     config_read();              /* before the screen: it says which one */
+    farmem_probe();             /* LANG.RSC goes in far memory ... */
+    lang_init();                /* ... and the boot screen is in its words */
+    boot_begin();               /* version, CPU, memory, DOS, the two files */
 
     /* WHICH SCREEN.  AUTO takes the VBXE when the machine has one, which
      * is the only case that needs no file.  VBXE asked for and not found
@@ -88,6 +103,12 @@ TASK void main(void)
         _exit_msg = (uint16_t)no_vbxe;
         _sys_exit();
     }
+    boot_video(video);
+    boot_clock();
+    pointer = config.mouse == CFG_MOUSE_AUTO ? GEM_POINTER : (WORD)config.mouse;
+    boot_pointer(pointer);
+    boot_printer();
+    boot_end();                 /* three seconds, or a key */
 
     if (video == CFG_VIDEO_VBXE) {
         vdev = &vdev_vbxe;
@@ -104,14 +125,11 @@ TASK void main(void)
 
     vdi_font_default();         /* the device's own face, into the device */
     vdi_init();
-    ptr_init(config.mouse == CFG_MOUSE_AUTO ? GEM_POINTER
-                                            : (WORD)config.mouse,
-             SCR_W / 2, SCR_H / 2);
+    ptr_init(pointer, SCR_W / 2, SCR_H / 2);
     /* The printer, which is a destination and a language and nothing
      * else until a program opens the workstation. */
     pr_kind = config.printer;
     pr_dest = config.printto;
-    farmem_probe();
     /* The processes, and the mark the context switch measures from.
      * ctx_init() MUST be called from here and not from inside
      * proc_init(): the mark it takes is its own caller's S, and no
@@ -131,7 +149,7 @@ TASK void main(void)
     mn_init();
     mn_start();     /* the registry: once, before any accessory */
     sh_init();                  /* far buffers: before any app_load */
-    lang_init();                /* LANG.RSC, or the English in the image */
+    lang_font();                /* SYSTEM.FNT, now there is a device for it */
     fs_start();
     sh_main();
 

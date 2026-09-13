@@ -179,6 +179,7 @@ void config_read(void)
 
     if (fd < 0)
         return;                 /* no file: every default stands */
+    config.found = 1;
 
     for (;;) {
         got = 0;

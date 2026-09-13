@@ -105,7 +105,7 @@ M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/
 # surface, its driver and its face come in on top of the runner's set.
 GEM_OBJS   = $(filter-out build/m3_vdi.o build/app_blob.o,$(M3_OBJS)) \
              build/dev_antic.o build/font6x6.o \
-             build/config.o build/gem.o
+             build/config.o build/bootinfo.o build/gem.o
 
 # A gem4xe application: its own C startup and bindings (src/app), linked
 # against nothing of gem4xe's, on the application's own linker rules.
@@ -324,7 +324,7 @@ build/dos.o: src/sys/dos.c src/sys/dos.h src/sys/cio.h
 # rebuilt when the seam moves.
 build/gem.o: src/gem.c src/vdi/vdi.h src/vdi/vdidev.h src/vdi/pointer.h \
              src/vdi/font.h src/vdi/print.h src/aes/aes.h src/sys/config.h \
-             src/vbxe/vbxe.h src/antic/antic.h
+             src/sys/bootinfo.h src/vbxe/vbxe.h src/antic/antic.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -332,6 +332,18 @@ build/gem.o: src/gem.c src/vdi/vdi.h src/vdi/vdidev.h src/vdi/pointer.h \
 build/config.o: src/sys/config.c src/sys/config.h src/sys/cio.h src/vdi/pointer.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
+
+# The boot screen: what was found, on E:, before the GEM screen comes up.
+# It says the version, which is the one place the C sees VERSION.
+build/version.h: VERSION
+	@mkdir -p build
+	printf '#define GEM4XE_VERSION "%s"\n' "$$(cat VERSION)" > $@
+build/bootinfo.o: src/sys/bootinfo.c src/sys/bootinfo.h src/sys/cio.h src/sys/irq.h \
+             src/sys/rapidus.h src/sys/farmem.h src/sys/dos.h src/sys/config.h \
+             src/sys/clock.h src/vbxe/vbxe.h src/vdi/pointer.h src/aes/aes.h \
+             build/lang_rsc.h build/version.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -I build -o $@ $<
 
 # GEMDOS for the applications: the ST's trap #1 on CIO, through the seam.
 build/gemdos.o: src/sys/gemdos.c src/sys/clock.h src/sys/gemdos.h src/sys/dos.h src/sys/cio.h src/sys/farmem.h src/sys/app.h
@@ -564,7 +576,11 @@ $(eval $(call g4a,m16_desk,$(G4A_LIB) build/app/m16_desk.o,$(APP_BSS),$(APP_BITS
 tools/deskicons.py: tools/iconconv.py
 	python3 tools/iconconv.py $(EMUTOS)/desk/icons.c $@
 
-build/desktop.rsc build/deskrsc.h: tools/deskrsc.py tools/rsc.py tools/aesref.py tools/deskicons.py
+# VERSION is a prerequisite because the About box says it: 0.1.1 shipped
+# with a resource built for 0.1, and the desktop gates found it a phase
+# later, when the model (which reads VERSION) had every tree two bytes
+# from where the stale file put it (docs/phase38.md).
+build/desktop.rsc build/deskrsc.h: tools/deskrsc.py tools/rsc.py tools/aesref.py tools/deskicons.py VERSION
 	@mkdir -p build
 	python3 tools/deskrsc.py build/desktop.rsc build/deskrsc.h
 
@@ -802,12 +818,15 @@ build/816.com: tools/mk816.py
 	@mkdir -p build
 	python3 tools/mk816.py $@
 
-# The DOS 2 floppy carries the SYSTEM and no applications, deliberately.
-# It has 87 sectors free, the calculator and the clock want 49 of them,
-# and tests/emu/product_boot.py holds a floor of 80 -- which exists so
-# that the smallest disk is still somewhere a person can put a program
-# of their own.  Filling that space with ours would be taking exactly
-# what the floor is there to keep.  The other two media have room.
+# The DOS 2 floppy carries the SYSTEM and the clock accessory, and no
+# applications: a DOS 2 disk has no directories, so \APPS\ cannot exist
+# on it, and the calculator and the clock live on the install disk and
+# the card (docs/shipping.md section 1).  The system got a third smaller
+# when its far image started travelling packed (tools/mkxex.py), which
+# is what gave this disk its DOS shell back, the documented GEM4XE.CFG
+# and the accessory, with a hundred-odd sectors left over --
+# tests/emu/product_boot.py holds a floor of 80, so that the smallest
+# disk is still somewhere a person can put a program of their own.
 # GEM4XE.CFG as it ships: every setting commented out, so that finding
 # the file is finding its documentation.  Translated to the Atari's EOL
 # ($9B) on the way to the disk -- src/sys/config.c reads CR, LF and EOL
@@ -819,18 +838,6 @@ build/gem4xe.cfg: dist/gem4xe.cfg
 	    open(sys.argv[2],'wb').write(open(sys.argv[1],'rb').read() \
 	        .replace(b'\r\n', b'\n').replace(b'\n', b'\x9b'))" $< $@
 
-# ...and the SHORT one the double-density DOS 2 floppy carries, because
-# that disk has about 2 KB free once GEM's 122 KB and the desktop are on
-# it and eight sectors of commentary is the wrong thing to spend it on.
-# It is the same file with the prose taken out and a pointer to where the
-# prose is, generated rather than written, so there is one source for
-# what the keys are.  The file's own opening line says this costs
-# nothing: "No file at all is the same as this one with everything
-# commented out, which is what it is."
-build/gem4xe-min.cfg: dist/gem4xe.cfg tools/mincfg.py
-	@mkdir -p build
-	python3 tools/mincfg.py $< $@
-
 # ...and the safe-mode one the ANTIC gate boots with, which is the same
 # file with the one line uncommented.
 build/safe.cfg: dist/gem4xe.cfg
@@ -840,26 +847,20 @@ build/safe.cfg: dist/gem4xe.cfg
 	        .replace(b'# VIDEO=AUTO', b'VIDEO=ANTIC') \
 	        .replace(b'\r\n', b'\n').replace(b'\n', b'\x9b'))" $< $@
 
-build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/gem4xe-min.cfg
+# The DOS's own DUP.SYS stays: it is what GEM returns to when it quits.
+# (It went, for a while, when the system outgrew the disk with the shell
+# on it -- docs/shipping.md section 2 -- and came back with the packed
+# far image.)  The accessory is found in the directory GEM was started
+# from, which on a DOS 2 disk is the only one there is.
+DOS2_FILES = --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
+	     --add build/lang.rsc LANG.RSC --add build/816.com 816.COM \
+	     --add build/clockacc.g4a CLOCK.ACC --add build/clock.rsc CLOCK.RSC
+build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/gem4xe.cfg $(ACCP_DEPS)
 	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
-# --remove DUP.SYS: the system outgrew the disk WITH the DOS's shell on
-# it (docs/shipping.md), and this floppy is a test vehicle -- a real
-# machine runs gem4xe off the APT/CF card.  What it costs is the return
-# to a DOS menu when GEM quits; test-boot measures what happens instead.
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
-	    --remove DUP.SYS \
-	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
-	    --add build/lang.rsc LANG.RSC --add build/816.com 816.COM \
-	    --add build/gem4xe-min.cfg GEM4XE.CFG
+	    $(DOS2_FILES) --add build/gem4xe.cfg GEM4XE.CFG
 
-# NO ACCESSORY ON THIS DISK, and it is not a choice: a double-density DOS
-# 2 floppy is 184 KB and GEM.COM is 122 KB of it, which leaves eleven
-# sectors after the desktop and its resource.  CLOCK.ACC wants twenty.
-# The accessory ships on the install disk and the CF card, which is where
-# docs/shipping.md sends anybody who wants to use the thing rather than
-# just see it boot.
-#
 # The product's SpartaDOS floppy is an INSTALL disk: the same \GEM\ and
 # \APPS\ layout the card has, so copying it onto an APT hard drive is a
 # directory copy and not a decision, and none of the file layer's
@@ -867,20 +868,13 @@ build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_
 # The same shipped disk with the safe-mode line uncommented: what a user
 # writes from the DOS prompt when the VBXE's output is not something
 # their monitor will show (tests/emu/m26_fallback.py).
-build/gem-antic.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/safe.cfg
+build/gem-antic.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/safe.cfg $(ACCP_DEPS)
 	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
-	    --remove DUP.SYS \
-	    --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
-	    --add build/lang.rsc LANG.RSC --add build/816.com 816.COM \
-	    --add build/safe.cfg GEM4XE.CFG
+	    $(DOS2_FILES) --add build/safe.cfg GEM4XE.CFG
 
-build/gem-sp.atr: build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg $(DESK_DEPS) $(APP_DEPS) $(ACCP_DEPS) tools/mkspdisk.py tools/atr.py
-	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
-	@rm -f $@
-	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) \
-	    --name "GEM>GEM.COM" --boot "CD >GEM|GEM" --mkdir GEM --mkdir APPS \
+SP_LAYOUT = --name "GEM>GEM.COM" --boot "CD >GEM|GEM" --mkdir GEM --mkdir APPS \
 	    --add build/desktop.g4a "GEM>DESKTOP.G4A" \
 	    --add build/desktop.rsc "GEM>DESKTOP.RSC" \
 	    --add build/lang.rsc "GEM>LANG.RSC" \
@@ -888,9 +882,22 @@ build/gem-sp.atr: build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg $(
 	    --add build/gem4xe.cfg "GEM>GEM4XE.CFG" \
 	    --add build/clockacc.g4a "GEM>CLOCK.ACC" \
 	    --add build/clock.rsc "GEM>CLOCK.RSC" \
-	    --add build/m11_app.g4a "APPS>M11.G4A" \
 	    --add build/calc.g4a "APPS>CALC.G4A" --add build/calc.rsc "APPS>CALC.RSC" \
 	    --add build/clock.g4a "APPS>CLOCK.G4A" --add build/clock.rsc "APPS>CLOCK.RSC"
+SP_DEPS   = build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg $(DESK_DEPS) $(APP_DEPS) $(ACCP_DEPS) tools/mkspdisk.py tools/atr.py
+
+build/gem-sp.atr: $(SP_DEPS)
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(SP_LAYOUT) \
+	    --add build/m11_app.g4a "APPS>M11.G4A"
+
+# The same floppy without the gate program, for the pictures: \APPS\ is
+# photographed, and M11.G4A is the tests' business, not the product's.
+build/gem-shots.atr: $(SP_DEPS)
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(SP_LAYOUT)
 
 # The CF card: an APT table and two SDFS partitions, with the system in
 # \GEM\ and the demonstration application in \APPS\ -- the install
@@ -1076,12 +1083,16 @@ dist: $(DIST_SYS) $(DIST_DISKS) build/gem4xe-sdk.tar.gz \
 # rather than the date.  It comes as a tarball and, for Windows, the same
 # tree as a zip; the DOS-less floppy travels on its own as well, under the
 # release's name, for whoever wants the disk and nothing else.  One
-# checksum file covers the three, for the release page.
+# checksum file covers the three, for the release page.  The first
+# line asks the desktop's resource what version its About box says,
+# because 0.1.1 went out saying 0.1 (phase38.md).
 VERSION := $(shell cat VERSION)
 RELEASE  = build/gem4xe-$(VERSION)
 
 release: $(DIST_SYS) build/gem-cf.img build/gem-sdx.atr build/gem4xe-sdk.tar.gz \
          tools/mkdist.py tools/dist/README.md tools/mksdk.py
+	@python3 -c 'import sys; sys.exit(b"version $(VERSION)\0" not in open("build/desktop.rsc","rb").read())' \
+	    || { echo "build/desktop.rsc does not say version $(VERSION) (phase38.md)"; exit 1; }
 	python3 tools/mkdist.py $(RELEASE) --public --tar $(RELEASE).tar.gz --zip $(RELEASE).zip
 	cp build/gem-sdx.atr $(RELEASE).atr
 	cd build && sha256sum gem4xe-$(VERSION).tar.gz gem4xe-$(VERSION).zip gem4xe-$(VERSION).atr > gem4xe-$(VERSION).sha256
@@ -1316,8 +1327,8 @@ movie: build/m3-boot.atr
 # into docs/shots/ as 640x480 PNGs for the README and the release page.
 # Coordinates are read out of the running desktop's own object trees, so
 # it is a tour, not a script of pixel positions; it is not a gate.
-shots: build/gem-sp.atr build/desktop.sym build/calc.sym
-	python3 tests/emu/shots.py
+shots: build/gem-shots.atr build/desktop.sym build/calc.sym
+	python3 tests/emu/shots.py --disk build/gem-shots.atr
 
 # GEMBench's tests, shaped for this machine: the dialog, text, graphics,
 # window, divide, float, RAM, ROM and blit rows timed to a VCOUNT tick

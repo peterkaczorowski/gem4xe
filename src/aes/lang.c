@@ -1,7 +1,11 @@
 /* lang.c -- LANG.RSC: everything the system says, kept in far memory --
  * and, since a translation is no use in a character set that cannot
- * spell it, the SYSTEM.FNT beside it (src/vdi/font.c).  lang_init()
- * reads both, because they are the two files a translation ships.
+ * spell it, the SYSTEM.FNT beside it (src/vdi/font.c).  They are the
+ * two files a translation ships, and two calls read them: lang_init()
+ * the strings, which needs only far memory and so can run before there
+ * is a GEM screen -- the boot screen (src/sys/bootinfo.c) is written in
+ * them -- and lang_font() the face, which goes into the device and so
+ * has to wait for one.
  *
  * The rule the project set itself is that no string a person reads is in
  * the C (docs/shipping.md, section 5).  The desktop's went into its own
@@ -96,18 +100,24 @@ static WORD lang_read(int16_t fd, uint32_t dst, const uint8_t *hdr, uint16_t siz
  * beside it and the system takes it if it is there (src/vdi/font.c).  The
  * VDI is told where to look either way, so vst_load_fonts can go back for
  * it later. */
-static void lang_font(void)
+void lang_font(void)
 {
+    static WORD done;           /* once a run, like the strings */
     char cio[CIO_NAME_MAX + 1];
 
+    if (done)
+        return;
+    done = 1;
     sh_cioname(FONT_FILE, cio);
     vdi_font_where(cio);
     vdi_font_load();
 }
 
+static WORD lang_file;          /* 1: LANG.RSC is what is in use */
+
 void lang_init(void)
 {
-    static WORD done;           /* the files are read once a run */
+    static WORD done;           /* the file is read once a run */
     uint8_t hdr[RSH_SIZE];
     char cio[CIO_NAME_MAX + 1];
     uint16_t size, got;
@@ -120,13 +130,10 @@ void lang_init(void)
     lang_builtin();
     sh_cioname(LANG_FILE, cio);
     fd = cio_open(cio, CIO_A_READ, 0);
-    if (fd < 0) {
-        lang_font();
+    if (fd < 0)
         return;
-    }
     if (cio_read(fd, hdr, RSH_SIZE, &got) != CIO_OK || got != RSH_SIZE) {
         cio_close(fd);
-        lang_font();
         return;
     }
     size = be16(&hdr[RSH_RSSIZE]);
@@ -136,24 +143,27 @@ void lang_init(void)
     if ((be16(&hdr[RSH_VRSN]) & NEW_FORMAT_RSC) || size < RSH_SIZE
         || (WORD)be16(&hdr[RSH_NSTRING]) < LANG_NSTRING) {
         cio_close(fd);
-        lang_font();
         return;
     }
     mem = far_alloc(size);
     if (!mem) {
         cio_close(fd);
-        lang_font();
         return;
     }
     if (lang_read(fd, mem, hdr, size)) {
         lang_base = mem;
         lang_frstr = be16(&hdr[RSH_FRSTR]);
         lang_n = (WORD)be16(&hdr[RSH_NSTRING]);
+        lang_file = 1;
     }
     cio_close(fd);
     /* A read that failed leaves the far memory taken and the built-in in
      * use, which is the safe way round: far_alloc never gives it back. */
-    lang_font();
+}
+
+WORD lang_loaded(void)
+{
+    return lang_file;
 }
 
 const char *lang_str(WORD n)

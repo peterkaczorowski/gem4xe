@@ -36,8 +36,10 @@ DOS itself does the copying, through `INITAD`:
     seg  $02E2-$02E3   -> _fl_copy
     seg  $02E0-$02E1   -> _atari_entry    run vector
 
-`tools/mkxex.py` builds those; `src/farload.s` is the copier. Four details are
-load-bearing:
+`tools/mkxex.py` builds those; `src/farload.s` is the copier. (Since phase
+38 the payload is LZ-packed and the copier is an unpacker -- the chunk
+page count became a 16-bit output count, and nothing else here changed; see
+`phase38.md`.) Four details are load-bearing:
 
 - **The header and its payload are one segment.** Putting the destination and
   length immediately in front of the bytes is what lets a whole chunk — where

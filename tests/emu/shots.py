@@ -7,11 +7,13 @@ for people, and a person looks at them.  What it shares with the gates
 is the machine and the way it is driven: the tester's install disk
 boots into the desktop with nothing typed, exactly as tests/emu/
 product_boot.py has it, and the pointer is then walked and clicked by
-the same steps test-m23 and test-m28 use.  Where things are on the
-screen is read out of the TARGET -- the desktop's own screen tree, the
-AES's menu tree and window frame, a dialog's tree once it is up -- so
-the tour does not carry coordinates that go stale the day a resource
-is edited.
+the same steps test-m23 and test-m28 use.  The disk is that floppy
+without the gate program on it (build/gem-shots.atr): \\APPS\\ is
+photographed, and M11.G4A is the tests' business.  Where things are on
+the screen is read out of the TARGET -- the desktop's own screen tree,
+the AES's menu tree and window frame, a dialog's tree once it is up --
+so the tour does not carry coordinates that go stale the day a
+resource is edited.
 
 The product has an ST mouse on the joystick port and there is no verb
 in the bridge to move one, so the pointer's kind is set to NONE after
@@ -21,6 +23,7 @@ the one poke this makes into the running product.
 
 What is photographed, in order:
 
+  boot        the boot screen, the hardware found, while it is held
   desk        the desk as it comes up
   window      a window on A:\\*.*, at its full size
   menu-desk   the Desk drop-down, with the accessory in it
@@ -36,7 +39,7 @@ Each picture is the overlay alone (the 16-pixel borders cropped) with
 its rows doubled: 640x240 is what the VBXE puts out and 640x480 is what
 a 4:3 monitor makes of it.
 
-  python3 tests/emu/shots.py [-o docs/shots] [--disk build/gem-sp.atr]
+  python3 tests/emu/shots.py [-o docs/shots] [--disk build/gem-shots.atr]
 """
 import argparse
 import os
@@ -60,13 +63,13 @@ from m7_form import poke16, apply_step, F, M, B, CLICK, DCLICK   # noqa: E402
 from m14_sparta import screen               # noqa: E402
 from m17_desktop import header, DESKTOP, DESK_SYM   # noqa: E402
 from demo_aes import path                   # noqa: E402
-from product_boot import REFUSAL, STEP      # noqa: E402
+from product_boot import REFUSAL, STEP, BOOT_WAIT, boot_screen   # noqa: E402
 
 BUILD = os.path.join(ROOT, "build")
 SYMS = os.path.join(BUILD, "gem.sym")
 CALC = os.path.join(BUILD, "calc.g4a")
 CALC_SYM = os.path.join(BUILD, "calc.sym")
-DISK = os.path.join(BUILD, "gem-sp.atr")
+DISK = os.path.join(BUILD, "gem-shots.atr")
 OUT = os.path.join(ROOT, "docs", "shots")
 
 NIL = -1
@@ -287,9 +290,10 @@ def publish(raw, fn):
     im.save(fn, optimize=True)
 
 
-def boot(b, syms):
+def boot(b, syms, out):
     """The disk to the desk, as product_boot.py waits for it: the loader
-    switches the CPU, the DOS starts GEM again, the desktop settles."""
+    switches the CPU, the DOS starts GEM again, the boot screen is held
+    and photographed, the desktop settles."""
     b.ok("COLD_RESET")
     for t in range(0, 20000, STEP):
         b.frames(STEP)
@@ -298,6 +302,19 @@ def boot(b, syms):
     else:
         raise SystemExit("the loader never switched the CPU")
     print(f"  the CPU switched {t + STEP} frames in")
+    # the boot screen is on E:, complete once its hint is up, and held
+    # for three seconds: the first picture, before the desk's numbering
+    for t in range(0, BOOT_WAIT, STEP):
+        b.frames(STEP)
+        if boot_screen(b):
+            break
+    else:
+        raise SystemExit("the boot screen never showed its hint")
+    raw = os.path.join(BUILD, "shots", "tour-boot.png")
+    b.screenshot(raw)
+    fn = os.path.join(out, "00-boot.png")
+    publish(raw, fn)
+    print(f"  {fn}")
     calls = syms["app_calls"]
     n, still = b.peek16(calls), 0
     for t in range(0, 20000, 250):
@@ -321,10 +338,14 @@ def main(argv):
     args = ap.parse_args(argv[1:])
     syms = symfile.load(SYMS)
 
-    emu = launch(tag="shots", memsize="1088K", extra_args=["--disk", args.disk])
+    # Absolute: the emulator does not run in this directory, and a
+    # relative path fails inside it as "Cannot open file" and a boot
+    # that never switches the CPU.
+    disk = os.path.abspath(args.disk)
+    emu = launch(tag="shots", memsize="1088K", extra_args=["--disk", disk])
     b = emu.bridge
     try:
-        boot(b, syms)
+        boot(b, syms, args.out)
         # the pointer is ours now (src/vdi/pointer.c: PTR_NONE polls nothing)
         poke16(b, syms["ptr_state"] + 6, PTR_NONE)
         t = Tour(b, syms, args.out)

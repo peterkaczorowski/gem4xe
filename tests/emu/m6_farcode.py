@@ -62,8 +62,8 @@ def probe_addresses(far, chunk):
     step = max(1, total // SPREAD)
     for base, data in far:
         size = len(data)
-        for dst, piece in mkxex.far_chunks(base, data, chunk):
-            for edge in (dst, dst + len(piece) - 1):
+        for dst, plain, _ in mkxex.far_chunks(base, data, chunk):
+            for edge in (dst, dst + len(plain) - 1):
                 for d in range(-SEAM, SEAM + 1):
                     if base <= edge + d < base + size:
                         want.add(edge + d)
@@ -157,9 +157,11 @@ def check_image(name, why):
     top_bank = (end - 1) >> 16
     banks = sorted({a >> 16 for a, _ in far} | {top_bank})
     for base, data in far:
-        n = -(-len(data) // chunk)
+        chunks = list(mkxex.far_chunks(base, data, chunk))
+        packed = sum(len(p) for _, _, p in chunks)
         print(f"far image  : ${base:06X}-${base + len(data) - 1:06X}  "
-              f"({len(data)} bytes, {n} chunks of {chunk})")
+              f"({len(data)} bytes packed to {packed}, {len(chunks)} chunks "
+              f"of up to {chunk})")
     print(f"             banks {', '.join(f'${b:02X}' for b in banks)}; "
           f"{len(probes)} bytes to probe")
 

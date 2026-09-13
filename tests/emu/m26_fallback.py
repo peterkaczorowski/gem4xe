@@ -201,7 +201,11 @@ def one(tag, disk, has_vbxe, want_cfg, want_dev, geom, syms, keep, check):
         # model has to hand the desktop's Malloc a real address and put
         # its tree where the loader put the target's.
         if want_dev == "antic":
-            calls = syms["gem_calls"]
+            # The desktop's own calls, not every process's: gem_calls
+            # counts the accessory's too, and CLOCK.ACC is back on the
+            # DOS 2 floppy (phase 38) -- seven calls past the first wait,
+            # none of them the desktop's (src/sys/abi.c, gem_entry).
+            calls = syms["app_calls"]
             kind = b.peek(syms["dos"])
             drvmap = 0x03 if kind != DOS_2 else (b.peek(DRVBYT) or 1)
             mark = b.peek16(syms["app_pool_lo"])

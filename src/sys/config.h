@@ -65,6 +65,8 @@ typedef struct {
     int16_t mouse;
     int16_t printer;            /* CFG_PRINT_* */
     char    printto[CFG_PRINTTO_MAX];   /* where it goes; "P:" by default */
+    int16_t found;              /* 1: the file was there and was read --
+                                 * the boot screen says which it was */
 } CONFIG;
 
 /* What the file said, or the defaults.  Readable after config_read(). */

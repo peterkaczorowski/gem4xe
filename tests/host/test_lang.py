@@ -72,11 +72,19 @@ class Resource(unittest.TestCase):
         got = bytes(int(t, 16) for t in body.replace("\n", "").split(",") if t.strip())
         self.assertEqual(got, self.data)
 
-    def test_every_text_is_a_form_alert_string(self):
-        """[icon][text][buttons], which is the grammar fm_alert parses --
-        a translation that loses a bracket loses the alert."""
+    def test_every_text_is_an_alert_or_a_label(self):
+        """An alert is [icon][text][buttons], which is the grammar
+        fm_alert parses -- a translation that loses a bracket loses the
+        alert.  The boot screen's labels (BOOT_*) are plain text, cut at
+        BOOT_LABEL columns, so one wider than that is a label that would
+        never be read whole."""
         for name, s in langrsc.STRINGS:
-            self.assertRegex(s, r"^\[[0-3]\]\[.+\]\[.+\]$", name)
+            if name.startswith("BOOT_"):
+                self.assertNotIn("[", s, name)
+                if name in langrsc.BOOT_LABELS:
+                    self.assertLessEqual(len(s), langrsc.BOOT_LABEL, name)
+            else:
+                self.assertRegex(s, r"^\[[0-3]\]\[.+\]\[.+\]$", name)
 
     def test_the_error_number_has_somewhere_to_go(self):
         """fm_error writes the number over the two characters after the
@@ -86,18 +94,26 @@ class Resource(unittest.TestCase):
         self.assertGreaterEqual(len(s) - s.index("#"), 3)
 
 
+def german(name, text):
+    """The English with a longer phrase in front of it, and ERRTOS with
+    its number moved to the end -- a translation is a third longer than
+    English as a rule, and it puts the words where it likes.  A boot
+    label is cut to its column; a boot value just grows."""
+    if name in langrsc.BOOT_LABELS:
+        return ("Prozessor" if name == "BOOT_CPU" else text + "e")[:langrsc.BOOT_LABEL]
+    if name.startswith("BOOT_"):
+        return text + " (deutsch)"
+    return ("[1][Diese Anwendung meldet einen Fehler|"
+            + ("in der Ausfuehrung|Fehler Nummer #00" if name == "ERRTOS"
+               else text[text.index("][") + 2:text.rindex("][")])
+            + "][ Abbrechen ]")
+
+
 class Translated(unittest.TestCase):
     """A translation is a different file with the same indices: longer
     strings, the phrases moved, the grammar kept."""
 
-    # The English with a longer phrase in front of it, and ERRTOS with
-    # its number moved to the end -- a translation is a third longer
-    # than English as a rule, and it puts the words where it likes.
-    STRINGS = [(name, "[1][Diese Anwendung meldet einen Fehler|"
-                      + ("in der Ausfuehrung|Fehler Nummer #00" if name == "ERRTOS"
-                         else text[text.index("][") + 2:text.rindex("][")])
-                      + "][ Abbrechen ]")
-               for name, text in langrsc.STRINGS]
+    STRINGS = [(name, german(name, text)) for name, text in langrsc.STRINGS]
 
     def setUp(self):
         self.data = langrsc.build(self.STRINGS).file()
@@ -117,7 +133,8 @@ class Translated(unittest.TestCase):
         moves everything else: form_alert's grammar, and one '#' with
         room for two digits after it in ERRTOS."""
         for name, s in self.STRINGS:
-            self.assertRegex(s, r"^\[[0-3]\]\[.+\]\[.+\]$", name)
+            if not name.startswith("BOOT_"):
+                self.assertRegex(s, r"^\[[0-3]\]\[.+\]\[.+\]$", name)
         s = dict(self.STRINGS)["ERRTOS"]
         self.assertEqual(s.count("#"), 1)
         self.assertGreaterEqual(len(s) - s.index("#"), 3)

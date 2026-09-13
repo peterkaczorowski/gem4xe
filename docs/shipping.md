@@ -42,8 +42,9 @@ none for the DOS's own shell either, which is worse (section 2).
 shell went because the system wanted seven sectors more than the disk had
 left beside it, and because a floppy is a test vehicle now rather than how
 anybody runs this: a real machine runs gem4xe off the APT/CF card, which
-has 96 KB spare.  `tests/emu/product_boot.py` asserts its absence, so
-putting it back is a deliberate act and not an accident.
+has 96 KB spare.  `tests/emu/product_boot.py` asserted its absence, so
+that putting it back would be a deliberate act and not an accident -- and
+it was one, a phase later; see below.
 
 That was 42 KB when this section was written, and it is 6 now.  One
 binary that carries both display drivers took 10 KB of it and the
@@ -53,6 +54,17 @@ nothing else.**  What 6 KB is still enough for is the thing a user
 writes on the first day -- `DESKTOP.INF`, from Options -> Save desktop
 -- and that is what `tests/emu/product_boot.py` now checks for instead
 of room for a program.
+
+**Since phase 38 the far image travels packed** (`phase38.md`), and
+the arithmetic above is a record rather than the state of the disk:
+`GEM.COM` is 90,468 bytes and 358 double-density sectors, not 122 KB
+and 486, so the DOS 2 floppy has **`DUP.SYS` back, the full
+`GEM4XE.CFG`, `CLOCK.ACC` and its resource, and 122 sectors (30 KB)
+free** with all of it aboard.  `tests/emu/product_boot.py` now requires
+the shell -- it is what GEM returns to -- and a floor of 80 free
+sectors, and prints the figure so the next phase that eats into it sees
+it go.  The paragraphs that follow were true when written and are what
+the packing was measured against.
 
 That is the honest shape of the thing rather than a regression to be
 fixed: a 640x240 GUI with a resident AES belongs on a volume measured in
@@ -136,8 +148,9 @@ directory stays eight entries to a sector and uses half of one.
 `test-boot` boots the result.
 
 The disk is built by sweeping a fixture down to its DOS (`mkdisk.py
---sweep --remove DUP.SYS`) and writing GEM onto it as `AUTORUN.SYS`, so
-what ships is the DOS's boot sectors, `DOS.SYS` and ours.  The DOS is the
+--sweep`) and writing GEM onto it as `AUTORUN.SYS`, so what ships is
+the DOS's boot sectors, `DOS.SYS`, `DUP.SYS` (removed in phase 37 for
+want of seven sectors, back since the image is packed) and ours.  The DOS is the
 German Atari **"DISK OPERATING SYSTEM II"** of 1990 (H. Barth and
 F. Bruchhäuser), which does double density and does run `AUTORUN.SYS`.
 
@@ -317,21 +330,20 @@ in its OWN directory, the one `GEM.COM` was started from, and never in
 allocators are bump allocators, and anything taken after a program has
 loaded is freed underneath it when that program exits.
 
-The DOS 2 floppy's `GEM4XE.CFG` is the **short form** (`tools/mincfg.py`):
-the same keys and values, generated from the same file, with the prose
-taken out and a pointer to where the prose is.  The full one is 1,922
-bytes of which nearly all is documentation -- every setting in it is
-commented out -- and that disk has about 3 KB free.  The file's own
-opening says the trade costs nothing: *"No file at all is the same as
-this one with everything commented out, which is what it is."*
+Every product disk carries the same `GEM4XE.CFG`, the documented one:
+1,922 bytes of which nearly all is prose, since every setting in it is
+commented out.  (For two phases the DOS 2 floppy had a generated short
+form of it instead, the keys without the prose, because the disk had
+3 KB free; the packed image gave the room back and the generator went.)
 
 `CLOCK.ACC` is the first one shipped.  It is the same `src/apps/clock.c`
 as `\APPS\CLOCK.G4A`, with a different `main`: the program opens its
 panel once and exits, the accessory registers "Clock" in the Desk menu
-and waits to be asked.  **It is not on the DOS 2 floppy**, and that is
-arithmetic rather than a decision -- a double-density disk is 184 KB,
-`GEM.COM` is 122 KB of it, and after the desktop and its resource there
-are eleven sectors left where the accessory wants twenty.
+and waits to be asked.  It is on every product disk, the DOS 2 floppy
+included -- which for a while it was not, by arithmetic rather than
+decision: `GEM.COM` was 122 KB of a 184 KB disk, and after the desktop
+and its resource there were eleven sectors left where the accessory
+wants twenty.  The packed image (`phase38.md`) is what changed that.
 
 `build/gem-cf.img` is that layout, less the two files that do not exist
 yet (section 5's `LANG.RSC` and a font).  The desktop opens a folder in
@@ -549,8 +561,12 @@ are cheapest now and dear later:
 place it lives**: `tools/deskrsc.py` reads it into the About dialog, so
 `tools/deskref.py`'s model of that dialog reads the same string and the
 three gates that compare it pixel for pixel cannot disagree with the
-product.  `make dist` writes both numbers into the distribution's own
-`VERSION`:
+product -- provided the resource was remade.  It was not, once: the
+Makefile's rule for `build/desktop.rsc` did not list `VERSION`, so
+0.1.1 went out with an About box that says 0.1 (`phase38.md`).  The
+rule lists it now, and `make release` refuses a resource whose About
+box does not say what `VERSION` says.  `make dist` writes both numbers
+into the distribution's own `VERSION`:
 
     0.1 (2026-09-11-bd01a07)
 

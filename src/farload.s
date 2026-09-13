@@ -12,23 +12,42 @@
 ;;; from $01 upwards, inside the accelerator's first megabyte (src/gem4xe.scm)
 ;;; -- and the far image travels in the .xex as a series of chunks aimed at a
 ;;; staging buffer in bank $00.  DOS calls through INITAD ($02E2) after
-;;; loading a segment, and this is what it calls: it copies one chunk from
+;;; loading a segment, and this is what it calls: it unpacks one chunk from
 ;;; the buffer to its real home and returns.  By the time DOS reaches the run
 ;;; vector the far image is assembled.
 ;;;
-;;; The copier does not know or care which banks the linker chose: every
-;;; chunk carries its own 24-bit destination.  What it does keep is _fl_top,
-;;; the highest address it has written past, so that the far heap can start
-;;; above whatever actually arrived (src/sys/farmem.c).
+;;; THE CHUNKS ARE PACKED -- an LZ77, tools/mkxex.py has the format -- because
+;;; the far image is two thirds of a double-density floppy and most of a
+;;; minute of a 1050's reading, and packing makes it a third smaller.  What
+;;; this costs is the unpacking, and that is cheap: a token is a few literal
+;;; bytes and then a copy from output already written, which is in the banks
+;;; above and is read back with the same long pointers that write it.  Both
+;;; copies go a page-run at a time -- as far as the nearer of the two
+;;; pointers is from the end of its page -- so the inner loop is Y-indexed
+;;; and the 24-bit arithmetic happens per run, not per byte.
 ;;;
-;;; tools/mkxex.py builds those chunks and is the other half of this file; the
+;;; The loader does not know or care which banks the linker chose: every
+;;; chunk carries its own 24-bit destination and how many bytes it unpacks
+;;; to.  What it does keep is _fl_top, the highest address it has written
+;;; past, so that the far heap can start above whatever actually arrived
+;;; (src/sys/farmem.c).
+;;;
+;;; tools/mkxex.py packs those chunks and is the other half of this file; the
 ;;; two share the layout through the linker symbols _fl_hdr / _fl_buf / _fl_end
 ;;; rather than a repeated constant.
 ;;;
-;;; THE STAGING BUFFER LIVES AT $8000, IN THE MEMAC A WINDOW.  That region is
-;;; already reserved -- no code or data may be placed there, because the driver
-;;; maps VBXE VRAM over it at run time -- and it is plain motherboard RAM until
-;;; vbxe_init() opens the window.  So staging there costs nothing at all.
+;;; THE STAGING BUFFER LIVES AT $8000, IN THE MEMAC A WINDOW, AND SO DOES THE
+;;; UNPACKER.  That region is already reserved -- no code or data may be
+;;; placed there, because the driver maps VBXE VRAM over it at run time --
+;;; and it is plain motherboard RAM until vbxe_init() opens the window.  So
+;;; staging there costs nothing at all, and neither does the code that runs
+;;; only while DOS is loading: _fl_copy and the unpacker are in `stagecode`,
+;;; which src/gem4xe.scm places above the buffer, and they are gone with the
+;;; buffer once the window opens.  What must outlive the load -- _fl_ok,
+;;; which the entry point reads, and _fl_top, which the far heap is derived
+;;; from -- is in `code`, in bank $00 proper, along with the checks and the
+;;; messages, which are plain 6502 code and are wanted on a machine that
+;;; may not have a MEMAC window at all.
 ;;;
 ;;; WHAT IT REFUSES TO DO
 ;;;
@@ -49,10 +68,12 @@
               .public _fl_hdr, _fl_buf, _fl_end
               .public _fl_running_bank
 
-FL_CHUNK:     .equ    0x1b00          ; staging payload: 27 whole pages -- with
-                                      ; the 20 bytes around it, what fits the
-                                      ; Stage memory (src/gem4xe.scm), which
-                                      ; stops under SpartaDOS X's screen
+FL_CHUNK:     .equ    0x1a00          ; staging payload: 26 pages -- with the
+                                      ; header and the unpacker after it,
+                                      ; what fits the Stage memories
+                                      ; (src/gem4xe.scm), which stop under
+                                      ; SpartaDOS X's screen
+FL_HDR:       .equ    5               ; the chunk header, see _fl_hdr
 
 ;;; CIO, for the two failure messages.  DOS is still resident and IOCB #0 is
 ;;; open on E: at this point, which is the whole reason the diagnostics can be
@@ -88,29 +109,33 @@ COLDST:       .equ    0x0244          ; the OS: non-zero at RESET means cold
 ;;; --- staging area -----------------------------------------------------------
 ;;; Placed by src/gem4xe.scm at $8000.  The header and the payload are ADJACENT
 ;;; ON PURPOSE: that lets mkxex.py describe a whole chunk -- where it goes, how
-;;; long it is, and the bytes themselves -- in one .xex segment.
+;;; much it unpacks to, and the packed bytes themselves -- in one .xex segment.
 ;;;
 ;;; _fl_end marks the end of the payload; mkxex.py sizes its chunks from it.
 
               .section farstage, bss
 _fl_hdr:      .space  3               ; +0  destination, 24-bit little-endian
-_fl_pages:    .space  1               ; +3  length in 256-byte pages, 0 = idle
-_fl_buf:      .space  FL_CHUNK        ; +4  the payload
+_fl_count:    .space  2               ; +3  bytes the chunk unpacks to, 0 = idle
+_fl_buf:      .space  FL_CHUNK        ; +5  the packed payload
 _fl_end:
 
-;;; The copier's pointers live in the OS's zero page, in the floating-point
-;;; package's FR0/FRE ($D4-$DF), which nothing touches during a binary
+;;; The unpacker's pointers live in the OS's zero page, in the floating-point
+;;; package's FR0/FRE/FR1 ($D4-$E5), which nothing touches during a binary
 ;;; load.  NOT in a direct page of its own: INITAD is called in emulation
 ;;; mode with the OS's interrupts running, and the OS's VBI and IRQ
 ;;; handlers address zero page through D -- a `tcd` here would send
 ;;; RTCLOK's increments and the keyboard's bookkeeping into whatever the
-;;; copier pointed D at (found the hard way in Calypsi-65816-Atari, whose
-;;; copier this one shares: the VBI wrote RTCLOK over the copier's own
+;;; loader pointed D at (found the hard way in Calypsi-65816-Atari, whose
+;;; copier this one grew out of: the VBI wrote RTCLOK over the copier's own
 ;;; first instruction).  With D left at $0000, the OS sees the machine it
 ;;; expects and nothing has to be masked.
-DP_SRC:       .equ    0xd4            ; 24-bit source pointer
-DP_DST:       .equ    0xd8            ; 24-bit destination pointer
-DP_CNT:       .equ    0xdc            ; pages remaining
+DP_SRC:       .equ    0xd4            ; 24-bit: the next packed byte; +2 is 0
+DP_DST:       .equ    0xd8            ; 24-bit: where the next output byte goes
+DP_MAT:       .equ    0xdc            ; 24-bit: where the current run is read
+DP_CNT:       .equ    0xe0            ; 16-bit: output bytes still to write
+DP_LEN:       .equ    0xe2            ; 16-bit: bytes still to copy in this run
+DP_RUN:       .equ    0xe4            ; 8-bit:  the page-run being copied
+DP_TOK:       .equ    0xe5            ; 8-bit:  the token
 
               .section code, root
 
@@ -132,7 +157,12 @@ _fl_top:      .byte   0, 0, 0
 
 ;;; ---------------------------------------------------------------------------
 ;;; _fl_copy -- DOS calls this through INITAD after each chunk segment.
+;;;
+;;; In `stagecode`, above the staging buffer: load-time only, like the buffer
+;;; (see the top of the file).  The one thing here that runs before the CPU
+;;; is known is the first three instructions, and they are 6502 ones.
 ;;; ---------------------------------------------------------------------------
+              .section stagecode, root
 _fl_copy:
               lda     fl_checked
               bne     fl_ready
@@ -140,7 +170,8 @@ _fl_copy:
 fl_ready:
               lda     _fl_ok
               beq     fl_out          ; wrong machine -- never write far RAM
-              lda     _fl_pages
+              lda     _fl_count
+              ora     _fl_count+1
               bne     fl_go           ; something is staged
 fl_out:       rts                     ; nothing staged (the priming call)
 fl_go:
@@ -156,43 +187,94 @@ fl_go:
               sta     dp:DP_DST+1
               lda     long:_fl_hdr+2
               sta     dp:DP_DST+2
-              lda     long:_fl_pages
+              lda     long:_fl_count
               sta     dp:DP_CNT
+              lda     long:_fl_count+1
+              sta     dp:DP_CNT+1
 
 ;;; Is there RAM where this chunk is going?  Probe the destination itself --
-;;; the copy is about to overwrite it, so the test costs nothing and asks
-;;; exactly the right question, rather than trusting a documented memory
-;;; map.  Every chunk is probed because the image may spill into a further
-;;; bank, and the first bank having RAM says nothing about the next.
+;;; the unpacking is about to overwrite it, so the test costs nothing and
+;;; asks exactly the right question, rather than trusting a documented
+;;; memory map.  Every chunk is probed because the image may spill into a
+;;; further bank, and the first bank having RAM says nothing about the next.
               ldy     #0
               lda     #0xa5
               sta     [dp:DP_DST],y
               cmp     [dp:DP_DST],y
-              bne     fl_noram
+              bne     fl_noram_far
               lda     #0x5a
               sta     [dp:DP_DST],y
               cmp     [dp:DP_DST],y
-              bne     fl_noram
+              beq     fl_token
+fl_noram_far: jmp     fl_noram        ; in `code`: out of a branch's reach
 
-;;; Both pointers are dereferenced long, so neither the source nor the
-;;; destination depends on what DOS left in the data bank register.
-fl_page:      ldy     #0
-fl_byte:      lda     [dp:DP_SRC],y
-              sta     [dp:DP_DST],y
-              iny
-              bne     fl_byte
-              inc     dp:DP_SRC+1     ; += 256; the buffer never crosses a bank
-              inc     dp:DP_DST+1
-              bne     fl_nowrap
-              inc     dp:DP_DST+2
-fl_nowrap:    dec     dp:DP_CNT
-              bne     fl_page
+;;; One token per turn of this loop: its literals, then -- unless the chunk's
+;;; output count ran out with the literals, which is how a chunk ends -- a
+;;; copy from earlier output.  Both copies are made by fl_run, out of
+;;; DP_MAT: the literals by pointing DP_MAT at the packed bytes and taking
+;;; it back afterwards as the new DP_SRC, so that there is one copy loop.
+fl_token:
+              lda     dp:DP_CNT
+              ora     dp:DP_CNT+1
+              beq     fl_finish
+              jsr     fl_next
+              sta     dp:DP_TOK
+              lsr     a
+              lsr     a
+              lsr     a
+              lsr     a
+              jsr     fl_length       ; DP_LEN = the literal count
+              lda     dp:DP_SRC
+              sta     dp:DP_MAT
+              lda     dp:DP_SRC+1
+              sta     dp:DP_MAT+1
+              lda     #0
+              sta     dp:DP_MAT+2
+              jsr     fl_run
+              lda     dp:DP_MAT
+              sta     dp:DP_SRC
+              lda     dp:DP_MAT+1
+              sta     dp:DP_SRC+1
+              lda     dp:DP_CNT
+              ora     dp:DP_CNT+1
+              beq     fl_finish
+;;; The match: its offset is where it is read from, counted back from where
+;;; it is written to, and the two may overlap -- a run of one byte is a
+;;; match at offset 1 -- which fl_run's forward, byte-by-byte copy gets
+;;; right by construction.  An offset of zero is no match at all: the
+;;; token was only its literals, and the next token follows.
+              jsr     fl_next
+              sta     dp:DP_MAT
+              jsr     fl_next
+              sta     dp:DP_MAT+1
+              ora     dp:DP_MAT
+              beq     fl_token
+              sec
+              lda     dp:DP_DST
+              sbc     dp:DP_MAT
+              sta     dp:DP_MAT
+              lda     dp:DP_DST+1
+              sbc     dp:DP_MAT+1
+              sta     dp:DP_MAT+1
+              lda     dp:DP_DST+2
+              sbc     #0
+              sta     dp:DP_MAT+2
+              lda     dp:DP_TOK
+              and     #0x0f
+              jsr     fl_length
+              clc                     ; a match is four bytes at least
+              lda     dp:DP_LEN
+              adc     #4
+              sta     dp:DP_LEN
+              bcc     fl_match
+              inc     dp:DP_LEN+1
+fl_match:     jsr     fl_run
+              bra     fl_token
 
+fl_finish:
 ;;; DP_DST is now one past the chunk; raise _fl_top to it if it is higher.
-;;; Chunks arrive in address order today, but the tail of a segment is slid
-;;; BACKWARDS to a page boundary (tools/mkxex.py), so "the last chunk" and
-;;; "the highest chunk" are not the same thing, and a maximum is what is
-;;; wanted.
+;;; Chunks arrive in address order today, but a maximum is what is meant,
+;;; and it costs nothing to be right about it.
               sec
               lda     dp:DP_DST
               sbc     long:_fl_top
@@ -211,9 +293,110 @@ fl_nottop:
 ;;; Consume the chunk.  DOS may call INITAD again after a segment that carries
 ;;; no chunk -- the run vector, for one -- and this is what makes that a no-op.
               lda     #0
-              sta     _fl_pages
-fl_done:      rts
+              sta     _fl_count
+              sta     _fl_count+1
+              rts
 
+;;; fl_next -- the next packed byte, in A.
+fl_next:      ldy     #0
+              lda     [dp:DP_SRC],y
+              inc     dp:DP_SRC
+              bne     fl_next_done
+              inc     dp:DP_SRC+1     ; the buffer never crosses a bank
+fl_next_done: rts
+
+;;; fl_length -- DP_LEN from a token's nibble in A: the nibble itself, or if
+;;; it is 15, that plus every byte that follows up to and including the first
+;;; that is not 255 (tools/mkxex.py).
+fl_length:    sta     dp:DP_LEN
+              lda     #0
+              sta     dp:DP_LEN+1
+              lda     dp:DP_LEN
+              cmp     #15
+              bne     fl_length_done
+fl_length_more:
+              jsr     fl_next
+              pha
+              clc
+              adc     dp:DP_LEN
+              sta     dp:DP_LEN
+              bcc     fl_length_same
+              inc     dp:DP_LEN+1
+fl_length_same:
+              pla
+              cmp     #255
+              beq     fl_length_more
+fl_length_done:
+              rts
+
+;;; fl_run -- copy DP_LEN bytes from DP_MAT to DP_DST, both moving on, and
+;;; take them off DP_CNT.  A page-run at a time: as many bytes as are left in
+;;; DP_LEN, or before the end of the page either pointer is in, whichever is
+;;; least -- so that the inner loop is `[dp],y` with Y climbing from zero
+;;; and never crossing a page, and the 24-bit adds are done once per run.
+;;; A pointer at the start of its page could run 256 bytes, which an 8-bit
+;;; count cannot say; it runs 255 and comes round again.
+fl_run:       lda     dp:DP_LEN
+              ora     dp:DP_LEN+1
+              beq     fl_run_done
+              sec
+              lda     #0
+              sbc     dp:DP_MAT       ; 256 - low byte...
+              bne     fl_run_src
+              lda     #255            ; ...or 255 at a page start
+fl_run_src:   sta     dp:DP_RUN
+              sec
+              lda     #0
+              sbc     dp:DP_DST
+              bne     fl_run_dst
+              lda     #255
+fl_run_dst:   cmp     dp:DP_RUN
+              bcs     fl_run_len
+              sta     dp:DP_RUN
+fl_run_len:   lda     dp:DP_LEN+1
+              bne     fl_run_go       ; 256 or more left: the run stands
+              lda     dp:DP_LEN
+              cmp     dp:DP_RUN
+              bcs     fl_run_go
+              sta     dp:DP_RUN
+fl_run_go:    ldy     #0
+fl_run_byte:  lda     [dp:DP_MAT],y
+              sta     [dp:DP_DST],y
+              iny
+              cpy     dp:DP_RUN
+              bne     fl_run_byte
+              clc
+              lda     dp:DP_MAT
+              adc     dp:DP_RUN
+              sta     dp:DP_MAT
+              bcc     fl_run_dst2
+              inc     dp:DP_MAT+1
+              bne     fl_run_dst2
+              inc     dp:DP_MAT+2
+fl_run_dst2:  clc
+              lda     dp:DP_DST
+              adc     dp:DP_RUN
+              sta     dp:DP_DST
+              bcc     fl_run_len2
+              inc     dp:DP_DST+1
+              bne     fl_run_len2
+              inc     dp:DP_DST+2
+fl_run_len2:  sec
+              lda     dp:DP_LEN
+              sbc     dp:DP_RUN
+              sta     dp:DP_LEN
+              bcs     fl_run_cnt
+              dec     dp:DP_LEN+1
+fl_run_cnt:   sec
+              lda     dp:DP_CNT
+              sbc     dp:DP_RUN
+              sta     dp:DP_CNT
+              bcs     fl_run
+              dec     dp:DP_CNT+1
+              bra     fl_run
+fl_run_done:  rts
+
+              .section code, root
 ;;; ---------------------------------------------------------------------------
 ;;; fl_check -- is this machine a 65816 with RAM where the far image goes?
 ;;;
@@ -323,10 +506,10 @@ fl_no816:     lda     #1              ; PBI device 1, then 2, 4, ...
 fl_slot:      sta     PDVS            ; select it; the registers appear
               pha
               lda     RAPBANK
-              bne     fl_next         ; open bus, or not in 6502 mode
+              bne     fl_nextslot         ; open bus, or not in 6502 mode
               lda     RAPCFG
               and     #RAPCFG_6502
-              beq     fl_next         ; a 65816 already: not our business
+              beq     fl_nextslot         ; a 65816 already: not our business
 ;;; It answers on both.  Come up cold, and switch.
               lda     #1
               sta     COLDST
@@ -336,7 +519,7 @@ fl_slot:      sta     PDVS            ; select it; the registers appear
 ;;; COLDST stand.  A card that answers a probe and then ignores a switch
 ;;; is a machine that will refuse below anyway, and a cold RESET on it is
 ;;; no worse than a warm one.
-fl_next:      pla
+fl_nextslot:      pla
               asl     a
               bcc     fl_slot
 ;;; Eight shifts and A is $00, which is also "nothing selected" -- the PBI

@@ -10,11 +10,8 @@ There are three of them and they come up the same way by different means:
                      booted it (tools/mkspdisk.py --boot);
   build/gem-boot.atr a double-density DOS 2 disk, the system named
                      AUTORUN.SYS because that is what the DOS runs at
-                     boot.  The DOS's own DUP.SYS is NOT on it: the
-                     system wanted seven sectors more than the disk had
-                     left beside it, and this floppy is a test vehicle --
-                     a real machine runs gem4xe off the card
-                     (tools/mkdisk.py --sweep --remove, and
+                     boot, beside the DOS's own DUP.SYS, which is what
+                     GEM returns to (tools/mkdisk.py --sweep, and
                      docs/shipping.md section 2);
   build/gem-sdx.atr  a double-sided double-density SDFS disk with NO DOS
                      on it (tools/mkfloppy.py): the one the release
@@ -42,8 +39,11 @@ sequence, which the Rapidus makes longer than it looks:
      machine after pressing power is NOTHING, which is the whole claim.
      On a machine with an Ultimate 1MB the question does not arise -- its
      Rapidus plugin sets the CPU over the M1 signal before the OS runs;
-  3. this time GEM keeps the machine: the desk, its drive icons and the
-     trash under the menu bar.
+  3. this time GEM keeps the machine: first the boot screen on the OS's
+     text screen -- the version, the processor, the memory, the DOS,
+     which files it read, which screen, which clock, which pointer,
+     which printer -- held for three seconds (src/sys/bootinfo.h), then
+     the desk, its drive icons and the trash under the menu bar.
 
   The refusal itself -- a machine with no accelerator at all, told so and
   left alone -- is test-m6's, which boots the same image with the Rapidus
@@ -51,6 +51,11 @@ sequence, which the Rapidus makes longer than it looks:
 
 What is checked: the disk's own files, read out of the image; the CPU,
 which must start as a 6502 and become a 65C816 with nothing driving it;
+the boot screen, read off the text screen while it is held and compared
+with what the machine then reports of itself -- the version in VERSION,
+the memory the probe recorded, the DOS, the VBXE the fixture has, and
+that both GEM4XE.CFG and LANG.RSC, which every product disk carries,
+were the ones read;
 the far image, spot checked against the linker's own output where a DOS
 that mangles the staging would show (this gate found one that does -- MyDOS, section 2 of
 docs/shipping.md); and the desk at the end, pixel for pixel against
@@ -79,6 +84,7 @@ from deskrsc import FILEMENU, QUITITEM      # noqa: E402
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
 from m7_form import F                       # noqa: E402
 from m14_sparta import screen               # noqa: E402
+from langrsc import STRINGS as LANG, BOOT_LABEL  # noqa: E402  the boot screen's words
 from m17_desktop import (header, listing, menu, rsc_imlen,  # noqa: E402
                          DESKTOP, DESK_RSC, DESK_SYM, SHOT)
 
@@ -91,6 +97,11 @@ BOOT_LINE = b"CD >GEM\x9bGEM\x9b"
 COLDST = 0x0244                 # the OS: non-zero at RESET means come up cold
 DRVBYT = 0x070A                 # DOS 2's drive map (src/sys/gemdos.c)
 DOS_2 = 0                       # src/sys/dos.h
+DOS_NAME = {0: "DOS 2", 1: "SpartaDOS 3", 2: "SpartaDOS X"}   # src/sys/bootinfo.c
+FARMEM_FIRST, FARMEM_LAST, FARMEM_BANKS = 1, 2, 3   # FARMEM's bytes (src/sys/farmem.h)
+BOOT_HOLD = 150                 # frames the screen is held on PAL (HOLD_SECONDS)
+BOOT_WAIT = 3000                # frames from the CPU switch to give it to appear
+BOOT_INK, BOOT_PAPER = "$00", "$0e"     # src/sys/bootinfo.c INK, PAPER, as HWSTATE prints them
 REFUSAL = "gem4xe needs"        # src/farload.s msg_no816
 FARMEM_BRK = 8                  # the cursor's offset in FARMEM (src/sys/farmem.h)
 SEAM = 8                        # bytes checked either side of a chunk seam
@@ -159,9 +170,9 @@ def far_probes(far, chunk):
     want = set()
     for base, data in far:
         size = len(data)
-        for dst, piece in mkxex.far_chunks(base, data, chunk):
+        for dst, plain, _ in mkxex.far_chunks(base, data, chunk):
             want.update(a for a in range(dst, dst + HEAD) if a < base + size)
-            for edge in (dst, dst + len(piece) - 1):
+            for edge in (dst, dst + len(plain) - 1):
                 want.update(a for a in range(edge - SEAM, edge + SEAM + 1)
                             if base <= a < base + size)
         want.add(base + size - 1)
@@ -181,6 +192,70 @@ def dos2_listing(fs):
     model has an answer if it ever does."""
     return {"A:\\": [(e.filename.upper(), 0, 0, 0, e.count * fs.data_bytes)
                      for e in fs.entries() if e.in_use and e.nameable]}
+
+
+def boot_screen(b):
+    """The boot screen's report, as {label: value}, or None while the
+    screen is not showing it.  The hint at the bottom says it is all
+    there: the lines land one probe at a time (src/sys/bootinfo.c)."""
+    words = dict(LANG)
+    lines = screen(b)
+    if not any(words["BOOT_HOLD"] in ln for ln in lines):
+        return None
+    # The rule says which column the block starts in: the screen puts it
+    # INSET columns in, counting E:'s own left margin, so a DOS that has
+    # moved LMARGN moves nothing here.  A label is BOOT_LABEL columns
+    # and a gap; the value is the rest.
+    col = next((ln.index("_") for ln in lines if "____" in ln), 2)
+    labels = [words[k] for k in words if k.startswith("BOOT_")]
+    report = {}
+    for ln in lines:
+        label = ln[col:col + BOOT_LABEL].strip()
+        if label in labels:
+            report[label] = ln[col + BOOT_LABEL + 1:].strip()
+    return report
+
+
+def check_boot(name, report, gtia, b, syms, check):
+    """The report against the machine that wrote it; gtia is HWSTATE's
+    reading of the colours, taken while the screen was held."""
+    words = dict(LANG)
+    L = lambda k: words["BOOT_" + k]        # noqa: E731
+    with open(os.path.join(ROOT, "VERSION")) as f:
+        version = f.read().strip()
+    for label, want in ((L("VERSION"), version),
+                        (L("CPU"), "65C816, Rapidus"),
+                        (L("CONFIG"), "GEM4XE.CFG"),
+                        (L("LANG"), "LANG.RSC"),
+                        (L("VIDEO"), "VBXE 1.26 ($D640)")):
+        check(report.get(label) == want,
+              f"{name}: the boot screen says {label} '{report.get(label)}', "
+              f"not '{want}'")
+    kind = b.peek(syms["dos"])
+    check(report.get(L("DOS")) == DOS_NAME[kind],
+          f"{name}: the boot screen says DOS '{report.get(L('DOS'))}' on a "
+          f"kind-{kind} DOS")
+    fm = syms["farmem"]
+    first, last, banks = (b.peek(fm + FARMEM_FIRST), b.peek(fm + FARMEM_LAST),
+                          b.peek(fm + FARMEM_BANKS))
+    tenths = (banks * 10 + 8) // 16
+    want = f"{tenths // 10}.{tenths % 10} MB, {L('BANKS')} ${first:02X}-${last:02X}"
+    check(report.get(L("MEMORY")) == want,
+          f"{name}: the boot screen says memory '{report.get(L('MEMORY'))}', "
+          f"the probe recorded '{want}'")
+    for label in (L("CLOCK"), L("POINTER"), L("PRINTER")):
+        check(bool(report.get(label)),
+              f"{name}: the boot screen has no {label} line")
+    # The colours, off GTIA itself while the screen was held: black ink
+    # on white paper.  The XL OS's VBI copies COLOR1 to COLPF1 in its
+    # first stage, before the CRITIC test, and every row is a CIO call
+    # with that VBI live -- the first picture had DOS's grey ink ($CA)
+    # for exactly that reason (src/sys/bootinfo.h).  Read then, not now:
+    # boot_end puts DOS's colours back before the desktop starts.
+    ink, paper = gtia["COLPF1"], gtia["COLPF2"]
+    check((ink, paper) == (BOOT_INK, BOOT_PAPER),
+          f"{name}: the boot screen's ink is {ink} on {paper}, not "
+          f"{BOOT_INK} on {BOOT_PAPER} -- the OS's VBI put COLOR1 back?")
 
 
 def one(name, progname, how, batches, cart, keep, check):
@@ -216,7 +291,8 @@ def one(name, progname, how, batches, cart, keep, check):
              "GEM>DESKTOP.RSC": "desktop.rsc", "APPS>CALC.G4A": "calc.g4a",
              "APPS>CLOCK.G4A": "clock.g4a"} if sdfs else
             {progname: "gem.xex", "DESKTOP.G4A": "desktop.g4a",
-             "DESKTOP.RSC": "desktop.rsc"})
+             "DESKTOP.RSC": "desktop.rsc", "CLOCK.ACC": "clockacc.g4a",
+             "CLOCK.RSC": "clock.rsc", "LANG.RSC": "lang.rsc"})
     for fname, built in want.items():
         check(fname in listed, f"{name}: {fname} is not on the disk")
         if sdfs and fname in listed:
@@ -237,35 +313,28 @@ def one(name, progname, how, batches, cart, keep, check):
                   f"{name}: the superblock names a DOS file at map sector "
                   f"{fs.boot_file_map}, and this disk is meant to carry none")
     else:
-        # NO DUP.SYS, deliberately (Makefile, build/gem-boot.atr).  The
-        # system outgrew the disk with the DOS's own shell on it -- 681
-        # sectors wanted against 674 left beside DOS.SYS and DUP.SYS --
-        # and this floppy is a test vehicle: a real machine runs gem4xe
-        # off the APT/CF card, which has 96 KB spare.  What it costs is
-        # the return to a DOS menu when GEM quits; docs/shipping.md
-        # section 2 has what happens instead, measured.
-        check("DUP.SYS" not in listed,
-              f"{name}: DUP.SYS is on the disk -- it was dropped to make "
-              f"room, so something has put it back")
+        # DUP.SYS is on the disk (Makefile, build/gem-boot.atr): it is the
+        # DOS's shell, and what GEM hands the machine back to.  It went,
+        # for a while, when the system outgrew the disk with the shell on
+        # it -- docs/shipping.md section 2 -- and came back when the far
+        # image started travelling packed (tools/mkxex.py), which took a
+        # third off GEM.COM.  Without it this DOS has nothing to return
+        # to, so its absence is a regression and not a saving.
+        check("DUP.SYS" in listed,
+              f"{name}: DUP.SYS is not on the disk -- GEM has no shell to "
+              f"return to")
         free = fs.free_count() * fs.data_bytes
-        print(f"  {fs.free_count()} sectors free, {free // 1024} KB -- this "
-              f"disk is the system and nothing else")
-        # THIS DISK IS THE SYSTEM AND NOTHING ELSE, and the number is
-        # here to say so rather than to leave room.  The floor used to be
-        # eighty sectors -- 20 KB, enough for GACS's engine beside the
-        # system -- and one binary carrying both display drivers
-        # (docs/phase34.md) took it below that: GEM.COM is 477 of the
-        # disk's 707 sectors and the desktop is another 133.  A
-        # double-density DOS 2 floppy holds a GEM that boots into its
-        # desktop, and an application goes on the SpartaDOS install disk
-        # (989 sectors free) or the card.  See docs/shipping.md section 1.
-        #
-        # What is still checked is that the disk is not FULL: a disk with
-        # nothing free cannot take a DESKTOP.INF, and Options -> Save
-        # desktop is the first thing a user does.
-        check(fs.free_count() > 8,
-              f"{name}: {fs.free_count()} sectors free -- not even room for "
-              f"a DESKTOP.INF")
+        print(f"  {fs.free_count()} sectors free, {free // 1024} KB")
+        # The floor is eighty sectors -- 20 KB, enough for a program of
+        # somebody's own beside the system -- and the number is here so
+        # that the smallest disk gem4xe ships on stays somewhere a person
+        # can put one.  It was below eight for a while (docs/shipping.md
+        # section 1 has the history); the packed far image is what put it
+        # back above eighty, and growth that takes it below again is a
+        # decision to make on purpose, not to discover here.
+        check(fs.free_count() >= 80,
+              f"{name}: {fs.free_count()} sectors free -- under the floor of "
+              f"80 that keeps room for a program of the user's own")
 
     if cart == "":
         print(f"  not booted: no SDX cartridge fixture ([spartados].sdx_cart "
@@ -309,7 +378,32 @@ def one(name, progname, how, batches, cart, keep, check):
         print(f"  the loader switched the machine to {mode} by itself, "
               f"{t + STEP} frames in, with nothing typed")
 
-        # -- 3. the desktop, and the model it must match --------------------
+        # -- 3. the boot screen, while it is held ---------------------------
+        # Three seconds is 150 frames and the poll is 20, so it cannot be
+        # missed; what is read is the whole report, because the hint is
+        # the last thing written.  The picture is kept beside the desk's.
+        gtia = {}
+        for t in range(0, BOOT_WAIT, STEP):
+            b.frames(STEP)
+            report = boot_screen(b)
+            if report:
+                gtia = b.cmd("HWSTATE")["gtia"]       # while it is held
+                break
+        else:
+            check(False, f"{name}: the boot screen never showed its hint")
+            for ln in screen(b):
+                if ln.strip():
+                    print("   |" + ln)
+            report = {}
+        if report:
+            print(f"  the boot screen, {t + STEP} frames after the switch:")
+            for ln in screen(b):
+                if ln.strip():
+                    print("   |" + ln)
+            os.makedirs(SHOTDIR, exist_ok=True)
+            b.screenshot(os.path.join(SHOTDIR, f"boot-{name.split('.')[0]}.png"))
+
+        # -- 4. the desktop, and the model it must match --------------------
         calls = syms["app_calls"]
         n, still = b.peek16(calls), 0
         for t in range(0, 20000, 250):
@@ -326,6 +420,8 @@ def one(name, progname, how, batches, cart, keep, check):
         check(fault == 0, f"{name}: irq_fault {fault} (src/sys/irq.s)")
         check(not any(REFUSAL in ln for ln in screen(b)),
               f"{name}: GEM refused the 65C816 as well: the switch did not take")
+        if report:
+            check_boot(name, report, gtia, b, syms, check)
 
         # the far image, as the linker wrote it
         bad = []

@@ -648,7 +648,9 @@ void rs_fixit(RSHDR *h);            /* the loader's fix-up, on any image */
  * started.  lang_str answers a NEAR string good until the next call --
  * one buffer, which is enough because alerts are modal. */
 #define LANG_FILE "LANG.RSC"
-void lang_init(void);                            /* before the first alert */
+void lang_init(void);                   /* the strings: needs far memory only */
+void lang_font(void);                   /* SYSTEM.FNT: needs the VDI device  */
+WORD lang_loaded(void);                 /* 1 when LANG.RSC is what is in use */
 const char *lang_str(WORD n);                    /* LS_*, build/lang_rsc.h */
 
 /* fsel.c -- the file selector (docs/phase11.md) */

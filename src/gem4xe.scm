@@ -15,7 +15,8 @@
 ;;;                (the runner's link; GEM.COM gives the pool the whole window)
 ;;;   $8000-$9BFF  RESERVED: VBXE MEMAC A window       -- nothing may RUN here,
 ;;;                but it is plain RAM until vbxe_init() opens the window, so
-;;;                farload's staging buffer borrows it at LOAD time (farstage)
+;;;                farload's staging buffer and its unpacker borrow it at
+;;;                LOAD time (farstage, stagecode)
 ;;;   $9C00-$9FFF  the rest of the MEMAC window: SpartaDOS X's screen
 ;;;                (MEMTOP $9C1F), so not even the stage goes there
 ;;;   $A000-$BFFF  NOT OURS: SpartaDOS X is a cartridge and this is it.
@@ -202,13 +203,18 @@
     ;; The load-time staging buffer, inside the MEMAC A window.  It holds no
     ;; linked content -- it is bss, and tools/mkxex.py writes it a chunk at a
     ;; time from the .xex -- so placing it over a region the driver later maps
-    ;; VBXE VRAM onto costs nothing.  It stops short of the window's last
-    ;; kilobyte, which is SpartaDOS X's display list and screen: a DOS loads
-    ;; the chunks, and it wants its screen back afterwards.  src/farload.s
-    ;; sizes the payload to fit; a chunk too big for this memory fails the
-    ;; link.
-    (memory Stage      (address (#x8000 . #x9bff))
+    ;; VBXE VRAM onto costs nothing.  The unpacker that empties it is the
+    ;; same kind of thing, load-time only, and goes in the rest of the window
+    ;; (StageCode -- its own memory, because a bss section cannot share one
+    ;; with a section that carries bits).  Both stop short of the window's
+    ;; last kilobyte, which is SpartaDOS X's display list and screen: a DOS
+    ;; loads the chunks, and it wants its screen back afterwards.
+    ;; src/farload.s sizes the payload to fit; a chunk too big for this
+    ;; memory, or an unpacker too big for its 507 bytes, fails the link.
+    (memory Stage      (address (#x8000 . #x9a04))
             (section farstage))
+    (memory StageCode  (address (#x9a05 . #x9bff))
+            (section stagecode))
 
     ;; 2 KB.  The shell's chain -- the runner or GEM.COM, sh_main, the
     ;; loader, app_run -- is on it under an application, and a COP is

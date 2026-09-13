@@ -60,11 +60,42 @@ STRINGS = [
     # the shell, when it cannot run what it was asked for (src/aes/shel.c)
     ("APPNOTFOUND", "[1][This application|cannot be found.][ OK ]"),
     ("APPNOTLOAD", "[1][This application|cannot be loaded.][ OK ]"),
+    # the boot screen (src/sys/bootinfo.c): the labels down its left
+    # column, and the few values that are words rather than the machine's
+    # own names and numbers.  A label is cut at BOOT_LABEL columns there,
+    # so a translation keeps them short.
+    ("BOOT_VERSION", "Version"),
+    ("BOOT_CPU", "Processor"),
+    ("BOOT_MEMORY", "Memory"),
+    ("BOOT_DOS", "DOS"),
+    ("BOOT_CONFIG", "Settings"),
+    ("BOOT_LANG", "Language"),
+    ("BOOT_VIDEO", "Screen"),
+    ("BOOT_CLOCK", "Clock"),
+    ("BOOT_POINTER", "Pointer"),
+    ("BOOT_PRINTER", "Printer"),
+    ("BOOT_BUILTIN", "built in"),
+    ("BOOT_DEFAULTS", "defaults"),
+    ("BOOT_NONE", "none"),
+    ("BOOT_PTR_ST", "ST mouse"),
+    ("BOOT_PTR_AMIGA", "Amiga mouse"),
+    ("BOOT_PTR_CX80", "CX80 trak-ball"),
+    ("BOOT_PTR_TABLET", "touch tablet"),
+    ("BOOT_PTR_XEM1", "mouSTer (XEM1)"),
+    ("BOOT_BANKS", "banks"),
+    ("BOOT_HOLD", "Hold SHIFT to pause this screen"),
 ]
 
 # The longest string the system will ever copy into its near buffer, and
 # the reason src/sys/lang.h can size that buffer without asking anyone.
 MAXLEN = max(len(s) for _, s in STRINGS)
+# The boot screen's labels, and the columns a label gets before it is cut
+# (src/sys/bootinfo.c draws them; the other BOOT_ strings are values).
+BOOT_LABELS = tuple("BOOT_" + n for n in
+                    "VERSION CPU MEMORY DOS CONFIG LANG VIDEO CLOCK POINTER PRINTER".split())
+BOOT_LABEL = 9
+assert all(len(s) <= BOOT_LABEL for n, s in STRINGS if n in BOOT_LABELS), \
+    "a boot-screen label is wider than its column"
 
 
 def build(strings=None):
@@ -93,6 +124,7 @@ def c_header(data, path):
              f"#define LANG_RSC_SIZE {len(data)}",
              f"#define LANG_NSTRING  {len(STRINGS)}",
              f"#define LANG_MAXLEN   {MAXLEN}",
+             f"#define LANG_BOOT_LABEL {BOOT_LABEL}",
              "extern const uint8_t FAR lang_rsc[LANG_RSC_SIZE];"]
     lines += [f"#define LS_{name:<12s} {i}" for i, (name, _) in enumerate(STRINGS)]
     lines.append("#endif")

@@ -184,6 +184,15 @@ static void clock_probe(void)
     }
 }
 
+uint8_t clock_card(void)
+{
+    if (!rtc_probed)
+        clock_probe();
+    if (!rtc)
+        return CLOCK_NONE;
+    return (uint16_t)rtc == RTC_U1MB ? CLOCK_U1MB : CLOCK_SIDE;
+}
+
 uint8_t clock_read(CLOCK *c)
 {
     uint8_t r[7];

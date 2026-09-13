@@ -479,6 +479,7 @@ static void run_script(void)
                 mn_start();                 /* the registry: once per AES start */
                 sh_init();                  /* far buffers: before any app_load */
                 lang_init();                /* LANG.RSC, or the English in the image */
+                lang_font();                /* and SYSTEM.FNT, into the device */
                 fs_start();                 /* the selector's name slots, too */
                 break;
             case 12:                        /* appl_write: id, len, msg[8] */
@@ -986,6 +987,7 @@ TASK void main(void)
      * because a pure VDI script never reaches that one -- test-m21 is
      * exactly such a script. */
     lang_init();
+    lang_font();
 
     /* Which bank is this code actually executing in?  src/farload.s copies it
      * up at load time and nothing else can confirm that it landed: the bridge

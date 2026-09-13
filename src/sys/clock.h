@@ -29,4 +29,11 @@ typedef struct {
  * comes back is $FF and fails the check that it is a plausible time. */
 uint8_t clock_read(CLOCK *c);
 
+/* Which card the clock is on, for the boot screen: probes if clock_read
+ * has not yet. */
+#define CLOCK_NONE 0
+#define CLOCK_U1MB 1
+#define CLOCK_SIDE 2
+uint8_t clock_card(void);
+
 #endif /* GEM4XE_CLOCK_H */
