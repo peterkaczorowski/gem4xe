@@ -17,6 +17,21 @@ both display drivers and chooses at start-up, so a machine without a VBXE gets
 320×168 on ANTIC mode F instead — `make test-m26` boots the shipped binary three
 ways to prove it. The 6502 path is still deferred.
 
+## Pictures
+
+The product booted and used, photographed under AltirraSDL by `make shots`
+(`tests/emu/shots.py`, which reads its coordinates out of the running
+desktop's own object trees). Every picture is 640 × 480: the 640 × 240
+overlay with its rows doubled, which is what a monitor shows.
+
+![the desktop with a window on A:\, fulled](docs/shots/02-window.png)
+
+![the calculator, launched from the APPS folder](docs/shots/09-calc.png)
+
+The rest are in [`docs/shots/`](docs/shots/): the bare desk, the Desk and
+File menus, the About box, a folder in icon and text view, Show Info, and
+the clock accessory over the desktop.
+
 ## Why it is shaped the way it is
 
 VBXE sits on the 1.79 MHz chip bus no matter how fast the CPU runs. Measured on

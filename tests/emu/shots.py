@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+"""The pictures: the product booted and used, photographed for the README
+and the release page.
+
+Not a gate.  Nothing here is compared with anything; the pictures are
+for people, and a person looks at them.  What it shares with the gates
+is the machine and the way it is driven: the tester's install disk
+boots into the desktop with nothing typed, exactly as tests/emu/
+product_boot.py has it, and the pointer is then walked and clicked by
+the same steps test-m23 and test-m28 use.  Where things are on the
+screen is read out of the TARGET -- the desktop's own screen tree, the
+AES's menu tree and window frame, a dialog's tree once it is up -- so
+the tour does not carry coordinates that go stale the day a resource
+is edited.
+
+The product has an ST mouse on the joystick port and there is no verb
+in the bridge to move one, so the pointer's kind is set to NONE after
+the boot: from then on the pointer record is the harness's to write,
+as it is in the gates' builds (src/vdi/pointer.c ptr_poll).  That is
+the one poke this makes into the running product.
+
+What is photographed, in order:
+
+  desk        the desk as it comes up
+  window      a window on A:\\*.*, at its full size
+  menu-desk   the Desk drop-down, with the accessory in it
+  menu-file   the File drop-down
+  about       Desk -> About
+  folder      the APPS folder opened
+  info        File -> Show Info on the calculator
+  text        View -> Text, the same folder as lines
+  calc        the calculator, with something in its display
+  clock       the clock accessory, over the desktop
+
+Each picture is the overlay alone (the 16-pixel borders cropped) with
+its rows doubled: 640x240 is what the VBXE puts out and 640x480 is what
+a 4:3 monitor makes of it.
+
+  python3 tests/emu/shots.py [-o docs/shots] [--disk build/gem-sp.atr]
+"""
+import argparse
+import os
+import struct
+import sys
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from a8test.launcher import launch          # noqa: E402
+import symfile                              # noqa: E402
+from aesref import W_FULLER, OBJ_SIZE, G_ICON   # noqa: E402
+from deskref import g_offset, DROOT, WOBS_START   # noqa: E402
+from deskrsc import (THEBAR, THEACTIVE, THEDROPS,           # noqa: E402
+                     DESKMENU, FILEMENU, VIEWMENU,
+                     DESKBOX, ABOUITEM, FILEBOX, SHOWITEM,
+                     VIEWBOX, ICONITEM, TEXTITEM,
+                     DEOK, FICNCL)
+from calcrsc import (C1, C2, C3, C4, C5, C6, CMUL, CEQ, CQUIT)   # noqa: E402
+from m7_form import poke16, apply_step, F, M, B, CLICK, DCLICK   # noqa: E402
+from m14_sparta import screen               # noqa: E402
+from m17_desktop import header, DESKTOP, DESK_SYM   # noqa: E402
+from demo_aes import path                   # noqa: E402
+from product_boot import REFUSAL, STEP      # noqa: E402
+
+BUILD = os.path.join(ROOT, "build")
+SYMS = os.path.join(BUILD, "gem.sym")
+CALC = os.path.join(BUILD, "calc.g4a")
+CALC_SYM = os.path.join(BUILD, "calc.sym")
+DISK = os.path.join(BUILD, "gem-sp.atr")
+OUT = os.path.join(ROOT, "docs", "shots")
+
+NIL = -1
+PTR_NONE = 0                    # src/vdi/pointer.h
+BORDER = 16                     # the overlay's column in a 672-wide shot
+FOLDER, PROGRAM = "APPS", "CALC.G4A"
+ACC_ITEM = ABOUITEM + 2         # the first accessory's line in the Desk box
+                                # (deskrsc: 10 is the separator)
+SUM = [C1, C2, C3, C4, CMUL, C5, C6, CEQ]      # 1234 x 56
+
+
+def obj(b, tree, i):
+    """One OBJECT out of the target, as the AES has it in memory."""
+    d = bytes(b.memdump(tree + i * OBJ_SIZE, OBJ_SIZE))
+    (nxt, head, tail, typ, flags, state, spec,
+     x, y, w, h) = struct.unpack("<hhhHHHIhhhh", d)
+    return dict(next=nxt, head=head, tail=tail, type=typ, flags=flags,
+                state=state, spec=spec, x=x, y=y, w=w, h=h)
+
+
+def children(b, tree, parent):
+    out, i = [], obj(b, tree, parent)["head"]
+    while i != NIL and i != parent and len(out) < 64:
+        out.append(i)
+        i = obj(b, tree, i)["next"]
+    return out
+
+
+def placed(b, tree, root=0):
+    """{obj: (x, y, w, h)} on the screen, for every object under root."""
+    out = {}
+
+    def walk(i, ox, oy):
+        o = obj(b, tree, i)
+        x, y = ox + o["x"], oy + o["y"]
+        out[i] = (x, y, o["w"], o["h"])
+        for c in children(b, tree, i):
+            walk(c, x, y)
+    walk(root, 0, 0)
+    return out
+
+
+def middle(r):
+    return (r[0] + r[2] // 2, r[1] + r[3] // 2)
+
+
+def cstring(b, addr, n=13):
+    d = bytes(b.memdump(addr, n))
+    return d.split(b"\0", 1)[0].decode("latin-1")
+
+
+class Tour:
+    def __init__(self, b, syms, out):
+        self.b, self.syms, self.out = b, syms, out
+        self.ptr = syms["ptr_state"]
+        self.dlink, _, _ = header(DESKTOP)
+        self.dsym = symfile.load(DESK_SYM)
+        self.clink, _, _ = header(CALC)
+        self.csym = symfile.load(CALC_SYM)
+        self.n = 0
+
+    # -- driving -----------------------------------------------------------
+    def here(self):
+        return (self.b.peek16(self.ptr), self.b.peek16(self.ptr + 2))
+
+    def run(self, steps):
+        for st in steps:
+            apply_step(self.b, self.ptr, st)
+
+    def go(self, xy):
+        self.run([F(2)] + path(self.here(), xy) + [F(4)])
+
+    def click(self, xy):
+        self.go(xy)
+        self.run(CLICK())
+        self.settle()
+
+    def dclick(self, xy):
+        self.go(xy)
+        self.run(DCLICK(xy))
+        self.settle()
+
+    def settle(self, limit=1500):
+        """Until the program has made no call for thirty frames."""
+        calls = self.syms["app_calls"]
+        n, still = self.b.peek16(calls), 0
+        for _ in range(0, limit, 10):
+            self.b.frames(10)
+            now = self.b.peek16(calls)
+            still = still + 1 if now == n else 0
+            n = now
+            if still >= 3:
+                return
+        print("  (still busy)")
+
+    def shot(self, name):
+        self.n += 1
+        raw = os.path.join(BUILD, "shots", f"tour-{name}.png")
+        self.b.frames(2)
+        self.b.screenshot(raw)
+        fn = os.path.join(self.out, f"{self.n:02d}-{name}.png")
+        publish(raw, fn)
+        print(f"  {fn}")
+
+    # -- where things are ----------------------------------------------------
+    def G(self):
+        """The desktop's G, where the loader put it this time."""
+        return self.b.peek16(self.syms["app_near"]) + (self.dsym["G"] - self.dlink)
+
+    def g_screen(self):
+        return self.G() + g_offset("g_screen")
+
+    def tree_of(self, field):
+        return self.b.peek16(self.G() + g_offset(field))
+
+    def desk_icon(self, label):
+        """A drive or the trash: the desk's own children."""
+        tree = self.g_screen()
+        rects = placed(self.b, tree)
+        for i in children(self.b, tree, DROOT):
+            if i < WOBS_START:
+                continue
+            if cstring(self.b, obj(self.b, tree, i)["spec"] + 34) == label:
+                return middle(rects[i])
+        raise KeyError(label)
+
+    def item(self, name):
+        """An entry of the window on top, by its label (an icon's, at
+        SCREENINFO.i.label, or the start of a text view's line)."""
+        tree = self.g_screen()
+        rects = placed(self.b, tree)
+        # the window roots are ROOT's children beside the desk (deskobj.c
+        # obj_init), ordered as they are stacked: the last with anything
+        # in it is the window on top
+        seen = []
+        for top in reversed(children(self.b, tree, 0)):
+            if top == DROOT or not children(self.b, tree, top):
+                continue
+            for i in children(self.b, tree, top):
+                o = obj(self.b, tree, i)
+                text = (cstring(self.b, o["spec"] + 34) if o["type"] & 0xFF == G_ICON
+                        else cstring(self.b, o["spec"], 48))
+                seen.append(text.strip())
+                if text.strip().startswith(name):
+                    return middle(rects[i])
+            break
+        raise KeyError(f"{name} is not in the window on top: {seen}")
+
+    def gadget(self, which):
+        """A gadget of the window on top, as W_ACTIVE was last laid out."""
+        rects = placed(self.b, self.syms["W_ACTIVE"])
+        return middle(rects[which])
+
+    def menu(self, title, item=None):
+        """The middle of a title of the bar, and of an item in its
+        drop-down: the item's y under the title's x, straight down."""
+        tree = self.b.peek16(self.syms["gl_mntree"])
+        rects = placed(self.b, tree)
+        t = middle(rects[title])
+        if item is None:
+            return t
+        return (t[0], middle(rects[item])[1])
+
+    def dialog(self, field, which):
+        """An object of one of the desktop's dialogs, once it is up."""
+        rects = placed(self.b, self.tree_of(field))
+        return middle(rects[which])
+
+    def drop(self, title):
+        """Hover the title until its menu is down."""
+        self.go(self.menu(title))
+        self.b.frames(10)
+
+    def choose(self, title, item):
+        self.drop(title)
+        self.run(path(self.here(), self.menu(title, item), speed=4) + [F(6)])
+        self.run(CLICK())
+        self.settle()
+
+    def launch(self, act, what, up=None):
+        """act() starts a program: wait until the shell has run one more,
+        until up() says it is showing, then until it is idle.  The shell
+        counts the run before the program's main(), and a load is disk
+        time with no AES calls in it, so app_calls alone settles too
+        early."""
+        runs = self.b.peek16(self.syms["sh_runs"])
+        act()
+        for _ in range(300):
+            if self.b.peek16(self.syms["sh_runs"]) != runs and (up is None or up()):
+                break
+            self.b.frames(10)
+        else:
+            self.shot("fail")
+            raise SystemExit(f"{what} never started")
+        self.settle()
+
+    def bar_up(self):
+        return self.b.peek16(self.syms["gl_mntree"]) != 0
+
+    def cancel_menu(self):
+        # a click on the desk, well away from the bar, takes the menu up
+        self.click((600, 150))
+
+
+def publish(raw, fn):
+    """The overlay alone, rows doubled, as an indexed PNG."""
+    from PIL import Image
+    im = Image.open(raw).convert("RGB")
+    im = im.crop((BORDER, 0, BORDER + 640, im.height))
+    im = im.resize((im.width, im.height * 2), Image.NEAREST)
+    colours = im.getcolors(256)
+    if colours:
+        pal = Image.new("P", (1, 1))
+        flat = [c for _, rgb in colours for c in rgb]
+        pal.putpalette(flat + [0] * (768 - len(flat)))
+        im = im.quantize(palette=pal, dither=Image.NONE)
+    os.makedirs(os.path.dirname(fn), exist_ok=True)
+    im.save(fn, optimize=True)
+
+
+def boot(b, syms):
+    """The disk to the desk, as product_boot.py waits for it: the loader
+    switches the CPU, the DOS starts GEM again, the desktop settles."""
+    b.ok("COLD_RESET")
+    for t in range(0, 20000, STEP):
+        b.frames(STEP)
+        if b.cmd("HWSTATE").get("cpu", {}).get("mode") != "6502":
+            break
+    else:
+        raise SystemExit("the loader never switched the CPU")
+    print(f"  the CPU switched {t + STEP} frames in")
+    calls = syms["app_calls"]
+    n, still = b.peek16(calls), 0
+    for t in range(0, 20000, 250):
+        b.frames(250)
+        now = b.peek16(calls)
+        still = still + 1 if now == n else 0
+        n = now
+        if still >= 2 and now:
+            break
+    else:
+        raise SystemExit(f"GEM never settled ({n} calls)")
+    if any(REFUSAL in ln for ln in screen(b)):
+        raise SystemExit("GEM refused the 65C816")
+    print(f"  the desk after {t + 250} frames, {n} calls in")
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("-o", "--out", default=OUT)
+    ap.add_argument("--disk", default=DISK)
+    args = ap.parse_args(argv[1:])
+    syms = symfile.load(SYMS)
+
+    emu = launch(tag="shots", memsize="1088K", extra_args=["--disk", args.disk])
+    b = emu.bridge
+    try:
+        boot(b, syms)
+        # the pointer is ours now (src/vdi/pointer.c: PTR_NONE polls nothing)
+        poke16(b, syms["ptr_state"] + 6, PTR_NONE)
+        t = Tour(b, syms, args.out)
+        b.frames(10)
+        t.shot("desk")
+
+        t.dclick(t.desk_icon("DISK A"))
+        t.click(t.gadget(W_FULLER))
+        t.go((400, 150))
+        t.shot("window")
+
+        t.drop(DESKMENU)
+        t.shot("menu-desk")
+        t.go(t.menu(FILEMENU))
+        b.frames(10)
+        t.shot("menu-file")
+        t.cancel_menu()
+
+        t.choose(DESKMENU, ABOUITEM)
+        t.go((400, 200))
+        t.shot("about")
+        t.click(t.dialog("a_info", DEOK))
+
+        t.dclick(t.item(FOLDER))
+        t.go((400, 150))
+        t.shot("folder")
+
+        t.click(t.item(PROGRAM))
+        t.choose(FILEMENU, SHOWITEM)
+        t.go((400, 200))
+        t.shot("info")
+        t.click(t.dialog("a_finfo", FICNCL))
+
+        t.choose(VIEWMENU, TEXTITEM)
+        t.go((400, 200))
+        t.shot("text")
+        t.choose(VIEWMENU, ICONITEM)
+
+        t.launch(lambda: t.dclick(t.item(PROGRAM)), "the calculator")
+        tree = b.peek16(t.csym["tree"] + b.peek16(syms["app_near"]) - t.clink)
+        keys = placed(b, tree)
+        for k in SUM:
+            t.go(middle(keys[k]))
+            t.run(CLICK())
+            b.frames(10)
+        t.go((400, 220))
+        t.shot("calc")
+        t.launch(lambda: t.click(middle(keys[CQUIT])), "the desktop", t.bar_up)
+
+        t.choose(DESKMENU, ACC_ITEM)
+        b.frames(60)
+        t.go((400, 200))
+        b.frames(60)
+        t.shot("clock")
+    finally:
+        emu.stop()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

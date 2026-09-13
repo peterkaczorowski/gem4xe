@@ -1294,6 +1294,14 @@ demo: build/m3-boot.atr
 movie: build/m3-boot.atr
 	python3 tests/emu/demo_aes.py
 
+# The product booted and used -- the desktop, its menus and dialogs, a
+# folder, both views, the calculator, the clock accessory -- photographed
+# into docs/shots/ as 640x480 PNGs for the README and the release page.
+# Coordinates are read out of the running desktop's own object trees, so
+# it is a tour, not a script of pixel positions; it is not a gate.
+shots: build/gem-sp.atr build/desktop.sym build/calc.sym
+	python3 tests/emu/shots.py
+
 # GEMBench's tests, shaped for this machine: the dialog, text, graphics,
 # window, divide, float, RAM, ROM and blit rows timed to a VCOUNT tick
 # and reported in milliseconds.  Not a gate; the baseline is docs/bench.md.
@@ -1313,4 +1321,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release memcheck gacs-check test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-boot test-cf demo movie bench emu-stop clean
