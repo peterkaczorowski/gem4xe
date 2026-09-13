@@ -82,7 +82,10 @@ every later row is garbage. The incrementing form changed the slot allocation
 so `stride` no longer shared `src`'s slot, which is why it worked and why the
 symptom looked like the pointer arithmetic. The fix is to read the field
 through a scalar; it is B5 in `tools/ccbug/README.md`, reproduced in the
-vendor's simulator and pinned by `make check-cc`.
+vendor's simulator and pinned by `make check-cc`. The general form of the
+defect — a member loaded at the destination's offset whenever `P->a = P->b
+OP e` goes through a spilled near pointer — was pinned down later as B15,
+after it turned up in the vendor's own `fdopen`.
 
 Both bugs were invisible to the eye and caught immediately by pixel comparison.
 That is the argument for the whole harness.

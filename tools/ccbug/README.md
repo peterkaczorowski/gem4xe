@@ -1,8 +1,10 @@
 # tools/ccbug — the cc65816 bugs gem4xe works around
 
-Fourteen defects in Calypsi cc65816 **5.18** — eight in code generation, two
-crashes and one in the front end's arithmetic — each reproduced from a shape
-lifted out of gem4xe, each with the shape the sources use instead. `make check-cc` builds `bugs.c` with the
+Fifteen defects in Calypsi cc65816 **5.18** — eleven in code generation,
+two crashes, one in the front end's arithmetic and one in the run-time
+library's division — each reproduced from a shape
+lifted out of gem4xe or out of the vendor's own C library, each with the
+shape the sources use instead. `make check-cc` builds `bugs.c` with the
 vendor's minimal linker script and C library, runs it under `db65816`, and
 reads the results back; `b6.c` and `b11.c`, which the compiler cannot get
 through, are compiled on their own and the outcome read from the compiler:
@@ -13,7 +15,7 @@ through, are compiled on their own and the outcome read from the compiler:
       ...
       B6 indexed direct-page array                       compiles   still present
       B11 near <-> far struct copy over 8 bytes          compiles   still present
-    check-cc: PASSED -- every workaround shape is right; 14 of 14 bug shapes still present
+    check-cc: PASSED -- every workaround shape is right; 18 of 18 bug shapes still present
 
 The run **fails only if a workaround shape stops compiling right**, because
 that is what would break gem4xe. A bug that has gone away is reported as
@@ -73,6 +75,11 @@ What the sources do, in one line each. The reasons follow.
     negative index.** Pass the base and an index, so that every subscript
     is non-negative: `draw_arrow(pt, n, (n-1)*2, -1)`, not
     `draw_arrow(&pt[(n-1)*2], n, -1)` with `pt[-2]` inside.
+15. **Never write `P->a = P->b OP e` (or `P[i] = P[j] OP e`) through a
+    near pointer.** `s = P->b; P->a = (WORD)(s OP e);` -- the member on
+    the left of the operator goes through a scalar. Rules 1 and 13 are
+    this rule's two earlier sightings; this is the exact trigger, and it
+    is what breaks `fdopen` in the vendor's own C library.
 
 ## B1 — stack-array element plus operand compiles to a load
 
@@ -406,3 +413,58 @@ found by reading a listing.
 Found by `make test-m3`: every arrowhead `vsl_ends` drew pointed at the
 origin (B13), and the one at the far end of the line pointed off the
 screen (B14).
+
+
+## B15 — `p->a = p->b OP e` through a spilled pointer is `p->a OP= e`
+
+    stream->fs_bufend = &stream->fs_bufstart[BUFSIZ];   /* __fs_fdopen(), clib */
+
+with `stream` a near pointer that lives on the stack (a call preceded it)
+compiles to
+
+    ldy ##fs_bufend ; lda ##64 ; clc ; adc (slot,s),y ; sta (slot,s),y
+
+— the load is done at the **destination's** offset. `fs_bufend` becomes
+whatever it was plus 64 and `fs_bufstart` is never read, so any `fwrite`
+or `fread` longer than 64 bytes runs off the end of the buffer and into
+the heap. Found in the Calypsi-65816-Atari board support package, whose
+`readwrite` test wrote 256 bytes and smashed the heap; it links
+its own `fdopen.c` ahead of `clib-*.a` and `docs/cc65816-bug.md` there
+carries the account.
+
+The trigger is exact, from four characterisation matrices: the right-hand
+side, after any casts and parentheses, is **one binary operation whose
+left operand is another member or element of the same pointer**.
+
+- Operators: `+ - & | ^ <<` and a signed `>>` (`ror n,x`); `+ 1` and
+  `- 1` become `inc n,x` / `dec n,x` on the destination, `* 2` an
+  `asl n,x`.
+- Any element width — `char`, `WORD`, `long` (`adc ##64; sta 8,x; adc
+  ##0; sta 10,x`).
+- A variable index on either side is ignored: `p[n] = p[1] + 64` and
+  `p[2] = p[n] + 64` are both wrong.
+- The right operand can be a constant, a global, a parameter, another
+  member or a `_Mul16` product; a `(WORD)` cast round the whole
+  right-hand side changes nothing; two such statements in a row are both
+  wrong.
+- Not triggered: the member on the **right** of a non-commutative
+  operator (`k - p->y`, `-p[1]`); more than one operator at the top level
+  (`(p->y + k) + m`, `p->y * 2 + k`, `(p->y + k) >> 1`); a call or a
+  `_Div16` between the load and the store (`p[1] - g()`, `p[1] / 2`,
+  `p[1] * 3`); a cast on the left operand (`(UWORD)p->y >> 1`); a
+  compound assignment (`p[2] += p[1]`, which is what the compiler thinks
+  it was given); a global pointer, a `__far` pointer, a pointer that is
+  still in X because no call spilled it, or an alias (`q = p; q->x =
+  p->y + k`).
+
+B1 (a stack array, `x[d] = x[d-1] + ...`), B13 (a pointer parameter with
+a computed index) and B5 (the shift or decrement done in place on a dead
+pointer's slot) are earlier faces of the same defect. A scan of gem4xe's
+tree for the shape — every `P->a = P->b OP e` and `P[i] = P[j] OP e` whose
+left operand's root differs from the destination's member — found no
+instance left; the one candidate, a global struct in `src/desk/desktop.c`,
+compiles right, and its listing was read to be sure.
+
+`bugs.c` gets the spill with a callee that loops — a one-line callee is
+inlined at -O2, the pointer never leaves X, and the statement compiles
+correctly, which is also why a minimal reproducer so easily misses it.

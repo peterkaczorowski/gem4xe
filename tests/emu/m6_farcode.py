@@ -151,7 +151,7 @@ def check_image(name, why):
     if not far:
         print("   FAIL: no far segments; is --code-model=large set?")
         return [f"{name}: no far segments"], far
-    chunk = syms["_fl_scr"] - syms["_fl_buf"]
+    chunk = syms["_fl_end"] - syms["_fl_buf"]
     probes = probe_addresses(far, chunk)
     end = max(a + len(d) for a, d in far)          # one past the image
     top_bank = (end - 1) >> 16
@@ -231,10 +231,10 @@ def check_image(name, why):
                          f"overlaps the code, which reaches ${end - 1:06X}")
 
         # 4. staging cost nothing: it is inside the reserved MEMAC A window
-        hdr, scr = syms["_fl_hdr"], syms["_fl_scr"]
-        print(f"staging    : ${hdr:04X}-${scr + 15:04X} (MEMAC A window)")
-        if not (0x8000 <= hdr and scr + 16 <= 0xA000):
-            fails.append(f"{name}: staging buffer ${hdr:04X}-${scr + 15:04X} is "
+        hdr, end = syms["_fl_hdr"], syms["_fl_end"]
+        print(f"staging    : ${hdr:04X}-${end - 1:04X} (MEMAC A window)")
+        if not (0x8000 <= hdr and end <= 0xA000):
+            fails.append(f"{name}: staging buffer ${hdr:04X}-${end - 1:04X} is "
                          f"outside the MEMAC A window, so it costs real bank $00 space")
 
         # 5. bank $00 is on the fast bus where the program lives.  The runner

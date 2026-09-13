@@ -1,17 +1,41 @@
 # Patches against AltirraSDL
 
 gem4xe's harness runs on [AltirraSDL](https://github.com/ilmenit/AltirraSDL),
-the headless/SDL front end to Altirra.  What it needed that is not
-upstream (as of b3061c7, 2026-09-01) is here as three patches that apply
-to that revision, in the order of the build recipe below, with `git
-apply` or `patch -p1`.  The same changes are upstream pull requests
+the headless/SDL front end to Altirra.  What it needed that was not
+upstream went up as pull requests
 [#88](https://github.com/ilmenit/AltirraSDL/pull/88) (the CPU core, the
 Ultimate 1MB switches and KEYRAW) and
 [#90](https://github.com/ilmenit/AltirraSDL/pull/90) (the bridge's
-65C816 debugging), and each patch is to be dropped once its request
-lands.
+65C816 debugging); **both were merged on 2026-09-06** and are in
+upstream `main` from 46567a14 (the 4.50-test20 sync, 2026-09-09).  The
+three patches that carried them are kept here for a build pinned to
+b3061c7, and as the record of what was changed and why.  One patch is
+still outstanding:
 
-## altirra-65c816-native-mode.patch -- two CPU core bugs
+## altirra-sdl-hostfs-posix-paths.patch -- the H: device on Linux
+
+`hostdevice.cpp` joins native paths with a literal `'\\'`, which Linux
+takes as a character in the file name.  `SetBasePath` canonicalises the
+mount directory (which strips its trailing slash) and then appends
+`L'\\'`, so with `--adddevice hostfs,path1=obj/t.run` a file opened as
+`H:RWTEST.TXT` is created as `obj/t.run\RWTEST.TXT` -- in the parent
+directory, with a backslash in its name -- and a later `H:RWTEST.TXT`
+open for reading, which goes through a directory search, does not find
+it.
+Subdirectories in the Atari path (`H:FOO>BAR.TXT`) are joined the same
+way.  The patch introduces `kATHostNativeSep` (`'\\'` on Windows,
+`'/'` elsewhere) for the separators the emulator *emits*, and accepts
+either where it *parses* them back (`VDIsPathSeparator`); the
+Atari-side syntax (`>` and `\`) is untouched.  The parser's self-tests
+are rewritten through a helper so they hold on both hosts.
+`pclink.cpp` has the same `+= '\\'` in its own path builder and is not
+touched here.
+
+Found by the file tests of the Calypsi Atari board support package
+(`~/dev/Calypsi-65816-Atari`, `test/readwrite.c`), which run against
+an H: directory.  Not yet sent upstream.
+
+## altirra-65c816-native-mode.patch -- two CPU core bugs (merged, #88)
 
 Altirra's 65C816 core, in native mode (`src/Altirra/h/cpumachine.inl`):
 
@@ -43,7 +67,7 @@ pair of bytes.  Nothing a C program does can write ANTIC's registers.
 `ALTIRRASDL=... make test-m19` with `DESK_BSS = 2944` is the second
 reproducer.
 
-## altirra-sdl-u1mb-keyraw.patch -- the Ultimate 1MB, headlessly
+## altirra-sdl-u1mb-keyraw.patch -- the Ultimate 1MB, headlessly (merged, #88)
 
 The core has emulated the U1MB all along (`ATUltimate1MBEmulator`); the
 SDL front end only reached it through the ImGui checkbox, and it embeds
@@ -70,7 +94,7 @@ The protocol document in the patch (`AltirraBridge/docs/PROTOCOL.md`)
 describes the verbs.  `tools/a8test/bridge.py` has `key_raw()` and
 `key_tap()` over `KEYRAW`.
 
-## altirra-sdl-bridge-65c816-debug.patch -- a post-mortem for native mode
+## altirra-sdl-bridge-65c816-debug.patch -- a post-mortem for native mode (merged, #90)
 
 PR #90 (2026-09-05), against the bridge only; written for the
 shell-loop fault in `docs/phase14.md` (milestone 3) and what read back
@@ -103,15 +127,24 @@ apply in the order below.
 
 ## Building
 
+Upstream `main` already carries #88 and #90; only the host-path fix
+needs applying:
+
     git clone https://github.com/ilmenit/AltirraSDL && cd AltirraSDL
-    git checkout b3061c7
-    git apply /path/to/gem4xe/tools/altirra/altirra-65c816-native-mode.patch
-    git apply /path/to/gem4xe/tools/altirra/altirra-sdl-u1mb-keyraw.patch
-    git apply /path/to/gem4xe/tools/altirra/altirra-sdl-bridge-65c816-debug.patch
+    git checkout 46567a14          # or later
+    git apply /path/to/gem4xe/tools/altirra/altirra-sdl-hostfs-posix-paths.patch
     ./build.sh --release --system-sdl3 \
         --cmake -DALTIRRA_ENABLE_FFMPEG_RECORDING=OFF \
         --cmake -DALTIRRA_FETCH_FFMPEG=OFF -j$(nproc)
     # build/linux-release/src/AltirraSDL/AltirraSDL
+
+For a build pinned to the revision the gates were first written against,
+apply the three historical patches instead, in this order:
+
+    git checkout b3061c7
+    git apply /path/to/gem4xe/tools/altirra/altirra-65c816-native-mode.patch
+    git apply /path/to/gem4xe/tools/altirra/altirra-sdl-u1mb-keyraw.patch
+    git apply /path/to/gem4xe/tools/altirra/altirra-sdl-bridge-65c816-debug.patch
 
 Point the harness at it:
 

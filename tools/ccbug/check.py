@@ -49,6 +49,8 @@ RESULTS = {
     "r_b13_fix": (48,  "fix", "B13 the far one through a scalar"),
     "r_b14_bug": (192, "bug", "B14 a negative index into an array"),
     "r_b14_fix": (192, "fix", "B14 indexed from the base instead"),
+    "r_b15_bug": (164, "bug", "B15 p->a = p->b + k, spilled pointer"),
+    "r_b15_fix": (164, "fix", "B15 the member through a scalar"),
 }
 B2 = ("r_b2_eq", "r_b2_lt", "r_b2_mod")
 # file stem: note -- the shapes the compiler cannot get through at all

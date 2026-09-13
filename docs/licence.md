@@ -76,14 +76,23 @@ in every application:
     simplified_exit.o   exit
     defaultExit.o       _Stub_exit
 
-Its header reads, in full:
+Eight of the twelve carry the vendor's own header, which reads, in full:
 
 > Copyright Håkan Thörngren.  This file is part of the Calypsi C library.
 > Permission to use with the Calypsi tool chain is hereby granted.
 
 That is a grant to **use**, and it does not mention redistribution either
-way.  Read carefully, the position is narrower than it first looks, and
-worth stating in both directions.
+way.  The other four are not the vendor's wording at all.
+`memcpy_far.o` and `memset_far.o` are NuttX's `lib_memcpy.c` and
+`lib_memset.c`, "Copyright (C) 2007, 2011 Gregory Nutt", under the
+three-clause BSD licence -- GPL-compatible, and its second clause asks
+that the notice travel with binary distributions, which is why
+`tools/dist/README.md` reproduces it.  `vswitch16.o` and `initialize.o`
+come from `vswitch.c` and `initialize.c`, which have no header of any
+kind; they fall under the tool chain's licence alone.
+
+Read carefully, the position is narrower than it first looks, and worth
+stating in both directions.
 
 **The tool chain's licence almost certainly permits this.**  Its clause 2
 expressly grants "personal non-commercial use, including personal hobby

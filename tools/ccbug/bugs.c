@@ -417,6 +417,7 @@ volatile WORD r_b12_bug, r_b12_fix;                     /* want 112 */
 volatile WORD r_b12_neg;                                /* want -113 */
 volatile WORD r_b13_bug, r_b13_fix;                     /* want 48 */
 volatile WORD r_b14_bug, r_b14_fix;                     /* want 192 */
+volatile WORD r_b15_bug, r_b15_fix;                     /* want 164 */
 
 /* ---- B12: a signed 16-bit >> is not an arithmetic shift --------------- */
 
@@ -545,6 +546,67 @@ static WORD b13_arrow_fix(WORD *pt, WORD count, WORD tip, WORD inc)
     return (WORD)(tx + bx - htx);
 }
 
+/* ---- B15: p->a = p->b OP e is compiled as p->a OP= e ------------------ */
+
+/* `st->end = st->start + 64` where st is a near pointer that lives on the
+ * stack (a call preceded it) compiles to `ldy ##end; lda ##64; clc; adc
+ * (slot,s),y; sta (slot,s),y`: the load is done at the DESTINATION's
+ * offset, so the statement is st->end += 64 and st->start is never read.
+ * The trigger is exact: the right-hand side, after casts and parentheses,
+ * is ONE binary operation whose LEFT operand is another member (or
+ * element) of the same pointer.  `+ - & | ^ <<` and a signed `>>` do it,
+ * `+ 1`/`- 1` become `inc/dec n,x` and `* 2` an `asl n,x` on the
+ * destination; any element width; variable indices on either side (`p[n]
+ * = p[1] + 64` and `p[2] = p[n] + 64` both ignore n); a (WORD) cast
+ * around the right-hand side changes nothing, and two such statements in
+ * a row are both wrong.  Not triggered: the member on the RIGHT of the
+ * operator (`k - p->y`), more than one operator at the top level (`p->y
+ * * 2 + k`), a call or _Div16 between the load and the store, a global
+ * pointer, a far pointer, or the pointer still in X.  All -O levels.
+ *
+ * B1 (a stack array), B5 (a dead pointer's slot) and B13 (a pointer
+ * parameter) are faces of the same defect.  This one was met in the
+ * vendor C library: __fs_fdopen's `stream->fs_bufend =
+ * &stream->fs_bufstart[BUFSIZ]` leaves fs_bufend as garbage + 64, and any
+ * fwrite or fread longer than 64 bytes then runs off the end of the
+ * buffer (Calypsi-65816-Atari, docs/cc65816-bug.md, links its own fdopen
+ * before the library to get round it).  The sources never write
+ * `P->a = P->b OP e` through a pointer: the member goes through a scalar. */
+typedef struct { WORD fd; WORD start; WORD end; } B15_STREAM;
+B15_STREAM b15_stream;
+WORD b15_pool[8];
+volatile WORD b15_base = 100;
+
+/* A stand-in for malloc: the first free slot's address.  A one-line
+ * callee is inlined and the pointer never leaves X, so this one loops. */
+WORD b15_alloc(WORD n)
+{
+    WORD i;
+    for (i = 0; i < 8; i++)
+        if (b15_pool[i] == 0) {
+            b15_pool[i] = (WORD)(n + 1);
+            return (WORD)(b15_base + i);
+        }
+    return 0;
+}
+
+WORD b15_bug(B15_STREAM *st)
+{
+    st->start = b15_alloc(0);                   /* spills st to the stack */
+    st->end = (WORD)(st->start + 64);
+    return st->end;
+}
+
+/* The member through a scalar first. */
+WORD b15_fix(B15_STREAM *st)
+{
+    WORD start;
+    st->start = b15_alloc(0);
+    start = st->start;
+    st->end = (WORD)(start + 64);
+    return st->end;
+}
+
 __task int main(void)
 {
     WORD w = 200, h;
@@ -606,5 +668,12 @@ __task int main(void)
     /* and the head at its END, reached by a negative index: x = 192 */
     r_b14_bug = b13_arrow_bug(&b14_pts[2], b13_count, -1);
     r_b14_fix = b13_arrow_fix(b14_pts, b13_count, 2, -1);
+
+    /* start is 100, so end should be 164; the bug adds 64 to end's old 0 */
+    b15_stream.end = 0;
+    r_b15_bug = b15_bug(&b15_stream);
+    b15_pool[0] = 0;
+    b15_stream.end = 0;
+    r_b15_fix = b15_fix(&b15_stream);
     return 0;
 }

@@ -175,7 +175,7 @@ def one(name, progname, how, keep, check):
     syms = symfile.load(SYMS)
     segs, _ = mkxex.read_elf(ELF)
     far = sorted((a, d) for a, d in segs if a > 0xFFFF)
-    chunk = symfile.load(SYMS)["_fl_scr"] - symfile.load(SYMS)["_fl_buf"]
+    chunk = symfile.load(SYMS)["_fl_end"] - symfile.load(SYMS)["_fl_buf"]
 
     # -- the disk, before anything boots it ---------------------------------
     img = atr.ATRImage.load(disk)

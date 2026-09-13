@@ -36,7 +36,7 @@ copier be a flat page loop.  The tail of a segment is handled by sliding the
 last chunk BACKWARDS to a page multiple -- recopying a few bytes already
 placed -- rather than by padding forwards into whatever follows.
 
-The staging layout is not repeated here: _fl_hdr, _fl_buf and _fl_scr come out
+The staging layout is not repeated here: _fl_hdr, _fl_buf and _fl_end come out
 of the ELF symbol table, so src/farload.s and src/gem4xe.scm remain the only
 places that decide where the buffer is and how big it is.
 
@@ -152,7 +152,7 @@ def build_xex(segs, entry, syms):
 
 def stage_far(far, syms):
     """Chunk the far image into staging-buffer segments plus INITAD triggers."""
-    need = ("_fl_hdr", "_fl_buf", "_fl_scr", "_fl_copy")
+    need = ("_fl_hdr", "_fl_buf", "_fl_end", "_fl_copy")
     missing = [n for n in need if n not in syms]
     if missing:
         raise SystemExit(
@@ -222,7 +222,7 @@ def main(argv):
         print(f"  ${vaddr:06X}-${vaddr + len(data) - 1:06X}  {len(data):5d} bytes  "
               f"staged through ${syms['_fl_buf']:04X}")
     if far:
-        chunk = syms["_fl_scr"] - syms["_fl_buf"]
+        chunk = syms["_fl_end"] - syms["_fl_buf"]
         print(f"    {nearb} bytes in bank $00, {farb} copied up in "
               f"{-(-farb // chunk)} chunk(s) of {chunk}")
     return 0

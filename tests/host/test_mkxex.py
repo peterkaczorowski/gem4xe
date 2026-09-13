@@ -71,7 +71,7 @@ def farload_copy(mem, hdr=None):
     mem[hdr + 3] = 0
 
 
-SYMS = {"_fl_hdr": 0x8000, "_fl_buf": 0x8004, "_fl_scr": 0x8004 + 0x1F00,
+SYMS = {"_fl_hdr": 0x8000, "_fl_buf": 0x8004, "_fl_end": 0x8004 + 0x1F00,
         "_fl_copy": 0x3802}
 
 

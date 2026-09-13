@@ -161,7 +161,7 @@ def main(argv):
     syms = symfile.load(SYMS)
     segs, _ = mkxex.read_elf(ELF)
     far = sorted((a, d) for a, d in segs if a > 0xFFFF)
-    chunk = syms["_fl_scr"] - syms["_fl_buf"]
+    chunk = syms["_fl_end"] - syms["_fl_buf"]
     fs = card_checks(check)
 
     # A profile of the gate's own, thrown away first: a fresh NVRAM is

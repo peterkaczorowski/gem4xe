@@ -58,7 +58,7 @@ load-bearing:
   until `vbxe_init()` opens the window. Staging there costs nothing at all.
 
 The layout is not written down twice: `mkxex.py` reads `_fl_hdr`, `_fl_buf` and
-`_fl_scr` out of the ELF symbol table, so `src/farload.s` and `src/gem4xe.scm`
+`_fl_end` out of the ELF symbol table, so `src/farload.s` and `src/gem4xe.scm`
 remain the only places that decide where the buffer is and how big it is.
 
 ## What moves, and what must not

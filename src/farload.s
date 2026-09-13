@@ -22,7 +22,7 @@
 ;;; above whatever actually arrived (src/sys/farmem.c).
 ;;;
 ;;; tools/mkxex.py builds those chunks and is the other half of this file; the
-;;; two share the layout through the linker symbols _fl_hdr / _fl_buf / _fl_scr
+;;; two share the layout through the linker symbols _fl_hdr / _fl_buf / _fl_end
 ;;; rather than a repeated constant.
 ;;;
 ;;; THE STAGING BUFFER LIVES AT $8000, IN THE MEMAC A WINDOW.  That region is
@@ -46,7 +46,7 @@
               .rtmodel core, "*"
 
               .public _fl_copy, _fl_ok, _fl_top
-              .public _fl_hdr, _fl_buf, _fl_scr
+              .public _fl_hdr, _fl_buf, _fl_end
               .public _fl_running_bank
 
 FL_CHUNK:     .equ    0x1b00          ; staging payload: 27 whole pages -- with
@@ -90,19 +90,27 @@ COLDST:       .equ    0x0244          ; the OS: non-zero at RESET means cold
 ;;; ON PURPOSE: that lets mkxex.py describe a whole chunk -- where it goes, how
 ;;; long it is, and the bytes themselves -- in one .xex segment.
 ;;;
-;;; _fl_scr sits after the payload, out of reach of the chunk segments, and is
-;;; the direct page this routine runs on.
+;;; _fl_end marks the end of the payload; mkxex.py sizes its chunks from it.
 
               .section farstage, bss
 _fl_hdr:      .space  3               ; +0  destination, 24-bit little-endian
 _fl_pages:    .space  1               ; +3  length in 256-byte pages, 0 = idle
 _fl_buf:      .space  FL_CHUNK        ; +4  the payload
-_fl_scr:      .space  16              ; direct page for the copier
+_fl_end:
 
-;;; Direct page layout, relative to _fl_scr.
-DP_SRC:       .equ    0               ; 24-bit source pointer
-DP_DST:       .equ    4               ; 24-bit destination pointer
-DP_CNT:       .equ    8               ; pages remaining
+;;; The copier's pointers live in the OS's zero page, in the floating-point
+;;; package's FR0/FRE ($D4-$DF), which nothing touches during a binary
+;;; load.  NOT in a direct page of its own: INITAD is called in emulation
+;;; mode with the OS's interrupts running, and the OS's VBI and IRQ
+;;; handlers address zero page through D -- a `tcd` here would send
+;;; RTCLOK's increments and the keyboard's bookkeeping into whatever the
+;;; copier pointed D at (found the hard way in Calypsi-65816-Atari, whose
+;;; copier this one shares: the VBI wrote RTCLOK over the copier's own
+;;; first instruction).  With D left at $0000, the OS sees the machine it
+;;; expects and nothing has to be masked.
+DP_SRC:       .equ    0xd4            ; 24-bit source pointer
+DP_DST:       .equ    0xd8            ; 24-bit destination pointer
+DP_CNT:       .equ    0xdc            ; pages remaining
 
               .section code, root
 
@@ -136,14 +144,6 @@ fl_ready:
               bne     fl_go           ; something is staged
 fl_out:       rts                     ; nothing staged (the priming call)
 fl_go:
-
-              php
-              phd
-              lda     #.byte1 _fl_scr
-              xba
-              lda     #.byte0 _fl_scr
-              tcd                     ; TCD is 16-bit even in emulation mode
-
               lda     #.byte0 _fl_buf
               sta     dp:DP_SRC
               lda     #.byte1 _fl_buf
@@ -208,8 +208,6 @@ fl_nowrap:    dec     dp:DP_CNT
               lda     dp:DP_DST+2
               sta     long:_fl_top+2
 fl_nottop:
-              pld
-              plp
 ;;; Consume the chunk.  DOS may call INITAD again after a segment that carries
 ;;; no chunk -- the run vector, for one -- and this is what makes that a no-op.
               lda     #0
@@ -264,9 +262,8 @@ fl_check:
               rts
 
 ;;; fl_noram -- a chunk's destination is not RAM.  Reached from _fl_copy with
-;;; its direct page still selected and DP_DST naming the bank, which is put
-;;; into the message so the user learns WHERE the machine stops, not just
-;;; that it does.
+;;; DP_DST naming the bank, which is put into the message so the user learns
+;;; WHERE the machine stops, not just that it does.
 fl_noram:     lda     dp:DP_DST+2
               pha
               lsr     a
@@ -279,8 +276,6 @@ fl_noram:     lda     dp:DP_DST+2
               and     #0x0f
               jsr     fl_hex
               sta     msg_noram_bank+1
-              pld
-              plp
               ldx     #.byte0 msg_noram
               ldy     #.byte1 msg_noram
               lda     #msg_noram_end-msg_noram
