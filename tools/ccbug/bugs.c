@@ -418,6 +418,7 @@ volatile WORD r_b12_neg;                                /* want -113 */
 volatile WORD r_b13_bug, r_b13_fix;                     /* want 48 */
 volatile WORD r_b14_bug, r_b14_fix;                     /* want 192 */
 volatile WORD r_b15_bug, r_b15_fix;                     /* want 164 */
+volatile WORD r_b16_fix;                                /* want 119 */
 
 /* ---- B12: a signed 16-bit >> is not an arithmetic shift --------------- */
 
@@ -607,6 +608,34 @@ WORD b15_fix(B15_STREAM *st)
     return st->end;
 }
 
+/* ---- B16: a byte spin loop's width switch lands before its back edge -- */
+
+/* `while (vc < 19) ;` on a volatile byte, with an early return before it
+ * and 16-bit code after it, compiles at -O2 to `?L: lda vc; cmp #19;
+ * rep #32; bcc ?L`: the second pass loads a word and the compare eats
+ * the rep's opcode, so execution runs into the branch's operand.  That
+ * shape cannot be run; it is b16.c, compiled alone and its listing read.
+ * The sources read the byte into a word through a helper and compare
+ * the word (src/sys/bootinfo.c's vcount()), which is what runs here.
+ * Nothing in the simulator has a beam, so this helper moves it on a
+ * line per read; the caller's code is the same either way. */
+volatile uint8_t b16_vc;                    /* VCOUNT */
+
+static WORD b16_vcount(void)
+{
+    b16_vc++;
+    return b16_vc;
+}
+
+WORD b16_fix(WORD p)
+{
+    if (p)
+        return 0;
+    while (b16_vcount() >= 19) ;            /* the frame's wrap */
+    while (b16_vcount() < 19) ;             /* the top of the logo */
+    return (WORD)(b16_vc + 100);
+}
+
 __task int main(void)
 {
     WORD w = 200, h;
@@ -675,5 +704,9 @@ __task int main(void)
     b15_pool[0] = 0;
     b15_stream.end = 0;
     r_b15_fix = b15_fix(&b15_stream);
+
+    /* the polls stop at line 19, so 119 */
+    b16_vc = 0;
+    r_b16_fix = b16_fix(0);
     return 0;
 }

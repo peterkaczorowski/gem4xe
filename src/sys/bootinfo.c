@@ -62,16 +62,70 @@ static uint8_t dos_ink;                 /* COLOR1 as DOS had it */
 #define SKSTAT   (*(volatile uint8_t *)0xD20F)  /* bit 2 low: a key held */
 #define IRQEN    (*(volatile uint8_t *)0xD20E)  /*   bit 3 low: SHIFT    */
 #define POKMSK   (*(volatile uint8_t *)0x0010)  /* the OS's IRQEN shadow */
+#define COLPF3   (*(volatile uint8_t *)0xD019)  /* the logo's colour     */
+#define CHBASE   (*(volatile uint8_t *)0xD409)  /* ANTIC: the glyphs' page */
+#define CHBAS    (*(volatile uint8_t *)0x02F4)  /* its OS shadow         */
+#define SDLSTL   (*(volatile uint16_t *)0x0230) /* the OS's display list */
 
 #define INK      0x00                   /* GEM's black on white */
 #define PAPER    0x0E
 
 #define HOLD_SECONDS 3                  /* EmuTOS's, and enough to read */
 
+#define LOGO_ROWS 5                     /* the logo: five rows of five */
+#define LOGO_LETTERS 6                  /* cells a letter, see below   */
+
+/* THE RAINBOW.  The logo is coloured the way this machine colours
+ * things: the beam is followed down the screen and COLPF3 rewritten
+ * every two lines, a hue a band, the bands walking down a step a frame.
+ * The text screen cannot do it as it stands -- in ANTIC mode 2 the ink
+ * takes COLPF2's hue and only COLPF1's luminance, so on white paper the
+ * ink is grey or nothing -- so for the hold the logo's five rows are
+ * mode 4, where a character is four two-bit cells and the cell value 3
+ * is COLPF2 for a plain character and COLPF3 for an inverse one.  A
+ * character set of one glyph, all eight bytes $FF, makes a space paper
+ * and an inverse space the raster's colour, and the rows as E: wrote
+ * them need not change at all.  The set lives at $8000: the loader's
+ * staging buffer, spent before main() and in the 16 KB the speed-up
+ * leaves on the motherboard bus, which is where ANTIC reads.  Nothing
+ * is written for the rest of the frame: CHBASE goes to the set as the
+ * first logo row begins and back to the OS's as the rule's row begins,
+ * both in the horizontal blank a VCOUNT step opens with, and the OS's
+ * rows above and below never see the strange set.  Interrupts are held
+ * off for those forty lines and no longer, so a mouse sample cannot
+ * push a write into the picture.  No display list interrupt, no
+ * WSYNC: VCOUNT is polled, which needs nothing installed and nothing
+ * in bank $00, and the accelerator's answer to a halted bus is not a
+ * thing this screen wants to find out. */
+#define GLYPHS     0x8000               /* the one-glyph set, 1 KB     */
+#define DL_TEXT    8                    /* ANTIC's first line          */
+#define DL_BLANK   24                   /* the OS list's three $70s    */
+#define LOGO_TOP   ((DL_TEXT + DL_BLANK + 8) / 2)  /* row 1, in VCOUNT */
+#define LOGO_BANDS (LOGO_ROWS * 4)      /* VCOUNT steps down the logo  */
+#define LOGO_END   (LOGO_TOP + LOGO_BANDS)
+
+/* The hues, twice each so a band is four lines: 1 to 15 is the hue
+ * circle, and at this luminance every one of them shows on white. */
+#define HUES 30
+#define HUE_LUM 0x06
+static const uint8_t FAR hues[HUES] = {
+    0x10 | HUE_LUM, 0x10 | HUE_LUM, 0x20 | HUE_LUM, 0x20 | HUE_LUM,
+    0x30 | HUE_LUM, 0x30 | HUE_LUM, 0x40 | HUE_LUM, 0x40 | HUE_LUM,
+    0x50 | HUE_LUM, 0x50 | HUE_LUM, 0x60 | HUE_LUM, 0x60 | HUE_LUM,
+    0x70 | HUE_LUM, 0x70 | HUE_LUM, 0x80 | HUE_LUM, 0x80 | HUE_LUM,
+    0x90 | HUE_LUM, 0x90 | HUE_LUM, 0xA0 | HUE_LUM, 0xA0 | HUE_LUM,
+    0xB0 | HUE_LUM, 0xB0 | HUE_LUM, 0xC0 | HUE_LUM, 0xC0 | HUE_LUM,
+    0xD0 | HUE_LUM, 0xD0 | HUE_LUM, 0xE0 | HUE_LUM, 0xE0 | HUE_LUM,
+    0xF0 | HUE_LUM, 0xF0 | HUE_LUM,
+};
+
+/* The logo rows' bytes in the OS's display list, once found; NULL
+ * while the logo is plain black. */
+static uint8_t *logo_dl[LOGO_ROWS];
+static uint8_t phase;                   /* where the bands are this frame */
+
 /* GEM4XE in block capitals, five rows of five cells a letter, one bit a
  * cell, the top row first. */
-#define LOGO_ROWS 5
-#define LOGO_LETTERS 6
 static const uint8_t FAR logo[LOGO_LETTERS][LOGO_ROWS] = {
     { 0x0F, 0x10, 0x13, 0x11, 0x0F },   /* G */
     { 0x1F, 0x10, 0x1E, 0x10, 0x1F },   /* E */
@@ -344,20 +398,98 @@ void boot_printer(void)
 
 /* ---- the hold -------------------------------------------------------- */
 
-/* Frames, from whichever counter is running: the interrupt regime's when
- * it is up, VCOUNT's wrap when it is not. */
-static uint16_t ticks(void)
+/* VCOUNT, read into a word.  The polls below compare the word, never
+ * the byte: a spin loop that compares a byte and is followed by 16-bit
+ * code is cc65816 5.18's B16 (tools/ccbug) -- the width switch lands
+ * before the back edge, and the second pass reads VCOUNT as a word,
+ * takes three bytes for the compare's two and runs into the branch's
+ * operand.  This costs a call per poll, which at 20 MHz is nothing. */
+static uint16_t vcount(void)
 {
-    static uint16_t n;
-    static uint8_t last;
-    uint8_t vc = VCOUNT;
+    return VCOUNT;
+}
 
-    if (irq.how != IRQ_OFF)
-        return irq_frames;
-    if (vc < last)
-        n++;
-    last = vc;
-    return n;
+/* The logo's rows to mode 4, if the OS's list is the one it builds for
+ * GRAPHICS 0: blank lines, then a mode-2 instruction a row, the first
+ * carrying the address.  Walked, not assumed -- a list with anything
+ * else in it leaves the logo black, which is a boot screen too.  Done
+ * with the beam below the logo, so no frame shows a mode-4 row with
+ * the OS's set, whose space is empty in both colours. */
+static void logo_on(void)
+{
+    uint8_t *dl = (uint8_t *)SDLSTL, *p = dl;
+    uint8_t *rows[LOGO_ROWS + 1];
+    WORD r;
+
+    while (*p == 0x70)
+        p++;
+    for (r = 0; r <= LOGO_ROWS; r++) {  /* the blank row, then the logo */
+        if ((*p & 0x0F) != 0x02)
+            return;
+        rows[r] = p;
+        p += (*p & 0x40) ? 3 : 1;       /* an address follows an LMS */
+    }
+    memset((void *)GLYPHS, 0, 1024);
+    memset((void *)GLYPHS, 0xFF, 8);
+    while (vcount() < LOGO_END)
+        ;
+    for (r = 0; r < LOGO_ROWS; r++) {
+        logo_dl[r] = rows[r + 1];
+        *logo_dl[r] = (uint8_t)((*logo_dl[r] & 0xF0) | 0x04);
+    }
+}
+
+static void logo_off(void)
+{
+    WORD r;
+
+    if (!logo_dl[0])
+        return;
+    while (vcount() < LOGO_END)           /* this frame's rows are drawn */
+        ;
+    for (r = 0; r < LOGO_ROWS; r++)
+        *logo_dl[r] = (uint8_t)((*logo_dl[r] & 0xF0) | 0x02);
+    CHBASE = CHBAS;
+}
+
+/* One frame: the wait for the top of the logo, then the beam followed
+ * down it.  Each band's colour is fetched before its line is waited
+ * for, so the store is the first thing after the poll, in the blank. */
+static void frame(void)
+{
+    uint16_t line;
+    uint8_t i, c;
+
+    while (vcount() >= LOGO_TOP - 1)      /* the rest of this frame */
+        ;
+    while (vcount() < LOGO_TOP - 1)       /* the OS's blank lines */
+        ;
+    if (!logo_dl[0]) {
+        while (vcount() < LOGO_TOP)
+            ;
+        return;
+    }
+    cpu_sei();
+    i = phase;
+    c = hues[i];
+    line = LOGO_TOP;
+    while (vcount() < line)
+        ;
+    CHBASE = GLYPHS >> 8;
+    COLPF3 = c;
+    while (++line < LOGO_END) {
+        if (++i == HUES)
+            i = 0;
+        c = hues[i];
+        while (vcount() < line)
+            ;
+        COLPF3 = c;
+    }
+    while (vcount() < line)               /* the rule's row: the OS's set */
+        ;
+    CHBASE = CHBAS;
+    cpu_cli();
+    phase = (uint8_t)(phase ? phase - 1 : HUES - 1);    /* down a band */
 }
 
 static uint8_t key_held(void)
@@ -386,7 +518,7 @@ void boot_end(void)
     ROW row;
     const char *h;
     WORD n, i, k;
-    uint16_t t0, hold;
+    uint16_t frames, hold;
     uint8_t paused = 0;
 
     rule();
@@ -405,15 +537,19 @@ void boot_end(void)
     CRSINH = 0;                         /* DOS gets its cursor back */
 
     /* Three seconds of frames -- 50 or 60 to the second -- any key ends
-     * it, and SHIFT holds it for as long as SHIFT is held. */
+     * it, and SHIFT holds it for as long as SHIFT is held, the rainbow
+     * running all the while. */
     hold = (uint16_t)(((PAL & 0x0E) == 0 ? 50 : 60) * HOLD_SECONDS);
-    t0 = ticks();
+    logo_on();
+    frames = 0;
     while (!key_held()) {
+        frame();
         if (shift_held())
             paused = 1;
-        else if (paused || (uint16_t)(ticks() - t0) >= hold)
+        else if (paused || ++frames >= hold)
             break;
     }
+    logo_off();
     kb_drain();
     COLOR1 = dos_ink;                   /* the OS's VBI restores the rest */
 }

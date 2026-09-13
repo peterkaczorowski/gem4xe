@@ -51,6 +51,7 @@ RESULTS = {
     "r_b14_fix": (192, "fix", "B14 indexed from the base instead"),
     "r_b15_bug": (164, "bug", "B15 p->a = p->b + k, spilled pointer"),
     "r_b15_fix": (164, "fix", "B15 the member through a scalar"),
+    "r_b16_fix": (119, "fix", "B16 the byte read into a word, compared"),
 }
 B2 = ("r_b2_eq", "r_b2_lt", "r_b2_mod")
 # file stem: note -- the shapes the compiler cannot get through at all
@@ -58,6 +59,11 @@ CRASHES = {
     "b6": "B6 indexed direct-page array",
     "b11": "B11 near <-> far struct copy over 8 bytes",
 }
+# file stem: note -- the shapes that compile to something that cannot be run
+LISTINGS = {
+    "b16": "B16 byte spin loop, rep before its back edge",
+}
+BRANCHES = ("bcc", "bcs", "beq", "bne", "bmi", "bpl", "bvc", "bvs")
 
 
 def run(cmd, **kw):
@@ -91,6 +97,34 @@ def simulate(db, elf, names):
     if len(vals) != len(names):
         sys.exit(f"expected {len(names)} values, got {len(vals)}:\n{out}")
     return dict(zip(names, map(int, vals)))
+
+
+def loop_width_bug(listing):
+    """True if the listing has a loop whose accumulator width is switched
+    to 16 bits just before its backward branch with no switch back inside
+    it: the loop's second pass then runs 8-bit code as 16-bit (B16)."""
+    ins = []
+    for line in open(listing):
+        m = re.match(r"\s*\\ [0-9a-f]{6} \S*\s+(?:(`?\?L\d+`?|\w+):)?\s*(\S+)?\s*(.*)$",
+                     line)
+        if not m:
+            continue
+        label, op, arg = m.groups()
+        if op is None and label is None:
+            continue
+        ins.append((label.strip("`") if label else None, op, arg.strip()))
+    labels = {label: i for i, (label, _, _) in enumerate(ins) if label}
+    for i, (_, op, arg) in enumerate(ins):
+        if op not in BRANCHES or i == 0:
+            continue
+        tgt = labels.get(arg.strip("`"))
+        if tgt is None or tgt > i:
+            continue
+        pop, parg = ins[i - 1][1], ins[i - 1][2]
+        if pop == "rep" and "32" in parg and not any(
+                o == "sep" and "32" in a for _, o, a in ins[tgt:i - 1]):
+            return True
+    return False
 
 
 def main():
@@ -131,6 +165,14 @@ def main():
                             os.path.join(ROOT, "tools", "ccbug", f"{tag}.c")],
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         crashes[note] = r.returncode != 0 and "internal error" in r.stdout
+    # B16 compiles, to code that derails on its second pass: compile the
+    # file alone and read its listing for the shape
+    for tag, note in LISTINGS.items():
+        lst = os.path.join(a.out, f"{tag}.lst")
+        run([cc, "--code-model=large", "--data-model=small", f"-O{a.O}",
+             "-o", os.path.join(a.out, f"{tag}.o"), "--list-file", lst,
+             os.path.join(ROOT, "tools", "ccbug", f"{tag}.c")])
+        crashes[note] = loop_width_bug(lst)
 
     print(f"{version}, -O{a.O}, {os.path.relpath(scm, a.calypsi)}")
     bad = 0
@@ -162,7 +204,7 @@ def main():
         print(f"check-cc: FAILED -- {bad} workaround shape(s) miscompile")
         return 1
     print(f"check-cc: PASSED -- every workaround shape is right; "
-          f"{present} of {sum(1 for v in RESULTS.values() if v[1] == 'bug') + len(CRASHES)} "
+          f"{present} of {sum(1 for v in RESULTS.values() if v[1] == 'bug') + len(CRASHES) + len(LISTINGS)} "
           f"bug shapes still present")
     return 0
 

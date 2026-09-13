@@ -1,13 +1,15 @@
 # tools/ccbug — the cc65816 bugs gem4xe works around
 
-Fifteen defects in Calypsi cc65816 **5.18** — eleven in code generation,
+Sixteen defects in Calypsi cc65816 **5.18** — twelve in code generation,
 two crashes, one in the front end's arithmetic and one in the run-time
 library's division — each reproduced from a shape
 lifted out of gem4xe or out of the vendor's own C library, each with the
 shape the sources use instead. `make check-cc` builds `bugs.c` with the
 vendor's minimal linker script and C library, runs it under `db65816`, and
 reads the results back; `b6.c` and `b11.c`, which the compiler cannot get
-through, are compiled on their own and the outcome read from the compiler:
+through, are compiled on their own and the outcome read from the compiler,
+and `b16.c`, whose output cannot be run, is compiled on its own and its
+listing read:
 
     make check-cc
       B1 stack array element + operand           want   476 got   376   still present
@@ -15,7 +17,8 @@ through, are compiled on their own and the outcome read from the compiler:
       ...
       B6 indexed direct-page array                       compiles   still present
       B11 near <-> far struct copy over 8 bytes          compiles   still present
-    check-cc: PASSED -- every workaround shape is right; 18 of 18 bug shapes still present
+      B16 byte spin loop, rep before its back edge         compiles   still present
+    check-cc: PASSED -- every workaround shape is right; 19 of 19 bug shapes still present
 
 The run **fails only if a workaround shape stops compiling right**, because
 that is what would break gem4xe. A bug that has gone away is reported as
@@ -80,6 +83,12 @@ What the sources do, in one line each. The reasons follow.
     the left of the operator goes through a scalar. Rules 1 and 13 are
     this rule's two earlier sightings; this is the exact trigger, and it
     is what breaks `fdopen` in the vendor's own C library.
+16. **Never spin on a byte.** A poll such as `while (VCOUNT < line) ;`
+    reads the byte into a word first -- `while (vcount() < line) ;` with
+    `static uint16_t vcount(void) { return VCOUNT; }` -- so that the
+    compare is a 16-bit one. At -O2 the byte compare's width switch can
+    land before the loop's back edge, and the second pass runs 8-bit code
+    as 16-bit.
 
 ## B1 — stack-array element plus operand compiles to a load
 
@@ -468,3 +477,33 @@ compiles right, and its listing was read to be sure.
 `bugs.c` gets the spill with a callee that loops — a one-line callee is
 inlined at -O2, the pointer never leaves X, and the statement compiles
 correctly, which is also why a minimal reproducer so easily misses it.
+
+## B16 — a byte spin loop's width switch lands before its back edge
+
+    if (p) return 0;
+    while (VCOUNT >= 19) ;      /* the frame's wrap */
+    while (VCOUNT < 19) ;       /* the top of the logo */
+
+with `VCOUNT` a volatile byte, at -O2, compiles the second loop to
+
+    ?L11: lda VCOUNT ; cmp #19 ; rep #32 ; bcc ?L11
+
+The first pass is right. The second runs `lda` as a word and `cmp #19` as
+a three-byte instruction, which swallows the `rep`'s opcode `c2`, so the
+next thing executed is the branch's own operand — `90 f7` and whatever
+follows it. In `src/sys/bootinfo.c` what followed was `20 90 f7`, a `jsr`
+into the middle of `farmem_probe`, whose `rtl` then landed in the OS ROM
+and BRKed out of the boot screen's rainbow. -O0 and -O1 put the `rep`
+after the loop; the first loop is untouched because its label sits before
+the `sep`; and without the `if (p) return 0` both loops compile right,
+which is why a minimal reproducer misses it. `do { vc++; } while (vc <
+19);` is the same shape.
+
+The shape cannot be run, so `b16.c` is compiled alone and `check.py`
+reads its listing: a conditional branch backwards, immediately preceded
+by `rep #32`, with no `sep #32` between the label and the branch. The
+same reading over every gem4xe source with its own flags found only the
+eight polls in `bootinfo.c`. The sources now read the byte into a word
+through a helper and compare the word — `while (vcount() < line) ;`, with
+`vcount()` a real call (`jsl`) that costs nothing at 20 MHz — and that
+shape runs in `bugs.c` as `r_b16_fix`. Rule 16.

@@ -50,9 +50,8 @@ logo, the version, the CPU and the memory come up before the VDI exists;
 the video line when the device is chosen; the clock line after the RTC
 probe; the pointer line as `ptr_init` gets its kind; the printer line
 from the configuration.  Then a rule, a hint, and EmuTOS's hold: three
-seconds, any key ends it, SHIFT held pauses it -- counted from the
-interrupt regime's frame counter when it is up and from VCOUNT when it
-is not.
+seconds, any key ends it, SHIFT held pauses it -- counted in frames,
+each of which the hold spends following the beam down the logo (below).
 
 The GTIA colour registers are written for GEM's colours, white paper and
 black ink, and **not the OS shadows**, so the way out -- the OS's VBI
@@ -106,6 +105,69 @@ that the clock, pointer and printer lines exist at all.  It also
 photographs it, `build/shots/boot-<disk>.png`; the tour (`make shots`)
 takes the same picture on its way to the desk, and that one is
 `docs/shots/00-boot.png`.
+
+## The rainbow
+
+The one thing this screen does that a TOS machine's cannot: the logo
+is coloured the Atari way, a rainbow of raster bands rolling down the
+letters for as long as the screen is held.  The text screen cannot do
+it as it stands.  In ANTIC mode 2 the ink takes `COLPF2`'s hue and only
+`COLPF1`'s luminance -- which is why GEM's black on white is the one
+pair of colours the boot screen could have -- so for the hold the
+logo's five rows are switched to **mode 4**, where a character is four
+two-bit cells and cell value 3 is `COLPF2` for a plain character and
+`COLPF3` for an inverse one.  A character set of one glyph, all eight
+bytes `$FF`, makes a space paper and an inverse space the raster's
+colour, and the rows as E: wrote them need not change at all.  The set
+lives at `$8000`: the loader's staging buffer, spent before `main()`,
+in the 16 KB the speed-up leaves on the motherboard bus, which is where
+ANTIC reads.
+
+Each frame, `boot_end` waits for `VCOUNT` to reach the first logo row,
+writes `CHBASE` and the first band's colour in the horizontal blank a
+`VCOUNT` step opens with, then a colour every step down the logo --
+twenty bands of two lines, the hues 1 to 15 twice each so a band is
+four lines and the wheel is sixty, walking down a step a frame -- and
+the OS's `CHBASE` back as the rule's row begins.  Interrupts are held
+off for those forty lines and no longer, so a mouse sample cannot push
+a write into the picture.  No display list interrupt and no `WSYNC`:
+`VCOUNT` is polled, which needs nothing installed and nothing in bank
+`$00`, and what the accelerator does with a halted bus is not a thing
+this screen wants to find out.  The display list is walked, not
+assumed: blank lines, then a mode-2 instruction a row with the first
+carrying the address, and anything else leaves the logo black, which
+is a boot screen too.  The switch happens with the beam below the
+logo, so no frame shows a mode-4 row with the OS's set, whose space is
+empty in both colours; the way back likewise, and the desktop starts
+with the OS's list and set as they were.
+
+**The compiler took the first version down**, and it took a day to
+see how.  The polls were written against byte variables, `while (vc <
+LOGO_TOP) ;`, so that each was `lda`, `cmp`, branch and the store
+landed inside the blank.  `make test-boot` then said the desktop never
+set its device, and the picture showed the logo black and the machine
+in the BRK handler.  Watchpoints on the variables never fired -- the
+bridge's `WATCH_SET` does not see writes into the accelerator's fast
+RAM -- but a breakpoint on the BRK vector's stub in bank `$00` does
+halt, and with `CONFIG history true` the `HISTORY` before it is the
+whole story: the second `VCOUNT` wait in `frame()` compiled to
+
+    ?L300: lda $D40B ; cmp #19 ; rep #32 ; bcc ?L300
+
+The width switch is *before* the back edge.  The first pass is right;
+the second loads a word, `cmp #19` takes three bytes and swallows the
+`rep`'s opcode, and the next instruction is the branch's own operand
+followed by whatever comes after -- `20 90 f7`, a `jsr` into the
+middle of `farmem_probe`, whose `rtl` landed in the OS ROM and BRKed.
+It needs -O2, a conditional return before the loop and 16-bit code
+after it; the minimal shape is six lines and it is **B16** in
+`tools/ccbug` (`b16.c`, compiled alone and its listing read, since the
+code cannot be run; the shape the sources use runs in `bugs.c`).  The
+polls now read `VCOUNT` into a word through a helper, `while (vcount()
+< line) ;`, and compare the word: a `jsl` per poll, which at 20 MHz
+is nothing against a scan line.  A listing reader written for the
+occasion went over every source in the tree with its own flags and
+found the shape in nothing but the eight polls.
 
 ## What it cost
 

@@ -32,8 +32,13 @@
  * hardware and of DOSes, numbers, file names -- are the machine's own.
  *
  * THE HOLD is EmuTOS's: three seconds, any key ends it, SHIFT held
- * pauses it.  Counted in frames from the interrupt regime's counter
- * when it is up (src/sys/irq.h) and from VCOUNT when it is not.
+ * pauses it.  Counted in frames, because each frame of it is spent
+ * following the beam down the logo: the one thing this screen does
+ * that a TOS machine's cannot is colour the logo the Atari way, a
+ * rainbow of raster bands rolling down the letters (bootinfo.c, THE
+ * RAINBOW).  Nothing is installed for it and nothing of it survives
+ * the hold: the display list and the character set are the OS's own
+ * again before the desktop starts.
  */
 #ifndef GEM4XE_BOOTINFO_H
 #define GEM4XE_BOOTINFO_H

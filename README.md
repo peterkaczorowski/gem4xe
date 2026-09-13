@@ -24,7 +24,7 @@ The product booted and used, photographed under AltirraSDL by `make shots`
 desktop's own object trees). Every picture is 640 × 480: the 640 × 240
 overlay with its rows doubled, which is what a monitor shows.
 
-![the boot screen: the hardware found, held for three seconds](docs/shots/00-boot.png)
+![the boot screen: the hardware found, held for three seconds under a rainbow that rolls down the logo](docs/shots/00-boot.png)
 
 ![the desktop with a window on A:\, fulled](docs/shots/02-window.png)
 
