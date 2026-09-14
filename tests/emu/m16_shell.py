@@ -46,7 +46,7 @@ APP_E_FILE = -6                             # src/sys/app.h
 DESKTOP = os.path.join(ROOT, "build", "m16_desk.g4a")
 # what the desktop draws (src/m16_desk.c), and what the shell says
 # when a program cannot be found (src/aes/shel.c)
-HELP = "gem4xe desktop -- R M11, C CALC, K CLOCK, B M29, X a missing one, Q quits"
+HELP = "gem4xe desktop -- R M11, C CALC, K CLOCK, B M29, H M31, X a missing one, Q quits"
 NOT_FOUND = "[1][This application|cannot be found.][ OK ]"
 STR_OFF = 0                                 # the model's copy of it, in scratch
 
