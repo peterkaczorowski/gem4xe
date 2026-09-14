@@ -805,7 +805,7 @@ class Desktop:
         if pf.attr & FA_SUBDIR:
             return IB_FOLDER
         k = pf.name.find(".")
-        if k >= 0 and pf.name[k:] == ".G4A":
+        if k >= 0 and pf.name[k:] in (".G4A", ".PRG"):   # .PRG: the same, by an Atari name
             return IB_APPL
         return IB_DOCU
 

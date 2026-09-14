@@ -391,7 +391,12 @@ static void win_sinfo(WNODE *pw)
 
 /* -- the view ---------------------------------------------------------- */
 
-/* Which icon an entry gets: a folder, a program (.G4A), or a document. */
+/* Which icon an entry gets: a folder, a program, or a document.  A
+ * program is .G4A -- gem4xe's own executable -- or .PRG, the Atari
+ * world's name for one, for anyone who would rather use that extension;
+ * either way the loader reads the file's format, not its name, and
+ * refuses a file that is not gem4xe's (src/sys/app.c, APP_E_MAGIC), so a
+ * 68000 .PRG off a real Atari is turned away rather than run. */
 static WORD win_which(const FNODE FAR *pf)
 {
     const char FAR *s = pf->f_name;
@@ -400,7 +405,9 @@ static WORD win_which(const FNODE FAR *pf)
         return IB_FOLDER;
     while (*s && *s != '.')
         s++;
-    if (s[0] == '.' && s[1] == 'G' && s[2] == '4' && s[3] == 'A' && !s[4])
+    if (s[0] == '.' && !s[4]
+        && ((s[1] == 'G' && s[2] == '4' && s[3] == 'A')
+         || (s[1] == 'P' && s[2] == 'R' && s[3] == 'G')))
         return IB_APPL;
     return IB_DOCU;
 }
