@@ -592,9 +592,9 @@ tools/deskicons.py: tools/iconconv.py
 # with a resource built for 0.1, and the desktop gates found it a phase
 # later, when the model (which reads VERSION) had every tree two bytes
 # from where the stale file put it (docs/phase38.md).
-build/desktop.rsc build/deskrsc.h: tools/deskrsc.py tools/rsc.py tools/aesref.py tools/deskicons.py VERSION
+build/desktop.rsc build/deskrsc.h build/prefs.rsc: tools/deskrsc.py tools/rsc.py tools/aesref.py tools/deskicons.py VERSION
 	@mkdir -p build
-	python3 tools/deskrsc.py build/desktop.rsc build/deskrsc.h
+	python3 tools/deskrsc.py build/desktop.rsc build/deskrsc.h build/prefs.rsc
 
 # The GEM 8x8 system font, extracted from EmuTOS (GPL v2+) by fontconv.py.
 # Checked in so the host reference reads the same bytes the target links.
@@ -771,7 +771,7 @@ SHELL_FILES = --add build/m16_desk.g4a DESKTOP.G4A --add build/m11_app.g4a M11.G
 SHELL_DEPS  = build/m16_desk.g4a build/m11_app.g4a
 DESK_FILES  = --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
               --add build/m11_app.g4a M11.G4A
-DESK_DEPS   = build/desktop.g4a build/desktop.rsc build/m11_app.g4a
+DESK_DEPS   = build/desktop.g4a build/desktop.rsc build/prefs.rsc build/m11_app.g4a
 # The two accessories (src/apps), on the media with room for them: the
 # SpartaDOS floppy, the CF card, and test-m22's own disk.  A prerequisite
 # list is expanded where it is written, so these live above every rule
@@ -941,6 +941,7 @@ build/gem-antic.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11
 SP_LAYOUT = --name "GEM>GEM.COM" --boot "CD >GEM|GEM" --mkdir GEM --mkdir APPS \
 	    --add build/desktop.g4a "GEM>DESKTOP.G4A" \
 	    --add build/desktop.rsc "GEM>DESKTOP.RSC" \
+	    --add build/prefs.rsc "GEM>PREFS.RSC" \
 	    --add build/lang.rsc "GEM>LANG.RSC" \
 	    --add build/816.com "GEM>816.COM" \
 	    --add build/gem4xe.cfg "GEM>GEM4XE.CFG" \
@@ -972,7 +973,7 @@ build/gem-shots.atr: $(SP_DEPS)
 # D1: and D2: before any DOS runs.  No SIDE.SYS, no driver on the card.
 # tools/apt.py writes the table, tests/host/test_apt.py checks it against
 # the rules Altirra's own parser applies, and test-cf boots it.
-build/gem-cf.img: build/gem.xex build/desktop.g4a build/desktop.rsc build/hello_app.g4a \
+build/gem-cf.img: build/gem.xex build/desktop.g4a build/desktop.rsc build/prefs.rsc build/hello_app.g4a \
                   build/lang.rsc build/gem4xe.cfg build/816.com $(APP_DEPS) $(ACCP_DEPS) tools/mkcf.py tools/apt.py tools/atr.py
 	@rm -f $@
 	python3 tools/mkcf.py $@
@@ -1003,7 +1004,7 @@ build/gem-sd.img: build/gem-cf.img build/gemdiag.com
 # machine rather than on the disk, so the disk is gem4xe's to give away
 # where gem-sp.atr and gem-boot.atr are not.  Needs no fixture to build;
 # test-boot boots it when [spartados].sdx_cart names a cartridge.
-build/gem-sdx.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/hello_app.g4a \
+build/gem-sdx.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/prefs.rsc build/hello_app.g4a \
                    build/lang.rsc build/gem4xe.cfg build/816.com $(APP_DEPS) $(ACCP_DEPS) tools/mkfloppy.py tools/mkcf.py tools/atr.py
 	@rm -f $@
 	python3 tools/mkfloppy.py $@
@@ -1164,6 +1165,7 @@ DIST ?= build/gem4xe-$(shell date +%F)-$(shell git rev-parse --short HEAD 2>/dev
 DIST_DISKS = build/gem-sp.atr build/gem-boot.atr build/gem-sdx.atr build/gem-cf.img
 DIST_SYS   = build/gem.xex build/desktop.g4a build/desktop.rsc \
              build/lang.rsc build/816.com build/hello_app.g4a build/gem4xe.cfg \
+             build/prefs.rsc \
              $(APP_DEPS) $(ACCP_DEPS)
 
 dist: $(DIST_SYS) $(DIST_DISKS) build/gem4xe-sdk.tar.gz \

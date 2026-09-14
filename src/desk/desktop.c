@@ -138,6 +138,106 @@ static WORD sel_item(WORD root)
     return 0;
 }
 
+/* -- preferences -------------------------------------------------------- */
+
+
+
+/* The two fields of a colour word the chooser touches (the donor's
+ * FILLPAT_MASK and FILLCOL_MASK): the fill pattern and the fill colour. */
+#define FILLPAT_MASK    0x0070L
+#define FILLCOL_MASK    0x000FL
+
+/* Put `spec` on the dialog: its pattern and colour selected in the two
+ * rows, and the sample drawn in both.  A colour the screen cannot show is
+ * left DISABLED and never selected. */
+static void pref_show(OBJECT *tree, LONG spec)
+{
+    WORD i, pat = (WORD)((spec & FILLPAT_MASK) >> 4);
+    WORD col = (WORD)(spec & FILLCOL_MASK);
+
+    for (i = 0; i < N_PAT; i++)
+        tree[PRPAT0 + i].ob_state = (UWORD)(i == pat ? SELECTED : NORMAL);
+    for (i = 0; i < N_COL; i++)
+        if (!(tree[PRCOL0 + i].ob_state & DISABLED))
+            tree[PRCOL0 + i].ob_state = (UWORD)(i == col ? SELECTED : NORMAL);
+    tree[PRSAMPLE].ob_spec = spec;
+}
+
+/* The background chooser: EmuTOS's inf_backgrounds in gem4xe's one
+ * "Set preferences..." item.  The desk's pattern and colour, or a
+ * window's, chosen from the eight VDI patterns and the colours the screen
+ * can show -- which is why the desktop's own background is a setting and
+ * not a decision made here: a 50% stipple is the GEM default at every
+ * depth (EmuTOS desk/deskapp.c) and it artifacts into colour on a
+ * composite Atari, so the answer is to let somebody choose. */
+static void do_prefs(void)
+{
+    OBJECT *tree;
+
+    /* THE CHOOSER LIVES IN A RESOURCE OF ITS OWN, loaded over ours while
+     * it is up and freed again (src/aes/rsrc.c nests one).  Keeping it in
+     * DESKTOP.RSC cost ~970 bytes of the pool for the whole run, which an
+     * accessory beside the desktop has not got (test-m28).  This costs it
+     * nothing until somebody opens the dialog. */
+    if (!rsrc_load("PREFS.RSC")) {
+        fun_alert(1, STNOPREF);
+        return;
+    }
+    rsrc_gaddr(R_TREE, ADPREF, (void **)&tree);
+    LONG curdesk = G.g_screen[DROOT].ob_spec;
+    LONG curwin = G.g_screen[DROOT + 1].ob_spec;
+    LONG spec;
+    WORD ret, i, ncol, desk = TRUE;
+
+    /* the colours this screen has, from what appl_init was told */
+    ncol = (WORD)(1 << global[10]);
+    if (ncol > N_COL)
+        ncol = N_COL;
+    for (i = 0; i < N_COL; i++)
+        tree[PRCOL0 + i].ob_state = (UWORD)(i < ncol ? NORMAL : DISABLED);
+
+    tree[PRDESK].ob_state = SELECTED;
+    tree[PRWIND].ob_state = NORMAL;
+    spec = curdesk;
+    pref_show(tree, spec);
+    start_dialog(tree);
+
+    for (;;) {
+        ret = (WORD)(form_do(tree, 0) & 0x7FFF);
+        if (ret == PROK || ret == PRCNCL)
+            break;
+        if (ret == PRDESK) {
+            desk = TRUE;
+            spec = curdesk;
+        } else if (ret == PRWIND) {
+            desk = FALSE;
+            spec = curwin;
+        } else if (ret >= PRPAT0 && ret < PRPAT0 + N_PAT) {
+            spec = (spec & ~FILLPAT_MASK) | ((LONG)(ret - PRPAT0) << 4);
+        } else if (ret >= PRCOL0 && ret < PRCOL0 + N_COL) {
+            spec = (spec & ~FILLCOL_MASK) | (LONG)(ret - PRCOL0);
+        }
+        if (desk)
+            curdesk = spec;
+        else
+            curwin = spec;
+        pref_show(tree, spec);
+        objc_draw(tree, ROOT, MAX_DEPTH, dlg.g_x, dlg.g_y, dlg.g_w, dlg.g_h);
+    }
+
+    tree[PROK].ob_state = NORMAL;
+    tree[PRCNCL].ob_state = NORMAL;
+    end_dialog();
+
+    rsrc_free();                    /* the nested one: ours is untouched */
+
+    if (ret == PROK) {
+        G.g_screen[DROOT].ob_spec = curdesk;
+        for (i = 1; i <= NUM_WNODES; i++)
+            G.g_screen[DROOT + i].ob_spec = curwin;
+        do_wredraw(DESKWH, &G.g_desk);
+    }
+}
 /* -- the menu ---------------------------------------------------------- */
 
 static WORD do_deskmenu(WORD item)
@@ -293,6 +393,9 @@ static WORD do_optnmenu(WORD item)
     case READITEM:
         if (!inf_read())
             fun_alert(1, STRDINF);
+        break;
+    case PREFITEM:
+        do_prefs();
         break;
     default:
         break;

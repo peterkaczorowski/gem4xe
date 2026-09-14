@@ -46,6 +46,8 @@ EOL = 0x9B
 SYSTEM = [("build/gem.xex", "GEM>GEM.COM"),
           ("build/desktop.g4a", "GEM>DESKTOP.G4A"),
           ("build/desktop.rsc", "GEM>DESKTOP.RSC"),
+          # the chooser, loaded only while Set preferences is open
+          ("build/prefs.rsc", "GEM>PREFS.RSC"),
           ("build/lang.rsc", "GEM>LANG.RSC"),
           ("build/gem4xe.cfg", "GEM>GEM4XE.CFG"),
           # the escape hatch the page promises "on the disk": switches a

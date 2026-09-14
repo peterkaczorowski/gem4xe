@@ -103,6 +103,7 @@ SYSTEM = [
     ("gem.xex", "GEM.COM"),
     ("desktop.g4a", "DESKTOP.G4A"),
     ("desktop.rsc", "DESKTOP.RSC"),
+    ("prefs.rsc", "PREFS.RSC"),
     ("lang.rsc", "LANG.RSC"),
     ("816.com", "816.COM"),
     ("gem4xe.cfg", "GEM4XE.CFG"),
@@ -118,6 +119,7 @@ WHAT_IT_IS = {
     "GEM.COM": "the system: the VDI, the AES, GEMDOS and the shell",
     "DESKTOP.G4A": "the desktop, which is an application like any other",
     "DESKTOP.RSC": "its resource -- the menu, the dialogs, the icons",
+    "PREFS.RSC": "the Set preferences chooser, loaded only while it is open",
     "LANG.RSC": "what the system says, so a translation is a file",
     "816.COM": "puts a Rapidus into 65C816 mode by hand, if the loader "
                "somehow does not",
