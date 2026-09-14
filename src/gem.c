@@ -168,7 +168,7 @@ TASK void main(void)
          * because the "next" bit is always set.  Clear the control
          * region first. */
         vram_fill(VR_XDL, 0x00, 0x1000);
-        vbxe_xdl_hr(VR_SCREEN0);
+        vbxe_xdl_hr(VR_SCREEN0, (uint8_t)config.topmargin);
         antic_suspend();            /* its DMA off the bus: antic.h */
     } else {
         vdev = &vdev_antic;

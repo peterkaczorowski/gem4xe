@@ -60,7 +60,7 @@ TASK void main(void)
     vbxe_palette(1, 0, pal16, 16);
     STATUS[2] = 3;
 
-    vbxe_xdl_hr(VR_SCREEN0);
+    vbxe_xdl_hr(VR_SCREEN0, 0);
     STATUS[2] = 4;
 
     /* --- the pattern -------------------------------------------------- */

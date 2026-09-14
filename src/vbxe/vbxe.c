@@ -184,11 +184,32 @@ void vbxe_palette(uint8_t pal, uint8_t first, const uint8_t *rgb, uint16_t count
  *     priority, scroll and palette selection are), so it must be set at the
  *     top of every XDL.
  */
-void vbxe_xdl_hr(uint32_t screen)
+void vbxe_xdl_hr(uint32_t screen, uint8_t topmargin)
 {
-    uint8_t xdl[16];
+    uint8_t xdl[24];
     uint16_t ctl = XDLC_GMON | XDLC_HR | XDLC_RPTL | XDLC_OVADR | XDLC_OVATT;
     uint8_t n = 0;
+
+    /* An optional top margin: `topmargin` scanlines that repeat the
+     * screen's first line -- which the desktop keeps as background --
+     * before the picture proper.  OVSTEP 0 reads that one line over and
+     * over, so it costs nothing in VRAM, and it moves the menu bar off
+     * the display's very first scanline (where a CRT has not settled and
+     * a phone camera catches ringing) and down out of the top overscan a
+     * tube may crop.  topmargin 0 emits the exact XDL it always did.
+     * GEM4XE.CFG's TOPMARGIN sets it; main hands it over. */
+    if (topmargin) {
+        xdl[n++] = (uint8_t)(ctl & 0xFF);
+        xdl[n++] = (uint8_t)(ctl >> 8);
+        xdl[n++] = (uint8_t)(topmargin - 1);      /* repeat -> topmargin lines */
+        xdl[n++] = (uint8_t)(screen);             /* OVADR = the first line     */
+        xdl[n++] = (uint8_t)(screen >> 8);
+        xdl[n++] = (uint8_t)(screen >> 16);
+        xdl[n++] = 0;                             /* OVSTEP 0: the same line     */
+        xdl[n++] = 0;
+        xdl[n++] = OVATT_OVPAL(1) | OVATT_WIDTH_NORMAL;
+        xdl[n++] = OVATT_PRI_OVER_ALL;
+    }
 
     xdl[n++] = (uint8_t)(ctl & 0xFF);
     xdl[n++] = (uint8_t)(ctl >> 8);

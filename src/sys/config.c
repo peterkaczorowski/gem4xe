@@ -75,6 +75,7 @@ static const char FAR k_mouse[] = "MOUSE";
 static const char FAR k_printer[] = "PRINTER";
 static const char FAR k_printto[] = "PRINTTO";
 static const char FAR k_clock[] = "CLOCK";
+static const char FAR k_topmargin[] = "TOPMARGIN";
 
 static char up(char c)
 {
@@ -112,6 +113,22 @@ static int16_t lookup(const CFG_WORD FAR *tbl, WORD n,
 /* One line, EOL and all.  Trimmed, upper-cased and split on the '=' in
  * place; a line with no '=' -- a comment, a blank, a heading somebody
  * left behind -- is nothing to do. */
+/* A small unsigned decimal, clamped to [0, max].  A value with no digit
+ * -- or none at all -- leaves the default, the same forgiving rule the
+ * word tables follow: a typo must never stop the machine starting. */
+static int16_t cfg_num(const char *v, int16_t dflt, int16_t max)
+{
+    int16_t n = 0;
+    WORD any = 0;
+
+    while (*v >= '0' && *v <= '9') {
+        n = (int16_t)(n * 10 + (*v++ - '0'));
+        if (n > max) n = max;
+        any = 1;
+    }
+    return any ? n : dflt;
+}
+
 static void cfg_line(char *s)
 {
     char *key, *val, *eq, *p;
@@ -157,6 +174,8 @@ static void cfg_line(char *s)
         config.printer = lookup(NAMES(cfg_printer), val, config.printer);
     else if (same(k_clock, key))
         config.clock = lookup(NAMES(cfg_clock), val, config.clock);
+    else if (same(k_topmargin, key))
+        config.topmargin = cfg_num(val, config.topmargin, CFG_TOPMARGIN_MAX);
     else if (same(k_printto, key)) {
         /* A NAME, not a word out of a table: the value is taken as it
          * stands (upper-cased, as CIO wants) and truncated rather than

@@ -60,6 +60,12 @@
 
 #define CFG_PRINTTO_MAX  20     /* "D1:PAGE.PS" and room to spare */
 
+/* TOPMARGIN -- blank scanlines added above the 640x240 picture, for a
+ * CRT whose top edge crops the menu bar or shows ringing on the first
+ * line (docs/shipping.md).  Default 0.  Capped so a typo cannot push the
+ * whole desktop off the bottom of the tube. */
+#define CFG_TOPMARGIN_MAX  32
+
 /* CLOCK -- where the time comes from.  src/sys/clock.c: the chip on a
  * U1MB or a SIDE first, the DOS's kernel when there is neither. */
 #define CFG_CLOCK_AUTO   0      /* the chip, then the DOS */
@@ -77,6 +83,7 @@ typedef struct {
     int16_t printer;            /* CFG_PRINT_* */
     char    printto[CFG_PRINTTO_MAX];   /* where it goes; "P:" by default */
     int16_t clock;              /* CFG_CLOCK_* */
+    int16_t topmargin;          /* blank scanlines above the picture, 0..CFG_TOPMARGIN_MAX */
     int16_t found;              /* 1: the file was there and was read --
                                  * the boot screen says which it was */
 } CONFIG;
