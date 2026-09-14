@@ -76,6 +76,7 @@ static const char FAR k_printer[] = "PRINTER";
 static const char FAR k_printto[] = "PRINTTO";
 static const char FAR k_clock[] = "CLOCK";
 static const char FAR k_topmargin[] = "TOPMARGIN";
+static const char FAR k_screenh[] = "SCREENH";
 
 static char up(char c)
 {
@@ -176,6 +177,8 @@ static void cfg_line(char *s)
         config.clock = lookup(NAMES(cfg_clock), val, config.clock);
     else if (same(k_topmargin, key))
         config.topmargin = cfg_num(val, config.topmargin, CFG_TOPMARGIN_MAX);
+    else if (same(k_screenh, key))
+        config.screenh = cfg_num(val, config.screenh, CFG_SCREENH_MAX);
     else if (same(k_printto, key)) {
         /* A NAME, not a word out of a table: the value is taken as it
          * stands (upper-cased, as CIO wants) and truncated rather than

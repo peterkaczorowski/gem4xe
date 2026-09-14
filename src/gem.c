@@ -163,12 +163,17 @@ TASK void main(void)
 
     MARK(7);
     if (video == CFG_VIDEO_VBXE) {
-        vdev = &vdev_vbxe;
+        /* How many of the 240 lines to show.  A tube that cuts the top
+         * or bottom off is given fewer; the buffer is 240 either way, so
+         * only the XDL and what the seam reports change. */
+        vdev = config.screenh == 200 ? &vdev_vbxe_200
+             : config.screenh == 224 ? &vdev_vbxe_224
+                                     : &vdev_vbxe;
         /* A blit list started in uninitialised VRAM ($FF) never stops,
          * because the "next" bit is always set.  Clear the control
          * region first. */
         vram_fill(VR_XDL, 0x00, 0x1000);
-        vbxe_xdl_hr(VR_SCREEN0, (uint8_t)config.topmargin);
+        vbxe_xdl_hr(VR_SCREEN0, (uint16_t)vdev->h, (uint8_t)config.topmargin);
         antic_suspend();            /* its DMA off the bus: antic.h */
     } else {
         vdev = &vdev_antic;

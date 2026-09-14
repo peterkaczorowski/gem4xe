@@ -66,6 +66,12 @@
  * whole desktop off the bottom of the tube. */
 #define CFG_TOPMARGIN_MAX  32
 
+/* SCREENH -- how many of the VBXE screen's 240 lines to SHOW.  The buffer
+ * is 240 whatever this says; a tube that cuts the top or the bottom off
+ * can be given fewer (src/vdi/dev_vbxe.c keeps a device table per size).
+ * 0 means the default, which is all of them. */
+#define CFG_SCREENH_MAX  240
+
 /* CLOCK -- where the time comes from.  src/sys/clock.c: the chip on a
  * U1MB or a SIDE first, the DOS's kernel when there is neither. */
 #define CFG_CLOCK_AUTO   0      /* the chip, then the DOS */
@@ -84,6 +90,7 @@ typedef struct {
     char    printto[CFG_PRINTTO_MAX];   /* where it goes; "P:" by default */
     int16_t clock;              /* CFG_CLOCK_* */
     int16_t topmargin;          /* blank scanlines above the picture, 0..CFG_TOPMARGIN_MAX */
+    int16_t screenh;            /* VBXE lines shown: 200, 224, 240; 0 = default */
     int16_t found;              /* 1: the file was there and was read --
                                  * the boot screen says which it was */
 } CONFIG;

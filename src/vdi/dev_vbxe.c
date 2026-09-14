@@ -1148,7 +1148,7 @@ void dev_save_form(MFDB *m)
 {
     m->fd_addr = VR_SAVE;
     m->fd_w = SCR_W;
-    m->fd_h = SCR_H;
+    m->fd_h = vdev->h;          /* the screen, not the buffer */
     m->fd_wdwidth = SCR_W / 16;
     m->fd_stand = 0;
     m->fd_nplanes = 4;
@@ -1159,7 +1159,7 @@ void dev_save_form(MFDB *m)
 void dev_screen_form(RFORM *f)
 {
     f->base = VR_SCREEN0;  f->stride = SCR_STRIDE;
-    f->w = SCR_W;  f->h = SCR_H;  f->screen = 1;
+    f->w = SCR_W;  f->h = vdev->h;  f->screen = 1;
 }
 
 /* One blit when both ends share their alignment and the width is a whole
@@ -1264,7 +1264,7 @@ void dev_get_pixel(WORD x, WORD y, WORD *value, WORD *pen)
 
 void dev_clear_screen(void)
 {
-    blit_fill(VR_SCREEN0, SCR_STRIDE, SCR_STRIDE, SCR_H, 0x00);
+    blit_fill(VR_SCREEN0, SCR_STRIDE, SCR_STRIDE, vdev->h, 0x00);
     blit_run();
 }
 
@@ -1306,36 +1306,54 @@ WORD dev_planes(void)
  */
 extern const uint8_t FAR font8x8[];
 
-const VDIDEV FAR vdev_vbxe = {
-    SCR_W, SCR_H, SCR_STRIDE,
-    FONT_W, FONT_H,
-    FONT_TOP, FONT_ASCENT, FONT_HALF, FONT_DESCENT, FONT_BOTTOM,
-    FONT_POINT, font8x8,
+/* THE DEVICE, three times over, differing only in how many lines it
+ * shows.  The height cannot simply be a variable: this table is
+ * `const ... FAR` and so lives in `cfar` (src/gem4xe.scm), and dropping
+ * the const would move a hundred-odd bytes of it into bank $00 -- which
+ * has single figures to spare (tools/memreport.py).  Three tables in far
+ * const cost nothing there.
+ *
+ * THE FRAMEBUFFER IS 240 LINES WHICHEVER IS CHOSEN.  Only what the XDL
+ * displays and what the seam reports change, so the VRAM map does not
+ * move and a shorter screen simply leaves the rows below it unshown --
+ * which is also why the clipping inside this file may go on using the
+ * compile-time SCR_H: it is the BUFFER's bound, a safe superset of the
+ * screen's, and everything above the seam has already clipped to
+ * vdev->h. */
+#define VBXE_DEV(hh) {                                                    \
+    SCR_W, (hh), SCR_STRIDE,                                              \
+    FONT_W, FONT_H,                                                       \
+    FONT_TOP, FONT_ASCENT, FONT_HALF, FONT_DESCENT, FONT_BOTTOM,          \
+    FONT_POINT, font8x8,                                                  \
+                                                                          \
+    dev_fill_rect,                                                        \
+    dev_xor_rect,                                                         \
+    dev_patt_rect,                                                        \
+    dev_style_line,                                                       \
+    dev_glyph,                                                            \
+    dev_font_changed,                                                     \
+    dev_raster_1bpp,                                                      \
+    dev_cursor_form,                                                      \
+    dev_cursor_show,                                                      \
+    dev_cursor_hide,                                                      \
+    dev_cursor_discard,                                                   \
+    dev_line_diag,                                                        \
+    dev_screen_form,                                                      \
+    dev_copy_form,                                                        \
+    dev_save_form,                                                        \
+    dev_clear_screen,                                                     \
+    dev_get_pixel,                                                        \
+    dev_pen_value,                                                        \
+    dev_read_row,                                                         \
+    dev_row_pixel,                                                        \
+    dev_colours,                                                          \
+    dev_planes,                                                           \
+    dev_palette_all,                                                      \
+    dev_palette_one,                                                      \
+    dev_invalidate,                                                       \
+    dev_flush,                                                            \
+}
 
-    dev_fill_rect,
-    dev_xor_rect,
-    dev_patt_rect,
-    dev_style_line,
-    dev_glyph,
-    dev_font_changed,
-    dev_raster_1bpp,
-    dev_cursor_form,
-    dev_cursor_show,
-    dev_cursor_hide,
-    dev_cursor_discard,
-    dev_line_diag,
-    dev_screen_form,
-    dev_copy_form,
-    dev_save_form,
-    dev_clear_screen,
-    dev_get_pixel,
-    dev_pen_value,
-    dev_read_row,
-    dev_row_pixel,
-    dev_colours,
-    dev_planes,
-    dev_palette_all,
-    dev_palette_one,
-    dev_invalidate,
-    dev_flush,
-};
+const VDIDEV FAR vdev_vbxe     = VBXE_DEV(VB_H);
+const VDIDEV FAR vdev_vbxe_224 = VBXE_DEV(224);
+const VDIDEV FAR vdev_vbxe_200 = VBXE_DEV(200);

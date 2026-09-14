@@ -174,7 +174,11 @@ void vbxe_palette(uint8_t pal, uint8_t first, const uint8_t *rgb, uint16_t count
 /* XDL                                                                    */
 /* ---------------------------------------------------------------------- */
 
-/* A 640x240 4bpp HR overlay from one screen buffer.
+/* A 640-wide 4bpp HR overlay from one screen buffer, `height` lines of
+ * it shown.  The BUFFER is always VB_H tall (the VRAM map is laid out for
+ * that); a shorter screen displays fewer of its rows, which is what a
+ * tube that cuts the top or the bottom off wants -- GEM4XE.CFG's SCREENH,
+ * and src/vdi/dev_vbxe.c's three device tables.
  *
  * Two things about the XDL that are easy to get wrong and silent when wrong:
  *   - an entry is only as long as its control word says, so a "blanked"
@@ -184,7 +188,7 @@ void vbxe_palette(uint8_t pal, uint8_t first, const uint8_t *rgb, uint16_t count
  *     priority, scroll and palette selection are), so it must be set at the
  *     top of every XDL.
  */
-void vbxe_xdl_hr(uint32_t screen, uint8_t topmargin)
+void vbxe_xdl_hr(uint32_t screen, uint16_t height, uint8_t topmargin)
 {
     uint8_t xdl[24];
     uint16_t ctl = XDLC_GMON | XDLC_HR | XDLC_RPTL | XDLC_OVADR | XDLC_OVATT;
@@ -213,7 +217,7 @@ void vbxe_xdl_hr(uint32_t screen, uint8_t topmargin)
 
     xdl[n++] = (uint8_t)(ctl & 0xFF);
     xdl[n++] = (uint8_t)(ctl >> 8);
-    xdl[n++] = (uint8_t)(VB_H - 1);              /* repeat -> VB_H lines  */
+    xdl[n++] = (uint8_t)(height - 1);            /* repeat -> `height` lines */
     xdl[n++] = (uint8_t)(screen);                 /* OVADR, 3 bytes         */
     xdl[n++] = (uint8_t)(screen >> 8);
     xdl[n++] = (uint8_t)(screen >> 16);

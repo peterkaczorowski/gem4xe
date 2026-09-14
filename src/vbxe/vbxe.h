@@ -171,7 +171,7 @@ void     vram_fill(uint32_t addr, uint8_t val, uint16_t len);
 uint8_t  vram_read8(uint32_t addr);
 
 void     vbxe_palette(uint8_t pal, uint8_t first, const uint8_t *rgb, uint16_t count);
-void     vbxe_xdl_hr(uint32_t screen, uint8_t topmargin); /* 640x240 HR, palette 1 */
+void     vbxe_xdl_hr(uint32_t screen, uint16_t height, uint8_t topmargin);
 void     vbxe_off(void);                              /* overlay and MEMAC off */
 void     vbxe_wait_vbl(void);
 

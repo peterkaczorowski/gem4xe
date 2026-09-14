@@ -342,6 +342,10 @@ extern const VDIDEV FAR *vdev;
  * devices it has a screen for; naming one that is not linked is a link
  * error, which is the right time to find out. */
 extern const VDIDEV FAR vdev_vbxe;
+/* the same device showing fewer lines, for a screen whose top or bottom
+ * the tube cuts off (GEM4XE.CFG's SCREENH) */
+extern const VDIDEV FAR vdev_vbxe_224;
+extern const VDIDEV FAR vdev_vbxe_200;
 extern const VDIDEV FAR vdev_antic;
 /* ...and the page, which is a device open BESIDE one of those rather
  * than instead of it: a workstation carries its own (src/vdi/vdi.h). */
