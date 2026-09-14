@@ -44,11 +44,13 @@ import rsc                                  # noqa: E402
 from rsc import ch, NIL                     # noqa: E402
 from aesref import (G_BOX, G_IBOX, G_STRING, G_BUTTON, G_TITLE, G_FTEXT,  # noqa: E402
                     NONE, NORMAL, SELECTABLE, DEFAULT, EXIT, DISABLED,
-                    EDITABLE, RBUTTON, OUTLINED, CHECKED, LASTOB)
+                    EDITABLE, RBUTTON, OUTLINED, CHECKED, LASTOB,
+                    SELECTED, TOUCHEXIT, IP_SOLID)
 import deskicons                            # noqa: E402
 
 # -- trees ---------------------------------------------------------------------
 ADMENU, ADDINFO, ADMKDBOX, ADDELDIA, ADFINFO = 0, 1, 2, 3, 4
+ADPREF = 5                                  # Set preferences...
 
 # ADMENU objects, in the donor's names where the donor has the item
 ROOT, THEBAR, THEACTIVE = 0, 1, 2
@@ -90,6 +92,23 @@ FIBOX, FITITLE, FINAME, FISIZE, FIDATE = 0, 1, 2, 3, 4
 FIFILES, FIFOLDS, FIATTBX = 5, 6, 7
 FIRDWR, FIRONLY, FIOK, FICNCL = 8, 9, 10, 11
 NOBS_FINF = 12
+
+# ADPREF objects: the donor keeps the background chooser in a dialog of
+# its own (EmuTOS desk/deskinf.c, inf_backgrounds -- BGSAMPLE, BGDESK and
+# the pattern/colour rows).  gem4xe has one "Set preferences..." item, so
+# the chooser lives there.  A colour word is border/text/pattern/fill
+# nibbles: fill colour is spec & 0x0F and fill pattern (spec >> 4) & 7.
+PRTITLE = 1
+PRBGLBL, PRDESK, PRWIND = 2, 3, 4
+PRPATLBL, PRPATBOX = 5, 6
+PRPAT0 = 7                                  # ...through PRPAT0 + 7, in PRPATBOX
+PRCOLLBL, PRCOLBOX = 15, 16
+PRCOL0 = 17                                 # ...through PRCOL0 + 15, in PRCOLBOX
+PRSMPLBL, PRSAMPLE = 33, 34
+PROK, PRCNCL = 35, 36
+NOBS_PREF = 37
+PREF_W, PREF_H = 40, 17
+N_PAT, N_COL = 8, 16
 
 # Free strings: the icon labels, and every alert the desktop puts up.
 # No string a person reads belongs in the C -- an alert written as a
@@ -200,6 +219,13 @@ IB_TABLE = ((IB_HARD, deskicons.IG_HARD), (IB_FLOPPY, deskicons.IG_FLOPPY),
             (IB_APPL, deskicons.IG_APPLICATION), (IB_DOCU, deskicons.IG_DOCUMENT))
 
 INDICES = [
+    ("ADPREF", ADPREF), ("PRTITLE", PRTITLE), ("PRBGLBL", PRBGLBL),
+    ("PRDESK", PRDESK), ("PRWIND", PRWIND), ("PRPATLBL", PRPATLBL),
+    ("PRPATBOX", PRPATBOX), ("PRPAT0", PRPAT0),
+    ("PRCOLLBL", PRCOLLBL), ("PRCOLBOX", PRCOLBOX), ("PRCOL0", PRCOL0),
+    ("PRSMPLBL", PRSMPLBL), ("PRSAMPLE", PRSAMPLE),
+    ("PROK", PROK), ("PRCNCL", PRCNCL),
+    ("N_PAT", N_PAT), ("N_COL", N_COL),
     ("ADMENU", ADMENU), ("ADDINFO", ADDINFO),
     ("DESKMENU", DESKMENU), ("FILEMENU", FILEMENU), ("VIEWMENU", VIEWMENU),
     ("OPTNMENU", OPTNMENU), ("DESKBOX", DESKBOX), ("ABOUITEM", ABOUITEM),
@@ -232,7 +258,7 @@ INDICES = [
 
 # The items the desktop does not do yet: disabled at start (menu_ienable),
 # not in the file, so the file stays RCS-shaped.
-NOT_YET = (FORMITEM, IICNITEM, IAPPITEM, PREFITEM)
+NOT_YET = (FORMITEM, IICNITEM, IAPPITEM)
 
 # The menu, box by box: (title, box x, box width, items); an item is a
 # string, "-" for a separator, and (string, state) for a state.
@@ -471,6 +497,65 @@ def finfo_tree(r):
     return r.tree(objs)
 
 
+def pref_tree(r):
+    """ADPREF: the background chooser, the donor's (EmuTOS desk/deskinf.c,
+    inf_backgrounds) in gem4xe's one "Set preferences..." item.
+
+    A row of the eight VDI fill patterns and a row of the sixteen colours,
+    a sample showing the two together, and which background -- the desk or
+    a window -- is being set.  THE TWO ROWS EACH SIT IN A BOX OF THEIR OWN
+    because RBUTTON is exclusive among SIBLINGS: with every swatch a child
+    of the root, choosing a pattern would clear the colour.  The desktop
+    disables the colours its screen cannot show, as the donor does.
+
+    A colour word is border/text/pattern/fill nibbles: the fill colour is
+    spec & 0x0F and the fill pattern (spec >> 4) & 7."""
+    SW = SELECTABLE | RBUTTON | TOUCHEXIT
+    objs = [
+        (NIL, PRTITLE, PRCNCL, G_BOX, NONE, OUTLINED, 0x00021100,
+         ch(0), ch(0), ch(PREF_W), ch(PREF_H)),
+        (PRBGLBL, NIL, NIL, G_STRING, NONE, NORMAL,
+         r.string("Set preferences"), ch(12), ch(1), ch(15), ch(1)),
+        (PRDESK, NIL, NIL, G_STRING, NONE, NORMAL,
+         r.string("Background:"), ch(2), ch(3), ch(11), ch(1)),
+        (PRWIND, NIL, NIL, G_BUTTON, SW, SELECTED,
+         r.string("Desktop"), ch(15), ch(3), ch(9), ch(1)),
+        (PRPATLBL, NIL, NIL, G_BUTTON, SW, NORMAL,
+         r.string("Window"), ch(26), ch(3), ch(9), ch(1)),
+        (PRPATBOX, NIL, NIL, G_STRING, NONE, NORMAL,
+         r.string("Pattern:"), ch(2), ch(5), ch(8), ch(1)),
+        (PRCOLLBL, PRPAT0, PRPAT0 + N_PAT - 1, G_IBOX, NONE, NORMAL,
+         0x00000000, ch(12), ch(5), ch(N_PAT * 3), ch(1)),
+    ]
+    # the eight patterns, in ink: the shape is what is being chosen
+    for i in range(N_PAT):
+        objs.append((PRPAT0 + i + 1 if i < N_PAT - 1 else PRPATBOX,
+                     NIL, NIL, G_BOX, SW, SELECTED if i == 4 else NORMAL,
+                     0x00001100 | (i << 4) | 1,
+                     ch(i * 3), ch(0), ch(2), ch(1)))
+    objs.append((PRCOLBOX, NIL, NIL, G_STRING, NONE, NORMAL,
+                 r.string("Colour:"), ch(2), ch(7), ch(7), ch(1)))
+    objs.append((PRSMPLBL, PRCOL0, PRCOL0 + N_COL - 1, G_IBOX, NONE, NORMAL,
+                 0x00000000, ch(12), ch(7), ch(8 * 3), ch(3)))
+    # the sixteen colours, each solid, eight to a row
+    for i in range(N_COL):
+        nxt = PRCOL0 + i + 1 if i < N_COL - 1 else PRCOLBOX
+        objs.append((nxt, NIL, NIL, G_BOX, SW,
+                     SELECTED if i == 3 else NORMAL,
+                     0x00001100 | (IP_SOLID << 4) | i,
+                     ch((i % 8) * 3), ch((i // 8) * 2), ch(2), ch(1)))
+    objs.append((PRSAMPLE, NIL, NIL, G_STRING, NONE, NORMAL,
+                 r.string("Sample:"), ch(2), ch(12), ch(7), ch(1)))
+    objs.append((PROK, NIL, NIL, G_BOX, NONE, NORMAL, 0x00001143,
+                 ch(12), ch(12), ch(12), ch(2)))
+    objs.append((PRCNCL, NIL, NIL, G_BUTTON, SELECTABLE | DEFAULT | EXIT,
+                 NORMAL, r.string("OK"), ch(7), ch(15), ch(9), ch(1)))
+    objs.append((ROOT, NIL, NIL, G_BUTTON, SELECTABLE | EXIT | LASTOB,
+                 NORMAL, r.string("Cancel"), ch(22), ch(15), ch(9), ch(1)))
+    assert len(objs) == NOBS_PREF, (len(objs), NOBS_PREF)
+    return r.tree(objs)
+
+
 def build():
     r = rsc.Rsc()
     assert menu_tree(r) == ADMENU
@@ -478,6 +563,7 @@ def build():
     assert mkdir_tree(r) == ADMKDBOX
     assert delete_tree(r) == ADDELDIA
     assert finfo_tree(r) == ADFINFO
+    assert pref_tree(r) == ADPREF
     assert r.free_string("DISK") == STDISK
     assert r.free_string("TRASH") == STTRASH
     for i, name, text in ALERTS:
@@ -523,7 +609,8 @@ def main(argv):
         f.write(c_header(data))
     print(f"{argv[1]}: {len(data)} bytes, "
           f"{NOBS_MENU} + {NOBS_INFO} + {NOBS_MKD} + {NOBS_CDEL} + "
-          f"{NOBS_FINF} objects in five trees, {len(IB_TABLE)} icons; "
+          f"{NOBS_FINF} + {NOBS_PREF} objects in six trees, "
+          f"{len(IB_TABLE)} icons; "
           f"{argv[2]}")
     return 0
 
