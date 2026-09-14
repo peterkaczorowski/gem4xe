@@ -37,7 +37,15 @@
 /* The running process's resource and the pool mark before it: see
  * src/aes/proc.h for why these belong to a process and not to this file.
  * rs_hdr stays the name the rest of the engine knows it by. */
-#define rs_hdr      (*(RSHDR **)&rlr->p_rsc)
+#define rs_1        (*(RSHDR **)&rlr->p_rsc)
+#define rs_1mark    (rlr->p_rscmark)
+#define rs_2        (*(RSHDR **)&rlr->p_rsc2)
+#define rs_2mark    (rlr->p_rscmark2)
+/* The resource a call ACTS ON: the nested one while it is up, so that a
+ * dialog loaded over a resident resource answers rsrc_gaddr and is what
+ * rsrc_free takes away.  Read-only -- the two slots are assigned by
+ * name. */
+#define rs_hdr      (rs_2 ? rs_2 : rs_1)
 #define rs_mark     (rlr->p_rscmark)
 
 static void swap_words(void *p, uint16_t n)
@@ -277,10 +285,13 @@ static void rs_imfar(uint8_t *mem, uint16_t im_off, uint16_t size)
     uint32_t base;
     WORD i;
 
+    if (!im_len || rs_hdr->rsh_nbb || rs_hdr->rsh_nimages)
+        return;                         /* see the note: not provably safe --
+                                         * and nothing moved, so a resource
+                                         * NESTED over another leaves the
+                                         * outer's record of its own alone */
     rs_imbase = 0;
     rs_imsize = 0;
-    if (!im_len || rs_hdr->rsh_nbb || rs_hdr->rsh_nimages)
-        return;                         /* see the note: not provably safe */
     base = far_alloc(im_len);
     if (!base)
         return;                         /* no far memory: leave them be */
@@ -304,7 +315,7 @@ WORD rs_load(const char *name)
     int16_t fd;
     uint8_t *mem;
 
-    if (rs_hdr)                     /* one at a time: free it first */
+    if (rs_1 && rs_2)               /* one resident and one nested is all */
         return 0;
     sh_cioname(name, cio);          /* A:\X.RSC -> D1:X.RSC */
     fd = cio_open(cio, CIO_A_READ, 0);
@@ -321,7 +332,10 @@ WORD rs_load(const char *name)
         cio_close(fd);
         return 0;
     }
-    rs_mark = pool_mark();
+    if (rs_1)
+        rs_2mark = pool_mark();
+    else
+        rs_1mark = pool_mark();
     mem = pool_alloc(size, 2);
     if (!mem) {
         cio_close(fd);
@@ -332,11 +346,14 @@ WORD rs_load(const char *name)
         uint8_t st = cio_read(fd, mem + sizeof raw, (uint16_t)(size - sizeof raw), &got);
         cio_close(fd);
         if ((st != CIO_OK && st != CIO_OK_EOF) || got != size - sizeof raw) {
-            pool_release(rs_mark);
+            pool_release(rs_1 ? rs_2mark : rs_1mark);
             return 0;
         }
     }
-    rs_hdr = (RSHDR *)mem;
+    if (rs_1)
+        rs_2 = (RSHDR *)mem;    /* nested: rs_hdr now answers with it */
+    else
+        rs_1 = (RSHDR *)mem;
     rs_fixit(rs_hdr);
     rs_imfar(mem, hdr.rsh_imdata, size);
     return 1;
@@ -349,10 +366,15 @@ RSHDR *rs_loaded(void)
 
 WORD rs_free(void)
 {
-    if (!rs_hdr)
+    if (rs_2) {                     /* the nested one first: LIFO */
+        pool_release(rs_2mark);
+        rs_2 = 0;
+        return 1;
+    }
+    if (!rs_1)
         return 0;
-    pool_release(rs_mark);
-    rs_hdr = 0;
+    pool_release(rs_1mark);
+    rs_1 = 0;
     return 1;
 }
 

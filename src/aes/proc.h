@@ -72,6 +72,14 @@ typedef struct PROC {
      * releases are still in the reverse of the takes. */
     void    *p_rsc;             /* RSHDR *, or 0 */
     uint16_t p_rscmark;         /* the pool before its load */
+    /* AND ONE NESTED ABOVE IT.  A program whose own resource is resident
+     * -- the desktop's -- can still put up a dialog kept in a resource of
+     * its own, by loading it over the top and freeing it again: the pool
+     * is a stack, so the releases stay in the reverse of the takes.  GEM
+     * gives a program one resource; this is one more, and a program that
+     * loads only one never sees it (src/aes/rsrc.c). */
+    void    *p_rsc2;            /* the nested RSHDR *, or 0 */
+    uint16_t p_rscmark2;        /* the pool before ITS load */
     /* Its open files and its search state (src/sys/gemdos.c).  These
      * were three file statics, and app_free closed EVERY process's
      * handles when any program exited -- which an accessory cannot
