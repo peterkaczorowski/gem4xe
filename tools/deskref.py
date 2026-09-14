@@ -70,7 +70,7 @@ from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
                     GRAF_MKSTATE, GRAF_DRAGBOX, GRAF_RUBBOX,
                     FOPEN, FCREATE, FCLOSE, FREAD, FWRITE, GD_EACCDN)
 from rsc import R_TREE, R_ICONBLK, R_STRING, ICONBLK_SIZE  # noqa: E402
-from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA, ADFINFO, ADPREF,  # noqa: E402
+from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA, ADFINFO,  # noqa: E402
                      DESKMENU, FILEMENU, ABOUITEM,
                      OPTNMENU, OPENITEM, SHOWITEM, NFOLITEM, DELTITEM,
                      CLOSITEM, CLSWITEM, QUITITEM, READITEM, SAVEITEM,
@@ -344,7 +344,6 @@ class Desktop:
         self.wcnt, self.dta, self.opdta = 0, 0, 0
         self.nfiles = self.ndirs = self.opsize = 0
         self.a_mkdir = self.a_delete = self.a_finfo = 0
-        self.a_pref = 0
         self.cnxsave = self.shelbuf = self.copybuf = 0
         self.wsave = [Wsave() for _ in range(NUM_WNODES)]
         # the desktop's copy of the shell buffer, a far CharArray the
@@ -2302,7 +2301,6 @@ class Desktop:
         self.a_mkdir = self.rsrc_gaddr(R_TREE, ADMKDBOX)
         self.a_delete = self.rsrc_gaddr(R_TREE, ADDELDIA)
         self.a_finfo = self.rsrc_gaddr(R_TREE, ADFINFO)
-        self.a_pref = self.rsrc_gaddr(R_TREE, ADPREF)
         self.a_iblist = self.rsrc_gaddr(R_ICONBLK, 0)
         self.fline = self.rsrc_gaddr(R_STRING, STFLINE)
         self.fmark = self.rsrc_gaddr(R_STRING, STFMARK)
