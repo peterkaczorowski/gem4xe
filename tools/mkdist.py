@@ -106,7 +106,7 @@ SYSTEM = [
     ("lang.rsc", "LANG.RSC"),
     ("816.com", "816.COM"),
     ("gem4xe.cfg", "GEM4XE.CFG"),
-    ("m11_app.g4a", "M11.G4A"),
+    ("hello_app.g4a", "HELLO.G4A"),
     ("calc.g4a", "CALC.G4A"),
     ("calc.rsc", "CALC.RSC"),
     ("clock.g4a", "CLOCK.G4A"),
@@ -124,7 +124,8 @@ WHAT_IT_IS = {
     "GEM4XE.CFG": "the screen and the mouse, in plain text -- edit it from "
                   "the DOS prompt if the display comes up wrong.  Ships "
                   "with everything commented out and documented",
-    "M11.G4A": "a small program, to have something to double-click",
+    "HELLO.G4A": "a hello-world program: a window you open and close, "
+                 "to have something to double-click",
     "CALC.G4A": "a calculator: whole numbers, and a division that "
                 "truncates rather than pretending otherwise",
     "CALC.RSC": "its panel -- every key of it, and every word",

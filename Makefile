@@ -580,6 +580,11 @@ build/desk/%.o: src/desk/%.c $(DESK_H)
 $(eval $(call g4a,desktop,$(DESK_OBJS),$(DESK_BSS),$(DESK_BITS),$(DESK_STACK)))
 $(eval $(call g4a,m16_desk,$(G4A_LIB) build/app/m16_desk.o,$(APP_BSS),$(APP_BITS),$(APP_STACK)))
 
+# HELLO.G4A (src/hello_app.c): the desktop's hello-world demo, shipped in
+# \APPS\ in place of the M11 gate app -- a real window a user can open and
+# close, not a fixture that flashes and exits (tools/mkdist.py).
+$(eval $(call g4a,hello_app,$(G4A_LIB) build/app/hello_app.o,$(APP_BSS),$(APP_BITS),$(APP_STACK)))
+
 tools/deskicons.py: tools/iconconv.py
 	python3 tools/iconconv.py $(EMUTOS)/desk/icons.c $@
 
@@ -967,7 +972,7 @@ build/gem-shots.atr: $(SP_DEPS)
 # D1: and D2: before any DOS runs.  No SIDE.SYS, no driver on the card.
 # tools/apt.py writes the table, tests/host/test_apt.py checks it against
 # the rules Altirra's own parser applies, and test-cf boots it.
-build/gem-cf.img: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a \
+build/gem-cf.img: build/gem.xex build/desktop.g4a build/desktop.rsc build/hello_app.g4a \
                   build/lang.rsc build/gem4xe.cfg build/816.com $(APP_DEPS) $(ACCP_DEPS) tools/mkcf.py tools/apt.py tools/atr.py
 	@rm -f $@
 	python3 tools/mkcf.py $@
@@ -998,7 +1003,7 @@ build/gem-sd.img: build/gem-cf.img build/gemdiag.com
 # machine rather than on the disk, so the disk is gem4xe's to give away
 # where gem-sp.atr and gem-boot.atr are not.  Needs no fixture to build;
 # test-boot boots it when [spartados].sdx_cart names a cartridge.
-build/gem-sdx.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a \
+build/gem-sdx.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/hello_app.g4a \
                    build/lang.rsc build/gem4xe.cfg build/816.com $(APP_DEPS) $(ACCP_DEPS) tools/mkfloppy.py tools/mkcf.py tools/atr.py
 	@rm -f $@
 	python3 tools/mkfloppy.py $@
@@ -1158,7 +1163,7 @@ build/gem4xe-sdk.tar.gz: $(SDK_FILES)
 DIST ?= build/gem4xe-$(shell date +%F)-$(shell git rev-parse --short HEAD 2>/dev/null || echo local)
 DIST_DISKS = build/gem-sp.atr build/gem-boot.atr build/gem-sdx.atr build/gem-cf.img
 DIST_SYS   = build/gem.xex build/desktop.g4a build/desktop.rsc \
-             build/lang.rsc build/816.com build/m11_app.g4a build/gem4xe.cfg \
+             build/lang.rsc build/816.com build/hello_app.g4a build/gem4xe.cfg \
              $(APP_DEPS) $(ACCP_DEPS)
 
 dist: $(DIST_SYS) $(DIST_DISKS) build/gem4xe-sdk.tar.gz \

@@ -55,7 +55,7 @@ SYSTEM = [("build/gem.xex", "GEM>GEM.COM"),
           # the AES looks for *.ACC, and not in \APPS\ with the programs
           ("build/clockacc.g4a", "GEM>CLOCK.ACC"),
           ("build/clock.rsc", "GEM>CLOCK.RSC"),
-          ("build/m11_app.g4a", "APPS>M11.G4A"),
+          ("build/hello_app.g4a", "APPS>HELLO.G4A"),
           ("build/calc.g4a", "APPS>CALC.G4A"),
           ("build/calc.rsc", "APPS>CALC.RSC"),
           ("build/clock.g4a", "APPS>CLOCK.G4A"),
