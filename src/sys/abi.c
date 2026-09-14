@@ -31,10 +31,10 @@
  * --data-model=large program keeps its every string literal in far memory
  * (Calypsi cfar), so near_str() copies a SHORT far string into a near
  * scratch before the AES sees it -- enough for a resource name, a menu
- * label and an alert (form_alert, rsrc_load, menu_text, menu_register).
- * The string opcodes that take a longer or a second one (fsel, shel_write,
- * shel_find) still want a near string, until a bigger scratch can be
- * afforded.  Message buffers and the parameter block's own arrays are
+ * label, an alert (form_alert, rsrc_load, menu_text, menu_register) and
+ * fsel's dialog title.  The strings that could be longer or come in pairs
+ * -- fsel's path and selection, shel_write's, shel_find's -- still want a
+ * near buffer, until a bigger scratch can be afforded.  Message buffers and the parameter block's own arrays are
  * written through far pointers and can be anywhere.
  *
  * GEMDOS (COP #$01): the block is the ST's trap #1 frame with the result
@@ -464,9 +464,12 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
      * the button its word. */
     case 90:                        /* fsel_input: path, sel */
     case 91: {                      /* fsel_exinput: path, sel, label */
-        char *path = near_of(addr_in[0]);   /* far: not yet (near_str is small) */
+        char *path = near_of(addr_in[0]);   /* the app's buffers, near */
         char *sel = near_of(addr_in[1]);
-        const char *label = (opcode == 91) ? near_of(addr_in[2]) : 0;
+        /* the label is a title fs_input only reads, and a program's is a far
+         * literal ("Open design", GACS main.c) -- the one fsel string that
+         * is IN-only and short, so bounce it while path/sel stay near. */
+        const char *label = (opcode == 91) ? near_str(addr_in[2]) : 0;
         if (path && sel && (opcode == 90 || label))
             ret = fs_input(path, sel, &int_out[1], label);
         else

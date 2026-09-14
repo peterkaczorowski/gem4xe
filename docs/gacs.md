@@ -52,9 +52,15 @@ needs, found by building one (`src/m29_big.c`, `make test-m29`):
     has `far` (initialised variables), `zfar` (uninitialised) and `ifar`
     (the initialiser `far` is copied from) -- and, in bank $00, `near`,
     `znear` and `inear`, because a global goes FAR there unless it is
-    declared `__near`, and anything handed to the AES must be near
-    (`src/sys/abi.c`, `near_of`).  It also needs `_NearBaseAddress`
-    declared, which a small-data program never refers to.
+    declared `__near`, and anything BUT a string handed to the AES must
+    be near (`src/sys/abi.c`): a tree or a form far is refused, but the
+    shim BOUNCES a far string (`near_str`), so `form_alert`, `rsrc_load`,
+    `menu_text`, `menu_register` and the `fsel` dialog title take a far
+    literal of up to **63 bytes** -- the near scratch bank $00 can spare.
+    A longer string, or a second one in the same call (`fsel`'s path and
+    selection, `shel_write`, `shel_find`), still wants `__near`.  It also
+    needs `_NearBaseAddress` declared, which a small-data program never
+    refers to.
   * **Bits and bss cannot share a memory.**  `far`/`zfar` carry no bytes
     and the linker refuses to place them beside `farcode`, so they go in
     a memory of their own -- the bank above the code.

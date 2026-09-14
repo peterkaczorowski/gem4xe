@@ -18,10 +18,16 @@
  * application's is ever read while the call is not in progress.
  *
  * On return A, X and Y are undefined; D, DB, S and P are as they were.
- * Trees, strings and forms the AES reads IN PLACE are addressed with 16
- * bits inside gem4xe (the small data model), so they must be in bank $00 --
- * which is where an application's data is, its near region being a slice
- * of bank $00 (src/app/gemapp.scm).
+ * Trees and forms the AES reads IN PLACE are addressed with 16 bits inside
+ * gem4xe (the small data model), so they must be in bank $00 -- which is
+ * where an application's data is, its near region being a slice of bank $00
+ * (src/app/gemapp.scm).  STRINGS may be FAR: a --data-model=large program
+ * keeps its literals in far memory, and the shim copies a SHORT one into a
+ * near scratch first (src/sys/abi.c, near_str), so form_alert, rsrc_load,
+ * menu_text, menu_register and the fsel dialog title take a far string of
+ * up to 63 bytes.  A longer string -- or a second one in the same call,
+ * which fsel's path/selection, shel_write and shel_find are -- still wants
+ * bank $00.
  */
 #ifndef GEM4XE_APP_GEM_H
 #define GEM4XE_APP_GEM_H
@@ -512,7 +518,7 @@ WORD objc_order(OBJECT *tree, WORD obj, WORD newpos);
 WORD form_do(OBJECT *tree, WORD start);
 WORD form_dial(WORD type, WORD x1, WORD y1, WORD w1, WORD h1,
                WORD x2, WORD y2, WORD w2, WORD h2);
-WORD form_alert(WORD defbut, const char *s);   /* s in bank $00 (near) */
+WORD form_alert(WORD defbut, const char *s);   /* s: near, or far up to 63 bytes */
 WORD form_error(WORD n);
 WORD form_center(OBJECT *tree, WORD *x, WORD *y, WORD *w, WORD *h);
 
