@@ -23,13 +23,19 @@
  * has none -- crysbind's `ret = TRUE` default -- and -1 for an opcode
  * gem4xe does not have.
  *
- * Trees, strings and forms an application passes by address must be in
- * bank $00 -- the AES addresses them near, as the small data model does for
- * everything -- so the loader gives an application a bank-$00 pool
- * (src/sys/app.c).  An address with a bank byte is refused and counted in
- * gem_bad rather than truncated to something that would draw garbage.
- * Message buffers and the parameter block's own arrays are written through
- * far pointers and can be anywhere.
+ * Trees and forms an application passes by address must be in bank $00 --
+ * the AES addresses them near, as the small data model does -- so the
+ * loader gives an application a bank-$00 pool (src/sys/app.c), and a far
+ * tree or form is refused and counted in gem_bad rather than truncated to
+ * garbage.  A STRING is the exception the near budget allows: a
+ * --data-model=large program keeps its every string literal in far memory
+ * (Calypsi cfar), so near_str() copies a SHORT far string into a near
+ * scratch before the AES sees it -- enough for a resource name, a menu
+ * label and an alert (form_alert, rsrc_load, menu_text, menu_register).
+ * The string opcodes that take a longer or a second one (fsel, shel_write,
+ * shel_find) still want a near string, until a bigger scratch can be
+ * afforded.  Message buffers and the parameter block's own arrays are
+ * written through far pointers and can be anywhere.
  *
  * GEMDOS (COP #$01): the block is the ST's trap #1 frame with the result
  * in front of it (src/sys/gemdos.h); gemdos_call() reads its arguments
@@ -42,6 +48,7 @@
 #include "aes/proc.h"
 #include "sys/abi.h"
 #include "sys/gemdos.h"
+#include "sys/farmem.h"
 
 uint32_t gem_pb;
 uint8_t  gem_which;
@@ -125,6 +132,43 @@ static void *near_of(int32_t a)
     return (void *)(uint16_t)a;
 }
 
+/* A caller STRING (int32_t) as a near pointer.  In a --data-model=large
+ * program every string literal is FAR (Calypsi cfar), and the AES reads
+ * strings near, so near_of() would hand it NULL and the call would do
+ * nothing -- form_alert draws blank, rsrc_load opens no file, menu_text
+ * writes no item.  Copy a far string into a near scratch instead, the same
+ * copy-in the parameter blocks get (see the file head); a near string is
+ * returned as itself, so nothing changes for a small-data program.
+ *
+ * The scratch is SMALL because bank $00 is nearly spent (tools/memreport.py):
+ * a big buffer fits neither the near budget (as a static) nor gem4xe's 2 KB
+ * stack across a deep AES call (as a local -- objc_draw overran it, m17).
+ * So a far string is capped at STR_SCRATCH-1, which covers a resource name,
+ * a menu label and the alerts a program actually raises.  The opcodes that
+ * take a longer or a second string -- fsel, shel_write, shel_find -- still
+ * want a near one; a bigger scratch (a bank-$00 map rebalance) is the
+ * follow-up that would carry them.  str_used winds back to 0 each call. */
+#define STR_SCRATCH 64
+static char str_scratch[STR_SCRATCH];
+static uint16_t str_used;
+
+static char *near_str(int32_t a)
+{
+    uint16_t start;
+
+    if (!((uint32_t)a >> 16))
+        return (char *)(uint16_t)a;         /* near, or NULL */
+    start = str_used;
+    while (str_used < STR_SCRATCH - 1) {
+        uint8_t c = far_read8((uint32_t)a++);
+        str_scratch[str_used++] = (char)c;
+        if (!c)
+            return &str_scratch[start];
+    }
+    str_scratch[STR_SCRATCH - 1] = 0;        /* truncate, keep a terminator */
+    return &str_scratch[start < STR_SCRATCH - 1 ? start : STR_SCRATCH - 1];
+}
+
 /* rsrc_gaddr's answer, for aes_entry to copy to addr_out[0] -- the one
  * AES call that returns an address (the donor's ad_rso). */
 static uint32_t ad_rso;
@@ -136,6 +180,8 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
     GRECT clip;
     WORD ret = 1;                   /* TRUE unless the call says otherwise */
     WORD k;
+
+    str_used = 0;                   /* one call's far-string bounces */
 
     /* Every op that takes a tree takes it in addr_in[0]. */
     switch (opcode) {
@@ -239,14 +285,14 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
         ret = do_chg(tree, int_in[0], SELECTED, !int_in[1], TRUE, TRUE);
         break;
     case 34: {                      /* menu_text: tree, item, text */
-        const char *s = (const char *)near_of(addr_in[1]);
+        const char *s = (const char *)near_str(addr_in[1]);
         if (!s)
             return -1;
         mn_text(tree, int_in[0], s);
         break;
     }
     case 35: {                      /* menu_register: pid, string */
-        const char *s = (const char *)near_of(addr_in[0]);
+        const char *s = (const char *)near_str(addr_in[0]);
         if (!s)
             return -1;
         ret = mn_register(int_in[0], s);
@@ -295,7 +341,7 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
         break;
     }
     case 52: {                      /* form_alert: defbut, string */
-        const char *s = (const char *)near_of(addr_in[0]);
+        const char *s = (const char *)near_str(addr_in[0]);
         if (!s)
             return -1;
         ret = fm_alert(int_in[0], s);
@@ -418,7 +464,7 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
      * the button its word. */
     case 90:                        /* fsel_input: path, sel */
     case 91: {                      /* fsel_exinput: path, sel, label */
-        char *path = near_of(addr_in[0]);
+        char *path = near_of(addr_in[0]);   /* far: not yet (near_str is small) */
         char *sel = near_of(addr_in[1]);
         const char *label = (opcode == 91) ? near_of(addr_in[2]) : 0;
         if (path && sel && (opcode == 90 || label))
@@ -432,7 +478,7 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
      * (words 5-6, 7-8, 9) are what the donor's rs_load leaves there; the
      * addresses are bank $00, so the high words are 0. */
     case 110: {                     /* rsrc_load: name */
-        const char *name = near_of(addr_in[0]);
+        const char *name = near_str(addr_in[0]);
         ret = name ? rs_load(name) : 0;
         if (ret) {
             global[5] = (WORD)((uint16_t)rs_loaded() + rs_loaded()->rsh_trindex);
@@ -469,7 +515,7 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
         break;
     }
     case 121: {                     /* shel_write: doex, isgr, iscr, cmd, tail */
-        const char *cmd = near_of(addr_in[0]);
+        const char *cmd = near_of(addr_in[0]);   /* far: not yet */
         const char *tail = near_of(addr_in[1]);
         if (int_in[0] == 1 && !(cmd && tail))
             ret = 0;
@@ -495,13 +541,13 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
         break;
     }
     case 124: {                     /* shel_find: path (unchanged here) */
-        char *path = near_of(addr_in[0]);
+        char *path = near_of(addr_in[0]);   /* far: not yet */
         ret = path ? sh_find(path) : 0;
         break;
     }
     case 125: {                     /* shel_envrn: &value, name */
         const char **pp = near_of(addr_in[0]);
-        const char *name = near_of(addr_in[1]);
+        const char *name = near_str(addr_in[1]);
         if (pp && name)
             sh_envrn(pp, name);
         else

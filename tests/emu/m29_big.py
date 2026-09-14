@@ -115,7 +115,7 @@ def main(argv):
         near = b.peek16(syms["app_near"])
         big = {n: bsym[n] + near - link_near
                for n in ("m29_ran", "m29_zeroed", "m29_seedok", "m29_sum",
-                         "m29_first", "m29_last", "m29_step")}
+                         "m29_first", "m29_last", "m29_step", "m29_alert")}
         print(f"  M29.G4A ran {tt} frames after B; its near region is at "
               f"${near:04X}, {far_banks} far banks")
 
@@ -145,6 +145,17 @@ def main(argv):
               f"pointer that wrapped inside the bank would read like this")
         print(f"  {N} far entries: big[0]={want[0]}, big[{N - 1}]="
               f"{want[-1]}, sum ${exp:04X} -- all as the model has them")
+
+        # The app is now blocked in form_alert with a FAR string literal --
+        # in --data-model=large that literal is far, and near_of would have
+        # nulled it (the peer's GACS bug).  RETURN picks the default button.
+        b.screenshot(os.path.join(ROOT, "build", "m29-alert.png"))
+        b.key("RETURN")
+        b.frames(30)
+        al = b.peek16(big["m29_alert"])
+        check(al == 1, f"form_alert with a far string returned {al}, not the "
+              f"button -- the shim did not bounce the far literal (near_str, "
+              f"src/sys/abi.c)")
 
         # Let it go, and see the shell put the desktop back over it.
         b.key("RETURN")
