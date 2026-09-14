@@ -154,7 +154,7 @@ def compare_listing(check, what, got, want, dirs=True):
 
 
 # -- the cases -------------------------------------------------------------------
-def cases(g, r, check, fs, kind, b, clock=False):
+def cases(g, r, check, fs, kind, b, clock=False, dos_clock=False):
     fixture = open(FIXTURE, "rb").read()
     tree = kind != DOS_2
     free0 = fs.free_count()
@@ -310,15 +310,21 @@ def cases(g, r, check, fs, kind, b, clock=False):
     # -- Tgetdate and Tgettime: the machine's clock ----------------------------------
     # The Atari has none; the Ultimate 1MB does, a DS1305 bit-banged
     # through $D3E2 (src/sys/clock.c).  A machine without one reads a
-    # register nothing drives, fails the check that what came back is a
-    # plausible time, and answers the ST's epoch -- which is what a TOS
-    # with a dead clock answers too.  `clock` is what this machine has.
+    # register nothing drives and fails the check that what came back is a
+    # plausible time -- and then ASKS THE DOS, because a SpartaDOS may have
+    # a clock driver for hardware gem4xe knows nothing about (an IDE Plus
+    # 2, an R-Time 8).  SpartaDOS X always answers kd_gettd: from that
+    # driver where one is loaded, and from its own software clock where
+    # none is, which is why the X in a cartridge on a clockless machine
+    # has a time and SpartaDOS 3.2 -- which is not asked -- has the epoch.
+    # `clock` is a chip the host drives; `dos_clock` is the DOS's answer.
     date, _ = g.call("Tgetdate")
     time, _ = g.call("Tgettime")
     y, mo, dd = 1980 + (date >> 9), (date >> 5) & 15, date & 31
     hh, mi, ss = time >> 11, (time >> 5) & 63, (time & 31) * 2
     print(f"  Tgetdate/Tgettime: {y:04d}-{mo:02d}-{dd:02d} {hh:02d}:{mi:02d}:{ss:02d}"
-          + ("" if clock else "  (no clock: the epoch)"))
+          + ("" if clock else "  (the DOS's own clock)" if dos_clock
+             else "  (no clock: the epoch)"))
     if clock:
         now = datetime.datetime.now()
         check((y, mo, dd) == (now.year, now.month, now.day),
@@ -329,6 +335,14 @@ def cases(g, r, check, fs, kind, b, clock=False):
         check(near < 120 or near > 86280,
               f"Tgettime says {hh:02d}:{mi:02d}:{ss:02d}, the host says "
               f"{now.hour:02d}:{now.minute:02d}:{now.second:02d}")
+    elif dos_clock:
+        # Not the host's time -- it is the X's own, made up and fixed -- so
+        # what is asserted is that it came from the DOS at all rather than
+        # being invented here.  A user who typed DATE has set it, and then
+        # it is the right answer (src/sys/clock.c, dos_clock).
+        check((date, time) != (DATE0, 0),
+              f"SpartaDOS X answers kd_gettd, so Tgetdate/Tgettime should be "
+              f"the DOS's clock, not the epoch {DATE0:#06x}/0")
     else:
         check((date, time) == (DATE0, 0),
               f"with no clock Tgetdate/Tgettime say {date:#06x}/{time:#06x}, "
@@ -552,7 +566,8 @@ def main(argv):
         r = Runner(b, syms)
         g = Gdos(r, check)
         print("GEMDOS on CIO, against the image:")
-        cases(g, r, check, fs, kind, b, clock=bool(flash))
+        cases(g, r, check, fs, kind, b, clock=bool(flash),
+              dos_clock=(kind == DOS_SDX and not flash))
     finally:
         emu.stop()
 

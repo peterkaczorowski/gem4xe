@@ -199,6 +199,17 @@ static uint8_t dos_clock(CLOCK *c)
         return 0;           /* the X documents this call; 3.2 is not asked */
     save = *dev;
     *dev = DOS_DEV_ANY;
+    /* POISON THE ANSWER FIRST.  kd_gettd fills these from the clock
+     * DRIVER; with no driver loaded it leaves them alone, and page 7 still
+     * holds whatever the DOS last put there -- a file's stamp, which reads
+     * as a plausible time and is not one (the head of this file: a DOS with
+     * no clock driver does not answer the time).  A machine with SpartaDOS
+     * X in a cartridge and no clock chip answered 2023-06-06 23:51:40, the
+     * same to the second on every run, because nothing was writing it.
+     * An impossible day is one the check below refuses, so a call that
+     * wrote nothing now says "no clock" instead of somebody's file. */
+    d[0] = d[1] = d[2] = 0xFF;
+    t[0] = t[1] = t[2] = 0xFF;
     for (tries = 0; tries < DOS_TRIES && (p & 1); tries++)
         p = dos_call(DOS_KD_GETTD);
     *dev = (uint8_t)save;
