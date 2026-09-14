@@ -1,5 +1,6 @@
 /* diag.c -- the marks GEMDIAG.COM makes; src/sys/diag.h says why. */
 #include "sys/diag.h"
+#include "sys/rapidus.h"
 
 #define CONSOL  (*(volatile uint8_t *)0xD01F)
 #define VCOUNT  (*(volatile uint8_t *)0xD40B)
@@ -30,6 +31,40 @@ static void frames(uint8_t n)
     while (n--) {
         do { v = VCOUNT; } while (v == 0);
         do { v = VCOUNT; } while (v != 0);
+    }
+}
+
+/* ATASCII to a screen code, the OS's own arithmetic. */
+static uint8_t screen_code(uint8_t c)
+{
+    uint8_t v = (uint8_t)(c & 0x7F);
+    if (v < 0x20)
+        v = (uint8_t)(v + 0x40);
+    else if (v < 0x60)
+        v = (uint8_t)(v - 0x20);
+    return (uint8_t)(v | (c & 0x80));
+}
+
+static void hex_at(volatile uint8_t *at, uint8_t v)
+{
+    at[0] = mark_code[v >> 4];
+    at[1] = mark_code[v & 0x0F];
+}
+
+#define DIAG_COL 18
+
+void diag_rapidus(void)
+{
+    volatile uint8_t *top = (volatile uint8_t *)SAVMSC + DIAG_COL;
+    uint16_t i;
+
+    top[0] = screen_code(rapidus.present ? 'R' : '-');
+    top[1] = 0;                                 /* a blank, over the DOS banner */
+    for (i = 0; i < 8; i++)
+        top[2 + i] = screen_code(rapidus_reg_read(RAP_SIG + i));
+    if (rapidus.present) {
+        hex_at(top + 11, rapidus.mcr_before);
+        hex_at(top + 14, rapidus.cmcr_before);
     }
 }
 

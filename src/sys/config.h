@@ -60,11 +60,23 @@
 
 #define CFG_PRINTTO_MAX  20     /* "D1:PAGE.PS" and room to spare */
 
+/* CLOCK -- where the time comes from.  src/sys/clock.c: the chip on a
+ * U1MB or a SIDE first, the DOS's kernel when there is neither. */
+#define CFG_CLOCK_AUTO   0      /* the chip, then the DOS */
+#define CFG_CLOCK_DOS    1      /* the DOS only: for a machine whose chip
+                                 * probe misfires, and for the gate that
+                                 * exercises the DOS path on a machine
+                                 * that has the chip too */
+#define CFG_CLOCK_NONE   2      /* no clock at all -- the epoch.  For
+                                 * finding out whether the probe is what
+                                 * stops a machine */
+
 typedef struct {
     int16_t video;
     int16_t mouse;
     int16_t printer;            /* CFG_PRINT_* */
     char    printto[CFG_PRINTTO_MAX];   /* where it goes; "P:" by default */
+    int16_t clock;              /* CFG_CLOCK_* */
     int16_t found;              /* 1: the file was there and was read --
                                  * the boot screen says which it was */
 } CONFIG;

@@ -13,6 +13,8 @@
  *         are gated through this same loop (tests/emu/m22_apps.py)
  *     B   run M29.G4A, which is compiled --data-model=large and keeps
  *         its variables in far memory (tests/emu/m29_big.py)
+ *     H   run M31.G4A, whose far IMAGE is bigger than a bank -- the
+ *         format-2 loader path (tests/emu/m31_huge.py)
  *     X   ask for NOPE.G4A, which is not there: the shell's alert, then
  *         the desktop again
  *     Q   shut GEM down and return to DOS
@@ -35,7 +37,7 @@ int main(void)
     v_opnvwk(work_in, &handle, work_out);
 
     vst_color(handle, 1);
-    v_gtext(handle, 8, hbox + 16, "gem4xe desktop -- R M11, C CALC, K CLOCK, B M29, X a missing one, Q quits");
+    v_gtext(handle, 8, hbox + 16, "gem4xe desktop -- R M11, C CALC, K CLOCK, B M29, H M31, X a missing one, Q quits");
 
     for (;;) {
         k = (WORD)(evnt_keybd() & 0x00FF);
@@ -63,6 +65,14 @@ int main(void)
          * MEMORY MODEL, not the path. */
         if (k == 'b' || k == 'B') {
             shel_write(SHW_EXEC, 1, 0, "M29.G4A", "\0");
+            break;
+        }
+        /* H: the one whose far IMAGE crosses a bank (src/m31_huge.c).
+         * Format 2 and a chunked copy are what let it load at all; before
+         * them the packer refused it and the loader would have copied it
+         * modulo 65,536 (src/sys/app.c, copy_far). */
+        if (k == 'h' || k == 'H') {
+            shel_write(SHW_EXEC, 1, 0, "M31.G4A", "\0");
             break;
         }
         if (k == 'x' || k == 'X') {

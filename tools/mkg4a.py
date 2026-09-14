@@ -23,20 +23,41 @@ else about the layout is assumed: the shifts, the region bases and the
 entry point are read from the ELFs.
 
     G4A file, little-endian:
-      0  'G4A' 1                    magic, format version
+      0  'G4A' v                    magic, format version (1 or 2)
       4  u16 near_base              where the near region was linked
       6  u16 near_size              its whole extent, a page multiple
       8  u16 far_off                the far region's offset in its bank
      10  u32 far_size
      14  u8  far_bank               the bank it was linked in
-     15  u8  far_banks              banks it spans: the IMAGE is one bank
-;;;                                    (the PC wraps inside one), but a
-;;;                                    --data-model=large program`s far
-;;;                                    variables reach past it
+     15  u8  far_banks              banks the far region spans -- the image
+                                    AND the far variables, which carry no
+                                    bytes and so are nowhere in the file
      16  u16 entry_lo, u8 entry_bank, u8 0
      20  u16 x4: fixup counts -- near part: high-byte, bank; far part: high-byte, bank
      28  u32 0
-     32  near bytes, far bytes, then the four fixup lists as u16 offsets
+     32  near bytes, far bytes, then the four fixup lists
+
+    VERSION 1 and VERSION 2 differ in one thing: how wide a FAR fixup
+    offset is.  v1 writes it as a u16, which caps the far image at 64 KB;
+    v2 writes it as three bytes and has no such cap.  The near lists are
+    u16 in both, and stay that way -- the near region is a page-aligned
+    slice of gem4xe's bank-$00 pool and cannot be bigger than the bank.
+
+    A file is written v1 whenever the far image fits in 64 KB, which is
+    every program in this tree but one, so their bytes do not change and
+    their disk images do not grow.  GACS's GEM shell is the exception and
+    the reason v2 exists: 102,862 bytes of farcode and another 11 KB of
+    constants, which is not close to a bank and cannot be made to fit one.
+    The loader reads both (src/sys/app.c).
+
+    The far IMAGE may now span banks.  It used to be refused here, on the
+    ground that the program counter wraps inside a bank so code may not
+    cross one -- which is true, and is not this tool's business: no single
+    FUNCTION crosses a bank because each is its own linker fragment placed
+    inside one memory, and src/app/gemapp.scm gives every code bank a pair
+    of memories either side of the $D5 page for exactly that reason.  The
+    packer was enforcing an invariant it does not own, and the cost was
+    that no application could be larger than a bank.
 
 Usage: mkg4a.py base.elf near-shifted.elf far-shifted.elf out.g4a
                 [--syms out.sym] [--c-array out.c NAME]
@@ -47,7 +68,8 @@ import sys
 
 from mkxex import read_elf
 
-MAGIC = b"G4A\x01"
+MAGIC_V1 = b"G4A\x01"
+MAGIC_V2 = b"G4A\x02"
 
 
 def read_elf_all(path):
@@ -86,10 +108,6 @@ def extents(segs, syms):
     near_end = max(a + m for a, _, m in near)
     far_base = min(a for a, _, _ in far)
     far_end = max(a + len(d) for a, d, _ in far)
-    if (far_base >> 16) != ((far_end - 1) >> 16):
-        raise SystemExit(f"far image ${far_base:06X}-${far_end - 1:06X} "
-                         f"spans banks; the program counter wraps inside "
-                         f"one, so code may not (src/gem4xe.scm)")
     if min(a for a, _, _ in near) < dp:
         raise SystemExit("a near segment lies below the direct page")
     return dp, near_end, far_base, far_end
@@ -213,15 +231,28 @@ def main(argv):
     if not (fb <= entry < fe):
         raise SystemExit(f"entry ${entry:06X} is not in the far region")
 
-    hdr = MAGIC + struct.pack("<HHHIBBHBBHHHHI",
+    # v1 unless the far image needs more room than its offsets have. Every
+    # program in this tree but GACS's shell stays v1, byte for byte.
+    v2 = far_size > 0x10000
+    for name, lst in (("near", near_hi + near_bank), ("far", far_hi + far_bank)):
+        if len(lst) > 0xFFFF:
+            raise SystemExit(f"{len(lst)} {name} fixups: the header counts "
+                             f"them in a u16")
+    hdr = (MAGIC_V2 if v2 else MAGIC_V1) + struct.pack(
+                              "<HHHIBBHBBHHHHI",
                               nb, near_size, fb & 0xFFFF, far_size, fb >> 16,
                               far_banks,
                               entry & 0xFFFF, entry >> 16, 0,
                               len(near_hi), len(near_bank), len(far_hi), len(far_bank), 0)
     assert len(hdr) == 32, len(hdr)
     body = near_img + far_img
-    for lst in (near_hi, near_bank, far_hi, far_bank):
+    for lst in (near_hi, near_bank):
         body += b"".join(struct.pack("<H", o) for o in lst)
+    for lst in (far_hi, far_bank):
+        if v2:
+            body += b"".join(struct.pack("<I", o)[:3] for o in lst)
+        else:
+            body += b"".join(struct.pack("<H", o) for o in lst)
     blob = hdr + body
     with open(out, "wb") as f:
         f.write(blob)

@@ -60,7 +60,7 @@
               .extern ae_sp, ae_pokmsk      ; src/crt_atari.s
               .extern irq_frames, irq_kput  ; src/sys/irq.c, irq.s
               .extern irq_cio_swap          ; src/sys/irq.c
-              .public cio_call, dsk_call, cio_env
+              .public cio_call, dsk_call, dos_call, cio_env
 
 #define POKMSK 0x0010                 /* OS shadow of IRQEN */
 #define RTCLOK 0x0012                 /* three bytes, high first */
@@ -71,6 +71,7 @@
 #define PORTB  0xD301
 #define CIOV   0xE456
 #define SIOV   0xE459                 /* the DCB in page 3, not an IOCB */
+#define KERNEL 0x0703                 /* SpartaDOS: JMP to its kernel, Y = the function */
 #define RAP_MCR 0xFF0080              /* src/sys/rapidus.h */
 #define MCR_SLOW3 0x08
 #define IRQ_SWAP_ROM  0x01            /* src/sys/irq.h */
@@ -83,14 +84,19 @@ cio_env:      .space  1               ; bisection knobs: 1 = leave CRITIC alone
 cio_iocb:     .space  1               ; iocb * 16, for X
 cio_pokmsk:   .space  1               ; gem4xe's POKMSK across the call
 cio_stat:     .space  2               ; the OS's Y, zero-extended
-cio_which:    .space  1               ; 0 = CIOV, 1 = SIOV (dsk_call)
+cio_which:    .space  1               ; 0 = CIOV, 1 = SIOV (dsk_call), 2 = KERNEL (dos_call)
+cio_fn:       .space  1               ; dos_call's function number, for Y
 
               .section code, root
-;;; Two ways in, one round trip.  cio_call takes an IOCB number in A and
+;;; Three ways in, one round trip.  cio_call takes an IOCB number in A and
 ;;; ends at CIOV; dsk_call takes nothing, the DCB in page 3 being the
 ;;; argument, and ends at SIOV -- which is the entry a PBI hard disk is
 ;;; served through as well as a floppy, so one sector read reaches every
-;;; drive gem4xe can see (src/sys/gemdos.c, gd_dfree).
+;;; drive gem4xe can see (src/sys/gemdos.c, gd_dfree); dos_call takes a
+;;; SpartaDOS kernel function number in A, puts it in Y and ends at the
+;;; JMP at $0703, the way the SDX User Guide (6.8, "Page Seven Kernel
+;;; Values") says a program calls the kernel.  It answers with the P the
+;;; kernel came back with: the carry is what a kernel call reports in.
 cio_call:     php
               sep     #0x20
               stz     abs:cio_which
@@ -102,6 +108,14 @@ dsk_call:     php
               sta     abs:cio_which
               rep     #0x20
               lda     ##0             ; no IOCB to index
+              bra     os_call
+dos_call:     php
+              sep     #0x20
+              sta     abs:cio_fn
+              lda     #2
+              sta     abs:cio_which
+              rep     #0x20
+              lda     ##0
 os_call:      sei
               phb
               phd
@@ -156,10 +170,18 @@ cio_nocrit:   stz     ATRACT
 cio_go:       cli
               ldx     abs:cio_iocb
               lda     abs:cio_which
-              bne     cio_sio
-              jsr     CIOV
+              beq     cio_cio
+              cmp     #2
+              beq     cio_dos
+              jsr     SIOV
               bra     cio_back
-cio_sio:      jsr     SIOV
+cio_cio:      jsr     CIOV
+              bra     cio_back
+cio_dos:      ldy     abs:cio_fn
+              jsr     KERNEL
+              php                     ; its P, carry and all, is the answer
+              pla
+              tay
 cio_back:     sei
               sty     abs:cio_stat
               lda     abs:irq_cio_swap

@@ -43,7 +43,14 @@ typedef struct {
 extern FARMEM farmem;
 
 void     farmem_probe(void);
-uint32_t far_alloc(uint32_t bytes);     /* 0 on failure */
+uint32_t far_alloc(uint32_t bytes);     /* 0 on failure; never crosses a
+                                         * bank -- it skips to the next */
+/* ...and one that MAY cross, for a file read in whole (far_read_file).
+ * A FAR POINTER'S ARITHMETIC IS 16 BITS on this compiler, so what lives
+ * in a span must be reached by recomputing the address -- far_read8,
+ * far_write8, far_put_span, far_copy_span -- and never by walking a
+ * pointer over the boundary.  The reasoning is in farmem.c. */
+uint32_t far_alloc_span(uint32_t bytes);
 /* Everything taken so far is permanent: no later far_release() may go
  * below it.  far_refused counts the releases turned away. */
 void     far_keep_mark(void);
@@ -58,6 +65,9 @@ uint8_t  far_read8(uint32_t addr);
 void     far_put(uint32_t dst, const uint8_t *src, uint16_t len);
 void     far_get(uint8_t *dst, uint32_t src, uint16_t len);
 void     far_copy(uint32_t dst, uint32_t src, uint16_t len);
+/* The same two for a far_alloc_span block, which may cross a bank. */
+void     far_put_span(uint32_t dst, const uint8_t *src, uint16_t len);
+void     far_copy_span(uint32_t dst, uint32_t src, uint32_t len);
 void     far_fill(uint32_t dst, uint8_t v, uint16_t len);
 void     far_strget(char *dst, uint32_t src, uint16_t max);   /* bounded strcpy, */
 void     far_strput(uint32_t dst, const char *src, uint16_t max); /* NUL always */

@@ -59,6 +59,11 @@ static char *put_num(char *d, LONG n)
     return d;
 }
 
+/* rc_intersect, wind_get_grect and wind_set_grect used to be three more
+ * statics here.  They are in the application library now (src/app/gemlib.c),
+ * where the desktop having written them itself was the argument for putting
+ * them: every GEM program wants the same three, and an ST program arrives
+ * already written against gemlib's spelling of them. */
 static WORD far_strcmp(const char FAR *a, const char FAR *b)
 {
     while (*a && *a == *b) {
@@ -68,35 +73,9 @@ static WORD far_strcmp(const char FAR *a, const char FAR *b)
     return (WORD)((unsigned char)*a - (unsigned char)*b);
 }
 
-/* *p2 becomes the part of it inside *p1; TRUE if any is. */
-static WORD rc_intersect(const GRECT *p1, GRECT *p2)
-{
-    WORD tx, ty, tw, th;
-
-    tw = (WORD)(p2->g_x + p2->g_w < p1->g_x + p1->g_w ? p2->g_x + p2->g_w : p1->g_x + p1->g_w);
-    th = (WORD)(p2->g_y + p2->g_h < p1->g_y + p1->g_h ? p2->g_y + p2->g_h : p1->g_y + p1->g_h);
-    tx = p2->g_x > p1->g_x ? p2->g_x : p1->g_x;
-    ty = p2->g_y > p1->g_y ? p2->g_y : p1->g_y;
-    p2->g_x = tx;
-    p2->g_y = ty;
-    p2->g_w = (WORD)(tw - tx);
-    p2->g_h = (WORD)(th - ty);
-    return tw > tx && th > ty;
-}
-
 static WORD mul_div(WORD m1, WORD m2, WORD d1)
 {
     return (WORD)((LONG)m1 * m2 / d1);
-}
-
-static void wind_get_grect(WORD wh, WORD field, GRECT *r)
-{
-    wind_get(wh, field, &r->g_x, &r->g_y, &r->g_w, &r->g_h);
-}
-
-static WORD wind_set_grect(WORD wh, WORD field, const GRECT *r)
-{
-    return wind_set(wh, field, r->g_x, r->g_y, r->g_w, r->g_h);
 }
 
 /* -- the windows ------------------------------------------------------- */

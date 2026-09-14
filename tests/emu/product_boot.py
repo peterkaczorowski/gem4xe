@@ -233,12 +233,14 @@ def check_boot(name, report, gtia, b, syms, check):
         check(report.get(label) == want,
               f"{name}: the boot screen says {label} '{report.get(label)}', "
               f"not '{want}'")
-    # The vectors line: the regime irq_install() reached, and the Rapidus
-    # MCR/CMCR as the firmware left them (src/sys/bootinfo.c).  With the
-    # OS ROM in and window 3 slow at boot, the ROM is copied under itself.
+    # The vectors line: the regime irq_install() reached, the Rapidus
+    # MCR/CMCR as the firmware left them, and which RAM under the ROM took
+    # the copy (src/sys/bootinfo.c).  With the OS ROM in and window 3 slow
+    # at boot, the ROM is copied under itself; Altirra's card always takes
+    # the SRAM way (S), so anything else here is a change in the emulation.
     rap = syms["rapidus"]
     mcr, cmcr = b.peek(rap + RAPIDUS_MCR_BEFORE), b.peek(rap + RAPIDUS_CMCR_BEFORE)
-    want = f"{L('IRQ_COPIED')} (${mcr:02X}/${cmcr:02X})"
+    want = f"{L('IRQ_COPIED')} (${mcr:02X}/${cmcr:02X}/S)"
     check(report.get(L("IRQ")) == want,
           f"{name}: the boot screen says {L('IRQ')} '{report.get(L('IRQ'))}', "
           f"not '{want}'")

@@ -324,7 +324,7 @@ build/dos.o: src/sys/dos.c src/sys/dos.h src/sys/cio.h
 # rebuilt when the seam moves.
 build/gem.o: src/gem.c src/vdi/vdi.h src/vdi/vdidev.h src/vdi/pointer.h \
              src/vdi/font.h src/vdi/print.h src/aes/aes.h src/sys/config.h \
-             src/sys/bootinfo.h src/vbxe/vbxe.h src/antic/antic.h \
+             src/sys/bootinfo.h src/sys/clock.h src/vbxe/vbxe.h src/antic/antic.h \
              build/lang_rsc.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -I build -o $@ $<
@@ -373,7 +373,7 @@ build/lang.rsc build/lang_rsc.c build/lang_rsc.h: tools/langrsc.py tools/rsc.py
 build/lang_rsc.o: build/lang_rsc.c
 	@mkdir -p build
 	$(CC) $(CFLAGS) -o $@ $<
-build/clock.o: src/sys/clock.c src/sys/clock.h
+build/clock.o: src/sys/clock.c src/sys/clock.h src/sys/cio.h src/sys/dos.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -458,17 +458,23 @@ build/appld/%.o: src/app/%.c src/app/gem.h
 # $(8), when given, is the runtime library: a --data-model=large program
 # needs clib-lc-ld.a and the large-data half of the application library,
 # because the linker refuses to mix runtime models.
+#
+# $(9) and $(10) are how many banks of CODE and of far VARIABLES the
+# program wants, both one unless said otherwise -- which is every program
+# here but m31_huge, and GACS's shell in the other repository, whose
+# 102 KB of farcode and 119 KB of zfar are what made them parameters
+# (src/app/gemapp.scm).
 define g4a
 build/$(1).elf: $(2) src/app/gemapp.scm
 	$$(LD) src/app/gemapp.scm $(2) $(if $(8),$(8),$$(LIB)) --rtattr exit=simplified --cstartup gemapp -o $$@ \
 	    --list-file build/$(1).map --stack-size $(5) \
-	    --memories-expression "(app-layout #x1000 #x020000 $(3) $(4))"
+	    --memories-expression "(app-layout-n #x1000 #x020000 $(3) $(4) $(if $(9),$(9),1) $(if $(10),$(10),1))"
 build/$(1)-near.elf: $(2) src/app/gemapp.scm
 	$$(LD) src/app/gemapp.scm $(2) $(if $(8),$(8),$$(LIB)) --rtattr exit=simplified --cstartup gemapp -o $$@ \
-	    --stack-size $(5) --memories-expression "(app-layout #x1100 #x020000 $(3) $(4))"
+	    --stack-size $(5) --memories-expression "(app-layout-n #x1100 #x020000 $(3) $(4) $(if $(9),$(9),1) $(if $(10),$(10),1))"
 build/$(1)-far.elf: $(2) src/app/gemapp.scm
 	$$(LD) src/app/gemapp.scm $(2) $(if $(8),$(8),$$(LIB)) --rtattr exit=simplified --cstartup gemapp -o $$@ \
-	    --stack-size $(5) --memories-expression "(app-layout #x1000 #x030000 $(3) $(4))"
+	    --stack-size $(5) --memories-expression "(app-layout-n #x1000 #x030000 $(3) $(4) $(if $(9),$(9),1) $(if $(10),$(10),1))"
 build/$(1).g4a build/$(1).sym $(7): build/$(1).elf build/$(1)-near.elf build/$(1)-far.elf tools/mkg4a.py
 	python3 tools/mkg4a.py build/$(1).elf build/$(1)-near.elf build/$(1)-far.elf \
 	        build/$(1).g4a --syms build/$(1).sym $(6)
@@ -687,7 +693,7 @@ build/gem_diag.o: src/gem.c src/sys/diag.h build/lang_rsc.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -DGEM_DIAG -I src -I build -o $@ $<
 
-build/diag.o: src/sys/diag.c src/sys/diag.h
+build/diag.o: src/sys/diag.c src/sys/diag.h src/sys/rapidus.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -794,6 +800,25 @@ build/appld/m29_big.o: src/m29_big.c src/app/gem.h
 BIG_OBJS = $(G4A_LIB_LD) build/appld/m29_big.o
 $(eval $(call g4a,m29_big,$(BIG_OBJS),1024,256,384,,,$(LIB_LD)))
 
+# The application whose far IMAGE is bigger than a bank (src/m31_huge.c).
+# Nothing in this tree had one until GACS's GEM shell was linked for this
+# machine, so the .G4A's u16 far fixup offsets and app_load's 16-bit
+# size_t both sat undisturbed -- and neither would have said so.  Format 2
+# and a chunked copy answer them; this is what proves it here rather than
+# in another repository.  Four blocks of far CONSTANTS, because only bytes
+# that are in the file grow the image.
+build/m31_data.c: tools/m31data.py
+	@mkdir -p build
+	python3 tools/m31data.py $@
+build/app/m31_data.o: build/m31_data.c
+	@mkdir -p build/app
+	$(CC) --code-model=large --data-model=large -O2 -I src -o $@ $<
+build/app/m31_huge.o: src/m31_huge.c src/app/gem.h
+	@mkdir -p build/app
+	$(CC) --code-model=large --data-model=large -O2 -I src -I src/app -o $@ $<
+HUGE_OBJS = $(G4A_LIB_LD) build/app/m31_huge.o build/app/m31_data.o
+$(eval $(call g4a,m31_huge,$(HUGE_OBJS),1024,256,384,,,$(LIB_LD),2,1))
+
 build/test.rsc: tools/mkrsc.py tools/rsc.py tools/aesref.py
 	@mkdir -p build
 	python3 tools/mkrsc.py $@
@@ -872,6 +897,15 @@ build/safe.cfg: dist/gem4xe.cfg
 	        .replace(b'# VIDEO=AUTO', b'VIDEO=ANTIC') \
 	        .replace(b'\r\n', b'\n').replace(b'\n', b'\x9b'))" $< $@
 
+# ...and the one test-cf-dosclock boots with: CLOCK=DOS, so that the
+# SpartaDOS X kernel is the clock even on a machine that has the chip.
+build/dosclock.cfg: dist/gem4xe.cfg
+	@mkdir -p build
+	python3 -c "import sys; \
+	    open(sys.argv[2],'wb').write(open(sys.argv[1],'rb').read() \
+	        .replace(b'# CLOCK=AUTO', b'CLOCK=DOS') \
+	        .replace(b'\r\n', b'\n').replace(b'\n', b'\x9b'))" $< $@
+
 # The DOS's own DUP.SYS stays: it is what GEM returns to when it quits.
 # (It went, for a while, when the system outgrew the disk with the shell
 # on it -- docs/shipping.md section 2 -- and came back with the packed
@@ -938,6 +972,26 @@ build/gem-cf.img: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_ap
 	@rm -f $@
 	python3 tools/mkcf.py $@
 
+# The same card with CLOCK=DOS in its GEM4XE.CFG.  The emulated U1MB and
+# SIDE 2 both carry the chip, so on the card above the DOS is never
+# asked; this one makes src/sys/clock.c ask it, which is what a machine
+# with neither -- an Antonia and an IDE Plus 2 -- does on its own.
+build/gem-cf-dosclock.img: build/gem-cf.img build/dosclock.cfg
+	@rm -f $@
+	python3 tools/mkcf.py $@ --cfg build/dosclock.cfg
+
+# The same card in the shape an SD card takes in a SubCart or an AVGCART:
+# a 64 MB FAT32 partition first (the cart's own browser reads it), the
+# APT table and the two partitions after it.  The cart's SIDE 2
+# emulation hands the whole card to the U1MB's PBI BIOS, so the boot is
+# test-cf's; test-sd runs it on this image.  Needs mkfs.fat (dosfstools),
+# so it is `make sd`, not part of `all`.  GEMDIAG.COM rides along: the
+# card is what goes to a real machine (docs/phase39.md).
+sd: build/gem-sd.img
+build/gem-sd.img: build/gem-cf.img build/gemdiag.com
+	@rm -f $@
+	python3 tools/mkcf.py $@ --fat 64 --add build/gemdiag.com "GEM>GEMDIAG.COM"
+
 # The release floppy: the card's system partition on a double-sided
 # double-density SDFS disk, and NO DOS -- it boots under the SpartaDOS X
 # in a cartridge or in U1MB flash, which is the one DOS that lives in the
@@ -985,6 +1039,16 @@ build/m29-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt 
 	@rm -f $@
 	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(SHELL_FILES) \
 	    --add build/m29_big.g4a M29.G4A
+
+# And the same again for the application whose far IMAGE crosses a bank
+# (src/m31_huge.c).  Its own disk for the reason m29's is its own: a file
+# added to a fixture moves every pool and directory number the gates on it
+# measure.
+build/m31-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(SHELL_DEPS) build/m31_huge.g4a tools/mkspdisk.py tools/atr.py
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(SHELL_FILES) \
+	    --add build/m31_huge.g4a M31.G4A
 
 # The desktop gate's disk (test-m17): the runner again, with the real
 # desktop and its resource where test-m16's stand-in was.
@@ -1048,7 +1112,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-boot
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-boot
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -1267,6 +1331,15 @@ test-m28: build/m28-boot.atr
 test-m29: build/m29-boot.atr
 	python3 tests/emu/m29_big.py
 
+# An application bigger than a bank, loaded and run.  tests/host/test_g4a.py
+# proves the FILE -- that applying its fixups reproduces the linker's own
+# shifted link, byte for byte -- and this proves the LOADER, which is the
+# half a Python check cannot reach: format 2's three-byte fixup offsets and
+# the chunked image copy that replaced a memcpy_far whose size_t is sixteen
+# bits.  Both failures would have been quiet.
+test-m31: build/m31-boot.atr
+	python3 tests/emu/m31_huge.py
+
 # The VDI on the printer, and the page off the machine: the third device
 # through the seam, checked from the files it writes rather than from a
 # screenshot, because paper is not photographable from here.
@@ -1334,6 +1407,14 @@ test-cf: build/gem-cf.img build/desktop.g4a build/desktop.sym
 	@test -n "$(SRC_U1MB)" || { echo "no U1MB fixture: set [u1mb].flash in fixtures.toml"; exit 1; }
 	python3 tests/emu/cf_boot.py
 
+test-sd: build/gem-sd.img build/desktop.g4a build/desktop.sym
+	@test -n "$(SRC_U1MB)" || { echo "no U1MB fixture: set [u1mb].flash in fixtures.toml"; exit 1; }
+	python3 tests/emu/cf_boot.py --card build/gem-sd.img
+
+test-cf-dosclock: build/gem-cf-dosclock.img build/desktop.g4a build/desktop.sym
+	@test -n "$(SRC_U1MB)" || { echo "no U1MB fixture: set [u1mb].flash in fixtures.toml"; exit 1; }
+	python3 tests/emu/cf_boot.py --card build/gem-cf-dosclock.img
+
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.
 demo: build/m3-boot.atr
@@ -1374,4 +1455,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-boot test-cf demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-boot test-cf test-sd test-cf-dosclock sd demo movie bench emu-stop clean

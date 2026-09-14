@@ -21,15 +21,17 @@
  * rather than assumed.  With NMIEN and IRQEN still off the whole operation
  * is invisible to the OS.
  *
- * ON A RAPIDUS the same copy also lands in the accelerator's SRAM -- the
- * MCR's window 3 is switched fast with write-through on, so each write goes
- * to both -- and the interrupt path then never touches the 1.79 MHz bus
- * except for the registers it reads.  Semantics as Altirra's rapidus.cpp
- * models them (UpdateSRAMWindows): with the ROM enabled the SRAM under it
+ * ON A RAPIDUS there are two RAMs under the ROM -- the accelerator's SRAM
+ * window and the motherboard's -- and which one takes a write depends on
+ * the MCR: window 3 fast with write-through off is the SRAM alone (as
+ * Altirra's rapidus.cpp models it, UpdateSRAMWindows), fast with it on is
+ * both, slow is the motherboard.  With the ROM enabled the SRAM under it
  * is not selected at all, which is why the copy has to go through RAM
- * under the ROM rather than being written straight into the SRAM.  The
- * hardware page stays hardware because MCR bit 6 masks it out of the
- * window; that bit is never cleared here.
+ * under the ROM rather than being written straight into the SRAM.  Which
+ * way is used is found, not assumed: irq_install() tries the three in the
+ * order that spares the DOS most (src/sys/irq.c, find_via) and reports the
+ * one that took in irq.via.  The hardware page stays hardware because MCR
+ * bit 6 masks it out of the window; that bit is never cleared here.
  *
  * WHAT THE HANDLERS DO -- as little as possible, in src/sys/irq.s:
  *
@@ -66,7 +68,10 @@
  * machine to DOS -- see there, and rapidus_restore() for the write-back
  * of $0000-$3FFF that has to come between the two.
  *
- * Verified in Altirra only: no Rapidus, and no CX80, has been near this.
+ * Altirra takes the SRAM way; the first real card (a 6S9054E core with
+ * BIOS 1.2, 2026-09-13) refused it -- the bytes read back as the ROM's --
+ * and took the write-through way, which is what find_via is for.  No CX80
+ * has been near this.
  */
 #ifndef GEM4XE_IRQ_H
 #define GEM4XE_IRQ_H
@@ -84,11 +89,23 @@
                                is not there, or not writable                */
 #define IRQ_FAIL_VEC   2    /* the vectors read back wrong                  */
 
+/* Which RAM under the ROM took the copy -- irq.via (irq.c, ram_side) */
+#define IRQ_VIA_NONE   0    /* no Rapidus: the one there is                 */
+#define IRQ_VIA_SRAM   1    /* window 3 fast, write-through off: the SRAM   */
+#define IRQ_VIA_BOTH   2    /* window 3 fast, write-through on: SRAM and
+                               motherboard together                         */
+#define IRQ_VIA_BUS    3    /* window 3 slow: the motherboard, and it stays
+                               slow while GEM runs                          */
+
 typedef struct {
     uint8_t  how, fail;
     uint8_t  portb_before;  /* PORTB as found; bit 0 = OS ROM enabled     */
     uint8_t  mcr_before;    /* Rapidus MCR as found (0 without a Rapidus) */
     uint8_t  fast;          /* window 3 switched to the SRAM               */
+    uint8_t  via;           /* IRQ_VIA_*: which RAM the copy went to, or
+                               the last one tried when none took          */
+    uint8_t  bad_byte;      /* after a failure: the first byte that read
+                               back wrong, as it read                      */
     uint8_t  timer_div;     /* AUDF1: the pointer sampler's divisor        */
     uint16_t rom_sum;       /* 16-bit sum of $C000-$CFFF,$D800-$FFFF read
                                from the ROM, and ... */

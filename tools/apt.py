@@ -25,6 +25,16 @@ reads real APT disks, and its writer is the header
     LBA 2-7  spare, so that a table that grows does not move the data.
     LBA 8+   the partitions themselves.
 
+A card that also has to be a FAT volume -- an SD card in a SubCart or an
+AVGCART, whose own file browser reads the first FAT partition in the
+MBR and whose SIDE 2 emulation hands the whole card to the U1MB's PBI
+BIOS -- keeps the same table, moved: the MBR's first entry is the FAT
+partition, its second the type-$7F entry pointing at the table, and
+the table and the APT partitions follow the FAT partition.  Which is
+the layout an SDX FDISK leaves on such a card, and the one the PBI
+BIOS reads back the same way -- through the $7F entry, wherever it
+points (`write_table(..., apt_lba=, fat=)`, `layout(..., at=)`).
+
 An entry says where a partition starts and how long it is IN BLOCKS of
 512 bytes, and how the DOS's own sectors sit inside those blocks (byte
 0, bits 0-1: 1 = 128, 2 = 256, 3 = 512, and bits 2-3 a packing mode).
@@ -44,6 +54,7 @@ BLOCK = 512
 HEADER_BLOCKS = 8               # LBA 0-7: the MBR, the table, and room to grow
 APT_LBA = 1
 MBR_TYPE_APT = 0x7F             # the type byte a protective MBR gives the table
+MBR_TYPE_FAT32 = 0x0C           # FAT32 with LBA addressing: the SD-card case
 SIG = b"APT"
 
 # byte 0 of a partition entry: the sector size, and how sectors pack into
@@ -130,10 +141,11 @@ class Partition:
                 f"{self.sector_count} x {BLOCK}, {mb:.1f} MB)")
 
 
-def layout(img, sizes):
+def layout(img, sizes, at=HEADER_BLOCKS):
     """Partitions of `sizes` blocks each, laid end to end after the
-    header.  A size of 0 takes what is left."""
-    parts, at = [], HEADER_BLOCKS
+    header -- or from `at`, for a table that does not sit at LBA 1.  A
+    size of 0 takes what is left."""
+    parts = []
     for i, n in enumerate(sizes):
         if not n:
             n = img.blocks - at
@@ -144,17 +156,31 @@ def layout(img, sizes):
     return parts
 
 
-def write_table(img, parts, boot_drive=0):
+def write_table(img, parts, boot_drive=0, apt_lba=APT_LBA, fat=None):
     """The protective MBR and the APT table, for partitions already laid
     out.  Every partition is a mapping slot, so the DOS mounts them in
-    order as D1:, D2:, and so on."""
+    order as D1:, D2:, and so on.  `fat` = (start, count) puts a FAT32
+    partition in the MBR's first entry and the table's entry second --
+    the SD-card layout in the header -- and `apt_lba` is then where the
+    table sits, after the FAT partition."""
     if len(parts) > 15:
         raise ATRError(f"{len(parts)} partitions: entries 1-15 are the mapping slots")
+    if apt_lba < 1 or apt_lba >= img.blocks:
+        raise ATRError(f"a table at block {apt_lba} is outside {img!r}")
     mbr = bytearray(BLOCK)
-    mbr[0x1BE] = 0x80                                   # the entry is bootable
-    mbr[0x1C2] = MBR_TYPE_APT
-    mbr[0x1C6:0x1CA] = struct.pack("<I", APT_LBA)
-    mbr[0x1CA:0x1CE] = struct.pack("<I", img.blocks - APT_LBA)
+    off = 0x1BE
+    if fat:
+        start, count = fat
+        if start < 1 or start + count > apt_lba:
+            raise ATRError(f"a FAT partition {start}+{count} does not end before the table at {apt_lba}")
+        mbr[off + 4] = MBR_TYPE_FAT32
+        mbr[off + 8:off + 12] = struct.pack("<I", start)
+        mbr[off + 12:off + 16] = struct.pack("<I", count)
+        off += 16
+    mbr[off] = 0x80                                     # the entry is bootable
+    mbr[off + 4] = MBR_TYPE_APT
+    mbr[off + 8:off + 12] = struct.pack("<I", apt_lba)
+    mbr[off + 12:off + 16] = struct.pack("<I", img.blocks - apt_lba)
     mbr[0x1FE:0x200] = b"\x55\xAA"
     img.write_block(0, mbr)
 
@@ -173,7 +199,19 @@ def write_table(img, parts, boot_drive=0):
         e[10:12] = struct.pack("<H", i)         # partition id; 0 and $FFFF are reserved
         e[12] = FLAG_AUTOMOUNT
         tab[i * 16:(i + 1) * 16] = e
-    img.write_block(APT_LBA, tab)
+    img.write_block(apt_lba, tab)
+
+
+def read_fat(img):
+    """The (start, count) of the MBR's FAT partition, or None: what an
+    SD card's own browser will see, and what has to end before the table."""
+    mbr = img.read_block(0)
+    if mbr[0x1FE:0x200] != b"\x55\xAA":
+        return None
+    for off in range(0x1BE, 0x1FE, 16):
+        if mbr[off + 4] in (MBR_TYPE_FAT32, 0x0B, 0x06, 0x0E):
+            return struct.unpack_from("<II", mbr, off + 8)
+    return None
 
 
 def read_table(img):
@@ -218,6 +256,9 @@ def main(argv=None):
     img = Image.load(a.image)
     parts = read_table(img)
     print(f"{a.image}: {img!r}, {len(parts)} partition(s)")
+    fat = read_fat(img)
+    if fat:
+        print(f"  FAT partition: block {fat[0]}, {fat[1]} x {BLOCK}, {fat[1] * BLOCK / (1 << 20):.1f} MB")
     for p in parts:
         print(f"  {p!r}")
     p = parts[a.drive - 1]

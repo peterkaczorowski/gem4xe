@@ -1400,3 +1400,93 @@ WORD Tgettime(void)
 {
     return (WORD)dos(0x2C);
 }
+
+/* -- The GRECT half of the library (src/app/gem.h).
+ *
+ * rc_intersect and rc_union are Atari's own, transcribed from the rule
+ * rather than the code: the intersection is the later of the two left
+ * edges to the earlier of the two right ones, and it exists only if that
+ * leaves a positive width AND a positive height.  Both write their answer
+ * into the SECOND rectangle, which is the ST's order and the reason a
+ * redraw loop can pass the window's work area first and the dirty
+ * rectangle second and have the dirty one come back clipped.
+ *
+ * The rest are gemlib's spellings over calls this library already has:
+ * one GRECT where the AES takes four loose words.  Nothing here reaches
+ * the AES that the call underneath does not. */
+WORD rc_intersect(const GRECT *src, GRECT *dst)
+{
+    WORD x, y, w, h;
+
+    x = src->g_x > dst->g_x ? src->g_x : dst->g_x;
+    y = src->g_y > dst->g_y ? src->g_y : dst->g_y;
+    w = src->g_x + src->g_w < dst->g_x + dst->g_w
+        ? (WORD)(src->g_x + src->g_w) : (WORD)(dst->g_x + dst->g_w);
+    h = src->g_y + src->g_h < dst->g_y + dst->g_h
+        ? (WORD)(src->g_y + src->g_h) : (WORD)(dst->g_y + dst->g_h);
+    dst->g_x = x;
+    dst->g_y = y;
+    dst->g_w = (WORD)(w - x);
+    dst->g_h = (WORD)(h - y);
+    return (WORD)(w > x && h > y);
+}
+
+void rc_union(const GRECT *src, GRECT *dst)
+{
+    WORD x, y, w, h;
+
+    x = src->g_x < dst->g_x ? src->g_x : dst->g_x;
+    y = src->g_y < dst->g_y ? src->g_y : dst->g_y;
+    w = src->g_x + src->g_w > dst->g_x + dst->g_w
+        ? (WORD)(src->g_x + src->g_w) : (WORD)(dst->g_x + dst->g_w);
+    h = src->g_y + src->g_h > dst->g_y + dst->g_h
+        ? (WORD)(src->g_y + src->g_h) : (WORD)(dst->g_y + dst->g_h);
+    dst->g_x = x;
+    dst->g_y = y;
+    dst->g_w = (WORD)(w - x);
+    dst->g_h = (WORD)(h - y);
+}
+
+WORD wind_get_grect(WORD handle, WORD field, GRECT *r)
+{
+    return wind_get(handle, field, &r->g_x, &r->g_y, &r->g_w, &r->g_h);
+}
+
+WORD wind_set_grect(WORD handle, WORD field, const GRECT *r)
+{
+    return wind_set(handle, field, r->g_x, r->g_y, r->g_w, r->g_h);
+}
+
+WORD wind_calc_grect(WORD type, WORD kind, const GRECT *in, GRECT *out)
+{
+    return wind_calc(type, kind, in->g_x, in->g_y, in->g_w, in->g_h,
+                     &out->g_x, &out->g_y, &out->g_w, &out->g_h);
+}
+
+/* The string is an address in two words, high first -- the ST's intin
+ * layout, which src/aes/wind.c reads back from pinwds[1].  The whole
+ * address goes in rather than the low half, on tree_addr's discipline:
+ * the AES addresses what it reads in place with 16 bits, so a string
+ * that is NOT in bank $00 is a caller's bug, and a high word of zero
+ * would hide it behind whatever happens to live at that offset. */
+WORD wind_set_str(WORD handle, WORD field, const char *str)
+{
+    LONG a = (LONG)(uint32_t)(const char FAR *)str;
+    return wind_set(handle, field, (WORD)((uint32_t)a >> 16), (WORD)a, 0, 0);
+}
+
+WORD form_center_grect(OBJECT *tree, GRECT *r)
+{
+    return form_center(tree, &r->g_x, &r->g_y, &r->g_w, &r->g_h);
+}
+
+WORD form_dial_grect(WORD flag, const GRECT *little, const GRECT *big)
+{
+    return form_dial(flag, little->g_x, little->g_y, little->g_w, little->g_h,
+                     big->g_x, big->g_y, big->g_w, big->g_h);
+}
+
+WORD objc_draw_grect(OBJECT *tree, WORD start, WORD depth, const GRECT *r)
+{
+    return objc_draw(tree, start, depth, r->g_x, r->g_y, r->g_w, r->g_h);
+}

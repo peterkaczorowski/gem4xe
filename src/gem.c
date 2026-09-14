@@ -55,6 +55,7 @@
 #include "sys/dos.h"
 #include "sys/config.h"
 #include "sys/bootinfo.h"
+#include "sys/clock.h"
 #include "vdi/print.h"
 #include "sys/gemdos.h"
 #include "vbxe/vbxe.h"
@@ -66,9 +67,11 @@
  * GEM.COM compiles the same file with the marks empty. */
 #define MARK(n)       diag_mark(n)
 #define UNLESS(bit)   if (!(diag_keys & (bit)))
+#define DIAG(call)    call
 #else
 #define MARK(n)
 #define UNLESS(bit)
+#define DIAG(call)
 #endif
 
 extern void _sys_exit(void);
@@ -114,6 +117,7 @@ TASK void main(void)
 #endif
     MARK(0);  dos_ident();
     MARK(1);  UNLESS(DIAG_SKIP_SPEEDUP) rapidus_speedup();
+    DIAG(diag_rapidus());       /* the signature and the windows, as found */
     MARK(2);  UNLESS(DIAG_SKIP_IRQ) irq_install();
     MARK(3);  config_read();    /* before the screen: it says which one */
     MARK(4);  farmem_probe();   /* LANG.RSC goes in far memory ... */
@@ -134,6 +138,7 @@ TASK void main(void)
         _sys_exit();
     }
     boot_video(video);
+    clock_how = (uint8_t)config.clock;  /* where to look, before the first look */
     boot_clock();
     pointer = config.mouse == CFG_MOUSE_AUTO ? GEM_POINTER : (WORD)config.mouse;
     boot_pointer(pointer);

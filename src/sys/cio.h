@@ -135,6 +135,19 @@ uint8_t dsk_read(uint8_t unit, uint16_t sector, void *buf, uint16_t len);
 uint8_t dsk_percom(uint8_t unit, void *buf);   /* SIO_PERCOM_LEN bytes */
 SIMPLE_CALL uint16_t dsk_call(uint16_t unused);
 
+/* ---- the DOS's kernel, for what CIO has no call for ------------------- */
+/* A SpartaDOS kernel function, by number in Y, through the JMP at $0703
+ * (SDX User Guide 6.8: `kernel`, with `device` at $0761 set first).  The
+ * same round trip as CIO.  The answer is the P register the kernel came
+ * back with, so bit 0 is its carry -- which is how a kernel call says
+ * "busy" or "no".  Only src/sys/clock.c uses it, for kd_gettd. */
+#define DOS_KERNEL     0x0703
+#define DOS_DEVICE     0x0761
+#define DOS_DATE       0x077B   /* day, month, year (binary; 80.. is 19xx) */
+#define DOS_TIME       0x077E   /* hour, minute, second */
+#define DOS_KD_GETTD   100      /* the clock, into DOS_DATE and DOS_TIME */
+SIMPLE_CALL uint16_t dos_call(uint16_t fn);
+
 extern uint16_t cio_calls;      /* round trips made */
 extern uint8_t  cio_env;        /* bisection knobs (src/sys/cio.s): 1 = leave CRITIC alone */
 extern uint8_t  cio_last;       /* the last status */

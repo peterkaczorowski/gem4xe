@@ -12,7 +12,8 @@
 #include "../vdi/vdi.h"
 #include "../vdi/pointer.h"
 
-CONFIG config = { CFG_VIDEO_AUTO, CFG_MOUSE_AUTO, CFG_PRINT_NONE, "P:" };
+CONFIG config = { CFG_VIDEO_AUTO, CFG_MOUSE_AUTO, CFG_PRINT_NONE, "P:",
+                  CFG_CLOCK_AUTO };
 
 #define CFG_LINE 72             /* a whole line, or it is not a setting */
 
@@ -62,11 +63,18 @@ static const CFG_WORD FAR cfg_printer[] = {
     { "PS",   CFG_PRINT_PS   }
 };
 
+static const CFG_WORD FAR cfg_clock[] = {
+    { "AUTO", CFG_CLOCK_AUTO },
+    { "DOS",  CFG_CLOCK_DOS  },
+    { "NONE", CFG_CLOCK_NONE }
+};
+
 /* ...and the keys themselves, for the same reason. */
 static const char FAR k_video[] = "VIDEO";
 static const char FAR k_mouse[] = "MOUSE";
 static const char FAR k_printer[] = "PRINTER";
 static const char FAR k_printto[] = "PRINTTO";
+static const char FAR k_clock[] = "CLOCK";
 
 static char up(char c)
 {
@@ -147,6 +155,8 @@ static void cfg_line(char *s)
         config.mouse = lookup(NAMES(cfg_mouse), val, config.mouse);
     else if (same(k_printer, key))
         config.printer = lookup(NAMES(cfg_printer), val, config.printer);
+    else if (same(k_clock, key))
+        config.clock = lookup(NAMES(cfg_clock), val, config.clock);
     else if (same(k_printto, key)) {
         /* A NAME, not a word out of a table: the value is taken as it
          * stands (upper-cased, as CIO wants) and truncated rather than

@@ -581,6 +581,12 @@ WORD form_keybd(OBJECT *tree, WORD obj, WORD nxt_obj, WORD thechar,
 WORD form_button(OBJECT *tree, WORD obj, WORD clks, WORD *pnxt_obj);
 WORD graf_rubbox(WORD x, WORD y, WORD w, WORD h, WORD *pw, WORD *ph);
 WORD graf_watchbox(OBJECT *tree, WORD obj, WORD instate, WORD outstate);
+/* fsel_input / fsel_exinput answer their `button` with one of these.  The
+ * Compendium names both (fsel_exinput: "FSEL_CANCEL (0) ... FSEL_OK (1)"),
+ * and an application that tests the value by its name rather than by 1 is
+ * the normal way ST code is written. */
+#define FSEL_CANCEL  0
+#define FSEL_OK      1
 WORD fsel_input(char *path, char *sel, WORD *button);
 WORD fsel_exinput(char *path, char *sel, WORD *button, const char *label);
 WORD rsrc_saddr(WORD type, WORD index, void *addr);
@@ -588,6 +594,30 @@ WORD rsrc_obfix(OBJECT *tree, WORD obj);
 WORD shel_read(char *cmd, char *tail);
 WORD shel_find(char *path);
 WORD shel_envrn(char **value, const char *name);
+
+/* -- The GRECT half of the library.
+ *
+ * rc_intersect and rc_union are Atari's own (FALCON.AES/FUNCTION.C): plain
+ * arithmetic on two rectangles, no AES call in either, and every binding
+ * library for the ST exposes them because the AES's own redraw loop is
+ * written with them -- walk the rectangle list, intersect each against
+ * what you meant to draw, draw if anything is left.
+ *
+ * The `_grect` and `_str` spellings below are gemlib's, not the ROM's:
+ * one GRECT where the call underneath takes four loose words, which is
+ * how ST source has been written for twenty years.  They are declared
+ * here for the same reason VdiHdl is -- they cost nothing, and they are
+ * the difference between a real ST application compiling and not. */
+WORD rc_intersect(const GRECT *src, GRECT *dst);
+void rc_union(const GRECT *src, GRECT *dst);
+
+WORD wind_get_grect(WORD handle, WORD field, GRECT *r);
+WORD wind_set_grect(WORD handle, WORD field, const GRECT *r);
+WORD wind_calc_grect(WORD type, WORD kind, const GRECT *in, GRECT *out);
+WORD wind_set_str(WORD handle, WORD field, const char *str);
+WORD form_center_grect(OBJECT *tree, GRECT *r);
+WORD form_dial_grect(WORD flag, const GRECT *little, const GRECT *big);
+WORD objc_draw_grect(OBJECT *tree, WORD start, WORD depth, const GRECT *r);
 
 /* -- GEMDOS, the ST's osbind names.  Pointers are far so that a buffer
  * Malloc gave out -- which is far memory -- can be read into directly;

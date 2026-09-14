@@ -88,43 +88,78 @@ uint16_t pool_room(void)
 
 #define HDR_SIZE 32
 
-static uint16_t rd16(const uint8_t FAR *p, uint16_t off)
+/* -- READING THE BLOB.
+ *
+ * Every one of these takes the blob as an ADDRESS and not as a pointer,
+ * and that is the whole of what an application bigger than a bank costs
+ * the loader.  A FAR POINTER'S ARITHMETIC IS SIXTEEN BITS here: `p + n`
+ * adds to the offset and leaves the bank byte alone, so a pointer walked
+ * off the top of a bank comes back at its bottom (src/sys/farmem.c has
+ * the generated code).  Below 64 KB that never showed, because nothing
+ * far_alloc hands out crosses a bank and every file gem4xe had loaded was
+ * a few KB.  GACS's GEM shell is 139 KB, and the whole of it -- the blob
+ * on the way in, the image on the way out, and every fixup offset -- is
+ * past where a 16-bit walk stays right. */
+static uint8_t rd8(uint32_t at)
 {
-    return (uint16_t)(p[off] | ((uint16_t)p[off + 1] << 8));
+    return far_read8(at);
 }
 
-static uint32_t rd32(const uint8_t FAR *p, uint16_t off)
+static uint16_t rd16(uint32_t at)
 {
-    return (uint32_t)rd16(p, off) | ((uint32_t)rd16(p, off + 2) << 16);
+    return (uint16_t)(far_read8(at) | ((uint16_t)far_read8(at + 1) << 8));
+}
+
+/* A v2 far fixup offset: three bytes, so that a far image may be bigger
+ * than a bank (tools/mkg4a.py). */
+static uint32_t rd24(uint32_t at)
+{
+    return (uint32_t)far_read8(at)
+         | ((uint32_t)far_read8(at + 1) << 8)
+         | ((uint32_t)far_read8(at + 2) << 16);
+}
+
+static uint32_t rd32(uint32_t at)
+{
+    return (uint32_t)rd16(at) | ((uint32_t)rd16(at + 2) << 16);
 }
 
 int16_t app_load(const uint8_t FAR *blob, uint32_t len, APP *app)
 {
     uint16_t near_size, far_off, n_nhi, n_nbank, n_fhi, n_fbank, k;
-    uint32_t far_size, need, lists, entry;
-    uint8_t  far_banks, dpage, dbank;
+    uint32_t far_size, need, lists, entry, b, far;
+    uint8_t  far_banks, dpage, dbank, fw;
     uint16_t bank;
     uint8_t *near;
-    uint8_t FAR *far;
 
     memset(app, 0, sizeof *app);     /* a failed load reports zeros */
+    b = (uint32_t)blob;              /* an address: see rd8 above */
     if (len < HDR_SIZE)
         return APP_E_SHORT;
-    if (blob[0] != 'G' || blob[1] != '4' || blob[2] != 'A' || blob[3] != 1)
+    if (rd8(b) != 'G' || rd8(b + 1) != '4' || rd8(b + 2) != 'A' ||
+        (rd8(b + 3) != 1 && rd8(b + 3) != 2))
         return APP_E_MAGIC;
-    app->link_near = rd16(blob, 4);
-    near_size      = rd16(blob, 6);
-    far_off        = rd16(blob, 8);
-    far_size       = rd32(blob, 10);
-    app->link_bank = blob[14];
-    far_banks      = blob[15];
-    entry          = rd32(blob, 16) & 0xFFFFFFUL;
-    n_nhi   = rd16(blob, 20);
-    n_nbank = rd16(blob, 22);
-    n_fhi   = rd16(blob, 24);
-    n_fbank = rd16(blob, 26);
+    /* The ONE difference between the two formats: how wide a far fixup
+     * offset is.  v1's u16 caps the far image at a bank, which every
+     * program in this tree but GACS's shell fits inside; v2 writes three
+     * bytes and does not.  The near lists are u16 in both, because the
+     * near region is a page-aligned slice of a bank-$00 pool and cannot
+     * be bigger than the bank. */
+    fw = (uint8_t)(rd8(b + 3) == 2 ? 3 : 2);
+    app->link_near = rd16(b + 4);
+    near_size      = rd16(b + 6);
+    far_off        = rd16(b + 8);
+    far_size       = rd32(b + 10);
+    app->link_bank = rd8(b + 14);
+    far_banks      = rd8(b + 15);
+    entry          = rd32(b + 16) & 0xFFFFFFUL;
+    n_nhi   = rd16(b + 20);
+    n_nbank = rd16(b + 22);
+    n_fhi   = rd16(b + 24);
+    n_fbank = rd16(b + 26);
     lists = HDR_SIZE + near_size + far_size;
-    need = lists + 2UL * ((uint32_t)n_nhi + n_nbank + n_fhi + n_fbank);
+    need = lists + 2UL * ((uint32_t)n_nhi + n_nbank)
+                 + (uint32_t)fw * ((uint32_t)n_fhi + n_fbank);
     if (need > len)
         return APP_E_SHORT;
 
@@ -151,39 +186,49 @@ int16_t app_load(const uint8_t FAR *blob, uint32_t len, APP *app)
      * constant: the high byte of a near address by the page difference,
      * the bank byte of a far address by the bank difference. */
     near = (uint8_t *)app->near_base;
-    far = (uint8_t FAR *)app->far_addr;
+    far = app->far_addr;
     for (k = 0; k < near_size; k++)
-        near[k] = blob[HDR_SIZE + k];
-    memcpy_far(far, blob + HDR_SIZE + near_size, (size_t)far_size);
+        near[k] = rd8(b + HDR_SIZE + k);
+    /* far_copy_span, not memcpy_far: the image may be bigger than a bank
+     * and so may the blob, and memcpy_far takes a size_t -- SIXTEEN BITS
+     * here, gem4xe being built --data-model=small.  A 115 KB image would
+     * have been copied modulo 65,536 with nothing saying so: the loader
+     * would report success, every fixup would apply, and the program
+     * would run into whatever was left of the previous tenant partway
+     * through. */
+    far_copy_span(far, b + HDR_SIZE + near_size, far_size);
 
     dpage = (uint8_t)((app->near_base - app->link_near) >> 8);
     dbank = (uint8_t)(bank - app->link_bank);
     app->fixups = 0;
     {
-        const uint8_t FAR *l = blob + lists;
+        uint32_t l = b + lists;
         for (k = 0; k < n_nhi; k++, l += 2) {
-            uint16_t o = rd16(l, 0);
+            uint16_t o = rd16(l);
             if (o >= near_size)
                 return APP_E_FIXUP;
             near[o] += dpage;
         }
         for (k = 0; k < n_nbank; k++, l += 2) {
-            uint16_t o = rd16(l, 0);
+            uint16_t o = rd16(l);
             if (o >= near_size)
                 return APP_E_FIXUP;
             near[o] += dbank;
         }
-        for (k = 0; k < n_fhi; k++, l += 2) {
-            uint16_t o = rd16(l, 0);
+        /* far + o, computed as an address rather than walked: past 64 KB
+         * of image a far pointer's own arithmetic would wrap back to the
+         * bottom of its bank and patch the wrong byte. */
+        for (k = 0; k < n_fhi; k++, l += fw) {
+            uint32_t o = (fw == 3) ? rd24(l) : rd16(l);
             if (o >= far_size)
                 return APP_E_FIXUP;
-            far[o] += dpage;
+            far_write8(far + o, (uint8_t)(far_read8(far + o) + dpage));
         }
-        for (k = 0; k < n_fbank; k++, l += 2) {
-            uint16_t o = rd16(l, 0);
+        for (k = 0; k < n_fbank; k++, l += fw) {
+            uint32_t o = (fw == 3) ? rd24(l) : rd16(l);
             if (o >= far_size)
                 return APP_E_FIXUP;
-            far[o] += dbank;
+            far_write8(far + o, (uint8_t)(far_read8(far + o) + dbank));
         }
         app->fixups = (uint16_t)(n_nhi + n_nbank + n_fhi + n_fbank);
     }
@@ -245,12 +290,22 @@ uint32_t far_read_file(const char *cioname, uint32_t *len)
             break;
         }
         if (got) {
-            at = far_alloc(got);
+            /* far_alloc_span, not far_alloc: the pieces have to make ONE
+             * extent and far_alloc will not cross a bank -- it skips to
+             * the next, so a file bigger than the room left in this one
+             * broke the `at != start + total` check below and came back
+             * as APP_E_FILE, which reads like a missing file.  The blob
+             * is only ever reached through a far pointer (app_load), so
+             * crossing costs it nothing. */
+            at = far_alloc_span(got);
             if (at != start + total) { /* out of far memory */
                 total = 0;
                 break;
             }
-            far_put(at, slice, got);
+            /* _span: this block came from far_alloc_span and a 2 KB
+             * slice of it can straddle a bank, where a far pointer's
+             * own increment would wrap to the bottom of that bank. */
+            far_put_span(at, slice, got);
             total += got;
         }
         if (got < n || st != CIO_OK)

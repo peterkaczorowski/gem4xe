@@ -141,6 +141,7 @@ EXPECT = [
     ("menu_text",        AES, 34, 1, 1, 2, 0),
     ("menu_register",    AES, 35, 1, 1, 1, 0),
     ("objc_draw",        AES, 42, 6, 1, 1, 0),
+    ("objc_draw_grect",  AES, 42, 6, 1, 1, 0),   # gemlib spelling: same call
     ("objc_find",        AES, 43, 4, 1, 1, 0),
     ("objc_offset",      AES, 44, 1, 3, 1, 0),
     ("objc_order",       AES, 45, 2, 1, 1, 0),
@@ -148,9 +149,11 @@ EXPECT = [
     ("objc_change",      AES, 47, 8, 1, 1, 0),
     ("form_do",          AES, 50, 1, 1, 1, 0),
     ("form_dial",        AES, 51, 9, 1, 0, 0),
+    ("form_dial_grect",  AES, 51, 9, 1, 0, 0),
     ("form_alert",       AES, 52, 1, 1, 1, 0),
     ("form_error",       AES, 53, 1, 1, 0, 0),
     ("form_center",      AES, 54, 0, 5, 1, 0),
+    ("form_center_grect",AES, 54, 0, 5, 1, 0),
     ("form_keybd",       AES, 55, 3, 3, 1, 0),
     ("form_button",      AES, 56, 2, 2, 1, 0),
     ("graf_rubbox",      AES, 70, 4, 3, 0, 0),
@@ -168,10 +171,14 @@ EXPECT = [
     ("wind_close",       AES, 102, 1, 1, 0, 0),
     ("wind_delete",      AES, 103, 1, 1, 0, 0),
     ("wind_get",         AES, 104, 2, 5, 0, 0),
+    ("wind_get_grect",   AES, 104, 2, 5, 0, 0),
     ("wind_set",         AES, 105, 6, 1, 0, 0),
+    ("wind_set_grect",   AES, 105, 6, 1, 0, 0),
+    ("wind_set_str",     AES, 105, 6, 1, 0, 0),
     ("wind_find",        AES, 106, 2, 1, 0, 0),
     ("wind_update",      AES, 107, 1, 1, 0, 0),
     ("wind_calc",        AES, 108, 6, 5, 0, 0),
+    ("wind_calc_grect",  AES, 108, 6, 5, 0, 0),
     ("rsrc_load",        AES, 110, 0, 1, 1, 0),
     ("rsrc_free",        AES, 111, 0, 1, 0, 0),
     ("rsrc_gaddr",       AES, 112, 2, 1, 0, 1),
@@ -244,6 +251,18 @@ ANSWERS = [
     ("graf_mkstate",   301, 302, 303, 304, 0),
     ("wind_get",       301, 302, 303, 304, 0),
     ("wind_calc",      301, 302, 303, 304, 0),
+    # The GRECT spellings answer with the same four words, in x, y, w, h
+    # order -- which is what a wrapper can get wrong while building a
+    # perfectly correct parameter block.
+    ("form_center_grect", 301, 302, 303, 304, 0),
+    ("wind_get_grect",    301, 302, 303, 304, 0),
+    ("wind_calc_grect",   301, 302, 303, 304, 0),
+    # (0,0,10,10) against (5,5,10,10): they overlap, and the overlap is
+    # the square from 5,5 to 10,10.  Atari's rc_intersect returns TRUE
+    # and writes the answer into the SECOND rectangle.
+    ("rc_intersect",   1, 5, 5, 5, 5),
+    # ...and their union spans 0,0 to 15,15.
+    ("rc_union",       0, 0, 15, 15, 0),
 ]
 
 # The VDI opcodes with no binding: the driver's own v_nop entries
@@ -260,7 +279,11 @@ VDI_NOP_OK = {10, 27, 29, 34}            # cell array twice, valuator, and 34
 # and here, where there is no GDOS to find, it is a constant. It is still
 # exercised by bind_sim.c, because the point of that check is that no
 # declared function goes unlooked-at.
-NO_CALL_OK = {"vq_gdos"}
+# rc_intersect and rc_union reach no gate either, for a plainer reason:
+# they are arithmetic on two rectangles and Atari's own AES has them in
+# FUNCTION.C rather than in a binding table.  What they compute IS
+# asserted, in OUTS.
+NO_CALL_OK = {"vq_gdos", "rc_intersect", "rc_union"}
 AES_NO_BINDING = set()                   # every opcode the shim serves is bound
 
 

@@ -87,6 +87,16 @@ class Constants(unittest.TestCase):
                      ("PR_PS", "CFG_PRINT_PS")):
             self.assertEqual(self.h[a], self.c[b], a + " vs " + b)
 
+    def test_the_clock_choices_agree_with_the_config_file(self):
+        """The same arrangement for the clock: clock.h names them
+        CLOCK_HOW_*, config.h names them CFG_CLOCK_*, and src/gem.c
+        assigns one to the other with no translation."""
+        k = defines("src/sys/clock.h")
+        for a, b in (("CLOCK_HOW_AUTO", "CFG_CLOCK_AUTO"),
+                     ("CLOCK_HOW_DOS", "CFG_CLOCK_DOS"),
+                     ("CLOCK_HOW_NONE", "CFG_CLOCK_NONE")):
+            self.assertEqual(k[a], self.c[b], a + " vs " + b)
+
     def test_declared_at_100_dpi_is_64_by_80_tenths_of_an_inch(self):
         """work_out[3] and [4] are microns per pixel and the VDI derives
         them from these; 100 dpi is 254 microns exactly, which is why the

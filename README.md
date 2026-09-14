@@ -17,9 +17,12 @@ both display drivers and chooses at start-up, so a machine without a VBXE gets
 320×168 on ANTIC mode F instead — `make test-m26` boots the shipped binary three
 ways to prove it. The 6502 path is still deferred.
 
-Nothing here has run on a real board yet: the first report from hardware was a
-white screen (`docs/phase39.md`). The boot screen's **Vectors** line says what
-the machine found under its OS ROM and how the Rapidus was set up, and `make
+The desktop first came up on a real board on 2026-09-13 — a 130XE with a
+Rapidus, an Ultimate 1MB, a VBXE and a SIDE 2 — after two reports that did
+not get there: a white screen (`docs/phase39.md`), then a boot screen that
+stopped at its **Vectors** line (`docs/phase40.md`). That line says
+what the machine found under its OS ROM, how the Rapidus was set up and which
+RAM under the ROM took the interrupt vectors, and `make
 diag` builds `GEMDIAG.COM` — `GEM.COM` with a digit and a tone per start-up
 step and OPTION/SELECT/START to skip and single-step — for a machine with no
 emulator bridge to ask.
@@ -88,7 +91,7 @@ full-screen repaints.
 | `make test-m29` | PASS | **an application with more data than bank `$00` has** — linked `--data-model=large`, its variables in a far bank of their own, loaded by the shell and run: the far bss zeroed, the far initialisers copied up by the crt's own table, and a 40 KB array walked end to end. The `.G4A` header's far-bank count comes from the linker's map, because a far bss carries no bytes and sizing it from the image would ask for one bank too few |
 | `make test-m30` | PASS | **the VDI on a printer** — the third device through the seam and the first that is not a screen: 640×800 dots in one far bank, drawn by the same `vdi.c`, written out by `v_updwk` as PCL 5 and as PostScript, both files read back out of the disk image. The PCL is decoded back to a page and compared with `vdiref` on `devref.Printer` — all 512,000 dots — and the Atari's own **PostScript is rendered by Ghostscript** and compared with the same page, which is what checks the y-flip and the DeviceGray inversion |
 | `make test-boot` | PASS | the product disks booting into the desktop with **nothing typed and nothing poked** — the loader finds the Rapidus behind the 6502 the machine came up as and switches it itself: `build/gem-sp.atr` (SpartaDOS, `STARTUP.BAT` for 3.2 and `AUTOEXEC.BAT` for X), `build/gem-boot.atr` (a double-density DOS 2 with `DUP.SYS`, the system named `AUTORUN.SYS`, 122 sectors free since the far image travels packed) and `build/gem-sdx.atr` (a double-sided SDFS disk with **no DOS on it**, the one the release carries, booted under the SpartaDOS X cartridge fixture); the 6502 boot runs GEM by itself and ends in the loader's refusal; `COLDST` and the Rapidus switch bring the machine up cold as a 65C816, the DOS starts GEM again, **the boot screen** is read back off E: while it is held and every line checked against the machine that wrote it, and the far image is spot-checked against the linker's output before the desk is compared pixel for pixel with the desktop model at its first wait |
-| `make test-cf` | PASS | the product **CF card** booting into the desktop: `build/gem-cf.img`, an APT table and two SDFS partitions, on a SIDE 2's IDE bus, with SpartaDOS X *and* the PBI BIOS that mounts those partitions coming from a real Ultimate 1MB flash image. The gate walks the U1MB BIOS setup itself (PBI BIOS on, hard disk on, an ID that is not the Rapidus's) from a fresh profile of its own, keeps the SIDE's SDX bank unmapped so the PBI BIOS will touch the disk, and then runs the same boot as `test-boot` -- refusal, switch, desk against the model. Needs the U1MB fixture and the patched emulator, so not in `make test` |
+| `make test-cf` | PASS | the product **CF card** booting into the desktop: `build/gem-cf.img`, an APT table and two SDFS partitions, on a SIDE 2's IDE bus, with SpartaDOS X *and* the PBI BIOS that mounts those partitions coming from a real Ultimate 1MB flash image. The gate walks the U1MB BIOS setup itself (PBI BIOS on, hard disk on, an ID that is not the Rapidus's) from a fresh profile of its own, keeps the SIDE's SDX bank unmapped so the PBI BIOS will touch the disk, and then runs the same boot as `test-boot` -- refusal, switch, desk against the model. Needs the U1MB fixture and the patched emulator, so not in `make test`. `make test-cf-dosclock` boots the same card with `CLOCK=DOS` in its `GEM4XE.CFG`, so that the SpartaDOS X kernel -- `kd_gettd`, the clock of a machine with no U1MB and no SIDE, an Antonia with an IDE Plus 2 say -- answers instead of the chip, and its answer is compared with the host's clock |
 | `make test-m14u` `test-m15u` | PASS | the same two on SpartaDOS X 4.49b booted from a real Ultimate 1MB flash image, U1MB switched on -- needs the patched emulator in `tools/altirra/`, so not in `make test` |
 | `make check-cc` | PASS | the ten compiler bugs worked around, in the vendor's simulator |
 | `make movie` | PASS | a session with the AES itself, filmed frame by frame and checked as a gate: `build/movie/gem4xe.mp4` |
@@ -387,7 +390,9 @@ APT table and mounts the partitions as `D1:` and `D2:` before any DOS
 runs. Three things about that machine had to be read out of its own
 firmware first, including the wait at `$D803` that stops the disk dead
 while the SIDE still claims the cartridge window (`docs/shipping.md`
-§3). The floppy is now the bootstrap, not the ceiling.
+§3). `make sd` writes the same card in the shape a **SubCart / AVGCART**
+wants -- a FAT32 partition first, the APT after it -- and `make test-sd`
+boots that one. The floppy is now the bootstrap, not the ceiling.
 Both product disks now come up in the desktop rather than at a prompt:
 the SpartaDOS one from a `STARTUP.BAT` and an `AUTOEXEC.BAT` (3.2 runs
 the first, X the second), the DOS 2 one from `AUTORUN.SYS` — which
@@ -484,6 +489,7 @@ stops.
 
     make test       # host tests + the emulated gates
     make test-cf    # the CF card on the U1MB machine (needs [u1mb].flash)
+    make test-cf-dosclock   # the same, with the DOS as the clock
 
 ## Licence
 

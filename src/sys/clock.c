@@ -1,8 +1,20 @@
-/* clock.c -- a DS1305, read a bit at a time.  See clock.h.
+/* clock.c -- a DS1305, read a bit at a time; failing that, the DOS's
+ * clock, whatever it is on.  See clock.h.
  *
  * TWO CARDS CARRY ONE: the Ultimate 1MB at $D3E2 and the SIDE / SIDE 2 at
  * $D5E2.  It is the same chip wired the same way on both, so the only
  * difference is which register the bits go to, and clock_probe picks it.
+ *
+ * A MACHINE WITH NEITHER may still have a clock -- an IDE Plus 2, an
+ * R-Time 8, a FujiNet -- and a SpartaDOS knows it, through whichever
+ * driver it loaded.  So when both registers say no, the DOS is asked:
+ * kernel function 100 (kd_gettd) fills `date` and `time` in page 7 from
+ * the clock driver (SDX User Guide 6.8).  It comes second, not first,
+ * because on a machine with the chip the chip is the source the DOS
+ * itself reads, and a DOS with no clock driver at all answers its
+ * software clock -- which is not the time.  The first report of this
+ * was a 65XE with an Antonia, a VBXE and an IDE Plus 2: a fine machine
+ * with a clock, and a clock application showing zeros.
  *
  * THE WIRING is that one register, and it is the card's rather than the
  * Atari's: a write drives the chip's three input lines and a read gives
@@ -33,6 +45,8 @@
  * real Ultimate 1MB.
  */
 #include "clock.h"
+#include "cio.h"
+#include "dos.h"
 
 #define RTC_U1MB 0xD3E2         /* the Ultimate 1MB's RTCIN/RTCOUT */
 #define RTC_SIDE 0xD5E2         /* the SIDE and SIDE 2's, the same chip */
@@ -48,6 +62,8 @@
  * once by clock_probe and not looked for again. */
 static volatile uint8_t *rtc;
 static uint8_t rtc_probed;
+static uint8_t rtc_dos;         /* no register: the DOS's kernel answers */
+uint8_t clock_how = CLOCK_HOW_AUTO;
 
 /* A moment, for a chip that was specified when a fast machine was 8 MHz.
  * Reading the register is a bus cycle the compiler cannot elide. */
@@ -162,18 +178,64 @@ static void read_regs(uint8_t *r)
     out(0);
 }
 
-/* Which register is a clock: the U1MB's, then the SIDE's, then none.  A
- * candidate has to pass looks_like_rtc before it is written to at all,
- * and then answer a plausible time. */
+/* The DOS's clock, into c: 1 if a SpartaDOS answered with a time that
+ * could be one.  kd_gettd says "busy" with the carry, and the guide
+ * says to ask again and give up after a while; 255 is its number.
+ * `device` is set to $10 for the call, as the guide's example has it,
+ * and put back.  Page 7 is the DOS's working area: a moment after this
+ * returns it holds the stamp of the last file the DOS touched, so the
+ * answer is copied out here and nothing reads page 7 later. */
+#define DOS_TRIES     255
+#define DOS_DEV_ANY   0x10
+
+static uint8_t dos_clock(CLOCK *c)
+{
+    volatile uint8_t *dev = (volatile uint8_t *)DOS_DEVICE;
+    volatile uint8_t *d = (volatile uint8_t *)DOS_DATE;
+    volatile uint8_t *t = (volatile uint8_t *)DOS_TIME;
+    uint16_t tries, p = 1, save;
+
+    if (dos.kind != DOS_SDX || *(volatile uint8_t *)DOS_KERNEL != 0x4C)
+        return 0;           /* the X documents this call; 3.2 is not asked */
+    save = *dev;
+    *dev = DOS_DEV_ANY;
+    for (tries = 0; tries < DOS_TRIES && (p & 1); tries++)
+        p = dos_call(DOS_KD_GETTD);
+    *dev = (uint8_t)save;
+    if (p & 1)
+        return 0;                               /* busy for good */
+    if (d[0] < 1 || d[0] > 31 || d[1] < 1 || d[1] > 12 || d[2] > 99
+        || t[0] > 23 || t[1] > 59 || t[2] > 59)
+        return 0;
+    c->day = d[0];
+    c->month = d[1];
+    c->year = (uint16_t)(d[2] < RTC_YEAR_PIVOT ? 2000 + d[2] : 1900 + d[2]);
+    c->hour = t[0];
+    c->minute = t[1];
+    c->second = t[2];
+    c->present = 1;
+    return 1;
+}
+
+/* Which register is a clock: the U1MB's, then the SIDE's, then the DOS,
+ * then none.  A candidate register has to pass looks_like_rtc before it
+ * is written to at all, and then answer a plausible time.  GEM4XE.CFG
+ * can cut the search short: CLOCK=DOS skips the chips and CLOCK=NONE
+ * skips everything, which is what somebody wants when they are finding
+ * out what stops their machine. */
 static void clock_probe(void)
 {
     static const uint16_t where[2] = { RTC_U1MB, RTC_SIDE };
     uint8_t r[7];
     uint16_t i;
+    CLOCK c;
 
     rtc_probed = 1;
     rtc = 0;
-    for (i = 0; i < 2; i++) {
+    rtc_dos = 0;
+    if (clock_how == CLOCK_HOW_NONE)
+        return;
+    for (i = 0; clock_how != CLOCK_HOW_DOS && i < 2; i++) {
         if (!looks_like_rtc(where[i]))
             continue;
         rtc = (volatile uint8_t *)where[i];
@@ -182,12 +244,15 @@ static void clock_probe(void)
             return;
         rtc = 0;
     }
+    rtc_dos = dos_clock(&c);
 }
 
 uint8_t clock_card(void)
 {
     if (!rtc_probed)
         clock_probe();
+    if (rtc_dos)
+        return CLOCK_DOS;
     if (!rtc)
         return CLOCK_NONE;
     return (uint16_t)rtc == RTC_U1MB ? CLOCK_U1MB : CLOCK_SIDE;
@@ -204,6 +269,8 @@ uint8_t clock_read(CLOCK *c)
 
     if (!rtc_probed)
         clock_probe();
+    if (rtc_dos)
+        return dos_clock(c);
     if (!rtc)
         return 0;
 

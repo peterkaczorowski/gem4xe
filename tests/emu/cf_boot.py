@@ -50,7 +50,13 @@ the Rapidus behind it and switches the CPU itself, and the desktop comes
 up on the
 restart and is compared with the model.
 
-  python3 tests/emu/cf_boot.py [--shot]
+  python3 tests/emu/cf_boot.py [--shot] [--card build/gem-sd.img]
+
+`--card` boots another image the same way: `build/gem-sd.img` is the
+SD-card shape (`tools/mkcf.py --fat`), a FAT32 partition first and the
+APT table after it, which is what a SubCart's or an AVGCART's SIDE 2
+emulation hands the PBI BIOS -- so the same gate proves the BIOS finds
+the table through the MBR when the table is not at LBA 1.
 """
 import os
 import shutil
@@ -73,8 +79,8 @@ import apt, atr, mkxex, symfile, vbxeref    # noqa: E402
 from m4_aes import SHOTDIR                  # noqa: E402
 from m14_sparta import screen               # noqa: E402
 from m17_desktop import listing             # noqa: E402
-from product_boot import (FARMEM_BRK, REFUSAL, desk_model,          # noqa: E402
-                          far_byte, far_probes)
+from product_boot import (BOOT_WAIT, FARMEM_BRK, REFUSAL, STEP,     # noqa: E402
+                          boot_screen, desk_model, far_byte, far_probes)
 
 CARD = os.path.join(BUILD, "gem-cf.img")
 SYMS = os.path.join(BUILD, "gem.sym")
@@ -86,6 +92,10 @@ WANT = {"GEM>GEM.COM": "gem.xex", "GEM>DESKTOP.G4A": "desktop.g4a",
 PBI_BANNER = "Ultimate PBI"
 SDX_BANK = 0xD5E1               # the SIDE's SDX bank register; $80 unmaps it
 DRVMAP = 0x03                   # D1: and D2:, the card's two partitions
+RTC_U1MB = 0xD3E2               # src/sys/clock.c: the chip the U1MB carries
+CLOCK_CARD = {0: "none", 1: "U1MB", 2: "SIDE", 3: "the DOS"}   # src/sys/clock.h
+# the boot screen's Clock line starts with the card (src/sys/bootinfo.c)
+CLOCK_LINE = {1: "U1MB, ", 2: "SIDE, ", 3: "DOS, "}
 
 # The BIOS setup, from the page it opens on ("Memory and System").
 SETUP = [("right", "the clock page"),
@@ -113,14 +123,18 @@ def keep_switch(b, frames, step=50):
         b.frames(step)
 
 
-def card_checks(check):
+def card_checks(check, card=CARD):
     """The card as tools/mkcf.py wrote it, read back through the same
     table the firmware reads: two partitions in mapping slots 1 and 2, so
     they arrive as D1: and D2:, and the system where the batch file
     looks for it."""
-    img = apt.Image.load(CARD)
+    img = apt.Image.load(card)
     parts = apt.read_table(img)
-    print(f"{os.path.basename(CARD)}: {img!r}, {len(parts)} partitions")
+    fat = apt.read_fat(img)
+    print(f"{os.path.basename(card)}: {img!r}, {len(parts)} partitions"
+          + (f", FAT32 at block {fat[0]}" if fat else ""))
+    if fat:
+        check(fat[0] + fat[1] <= parts[0].start, "the FAT partition overlaps D1:")
     check(len(parts) == 2, f"the card has {len(parts)} partitions, not 2")
     fs = atr.Sdfs(parts[0])
     listed = {e.filename.upper(): e.size for e in fs.entries("")}
@@ -142,14 +156,67 @@ def card_checks(check):
     return fs
 
 
+def cfg_clock(fs):
+    """What the card's GEM4XE.CFG says the clock is: the CLOCK= line if
+    it has one, else AUTO (src/sys/config.c reads it the same way)."""
+    try:
+        text = fs.read("GEM>GEM4XE.CFG").replace(b"\x9b", b"\n").decode("latin-1")
+    except Exception:
+        return "AUTO"
+    for ln in text.splitlines():
+        ln = ln.split("#")[0].split(";")[0].strip().upper()
+        if ln.startswith("CLOCK") and "=" in ln:
+            return ln.split("=", 1)[1].strip() or "AUTO"
+    return "AUTO"
+
+
+def clock_checks(check, b, syms, want, report):
+    """Which clock src/sys/clock.c settled on, read back from its own
+    statics once the boot screen has asked it, against what the card's
+    GEM4XE.CFG asked for; and the boot screen's own Clock line, which
+    is the time it read.  With CLOCK=DOS the SpartaDOS X kernel is the
+    clock, and the date and time it answered must be the emulated
+    chip's, which is the host's own in Altirra, to within the boot's
+    few minutes.  (Page 7 itself is no use here: by the time the
+    desktop is up it holds the stamp of the last file the DOS touched.)
+    That is the only gate on dos_call (src/sys/cio.s) and dos_clock: on
+    the plain card both chips are found first and the DOS is never
+    asked."""
+    import datetime
+    probed = b.peek(syms["rtc_probed"])
+    card = 3 if b.peek(syms["rtc_dos"]) else (
+        0 if b.peek16(syms["rtc"]) == 0 else
+        1 if b.peek16(syms["rtc"]) == RTC_U1MB else 2)
+    check(probed, "the boot screen never asked src/sys/clock.c for the clock")
+    line = report.get("Clock", "")
+    print(f"  the clock: {CLOCK_CARD[card]} (CLOCK={want}); "
+          f"the boot screen said {line!r}")
+    if want == "DOS":
+        check(card == 3, f"CLOCK=DOS, but the clock found is {CLOCK_CARD[card]}")
+    else:
+        check(card == 1, f"the U1MB's chip was not the clock found ({CLOCK_CARD[card]})")
+    check(line.startswith(CLOCK_LINE.get(card, "?")),
+          f"the boot screen's Clock line does not name {CLOCK_CARD[card]}")
+    now = datetime.datetime.now()
+    try:
+        then = datetime.datetime.strptime(line.split(", ", 1)[1], "%Y-%m-%d %H:%M:%S")
+        off = abs((now - then).total_seconds())
+    except (IndexError, ValueError):
+        off = None
+    check(off is not None and off < 15 * 60,
+          f"the clock read {line!r}, the host's says {now:%Y-%m-%d %H:%M:%S}")
+
+
 def main(argv):
     keep = "--shot" in argv
+    card = (os.path.abspath(argv[argv.index("--card") + 1])   # the emulator's cwd is not ours
+            if "--card" in argv else CARD)
     rom = flash()
     if not rom or not os.path.exists(rom):
         print("gem4xe-cf: no U1MB fixture -- set [u1mb].flash in fixtures.toml")
         return 2
-    if not os.path.exists(CARD):
-        print(f"gem4xe-cf: no {CARD} -- run make")
+    if not os.path.exists(card):
+        print(f"gem4xe-cf: no {card} -- run make")
         return 2
     fails = []
 
@@ -162,7 +229,7 @@ def main(argv):
     segs, _ = mkxex.read_elf(ELF)
     far = sorted((a, d) for a, d in segs if a > 0xFFFF)
     chunk = syms["_fl_end"] - syms["_fl_buf"]
-    fs = card_checks(check)
+    fs = card_checks(check, card)
 
     # A profile of the gate's own, thrown away first: a fresh NVRAM is
     # what makes the BIOS open its setup screen.
@@ -175,7 +242,7 @@ def main(argv):
                  extra_args=["--u1mbrom", rom, "--adddevice", "side2"])
     b = emu.bridge
     try:
-        added = b.cmd(f"DEVICE_ADD harddisk parent=/side2/idebus path={CARD} "
+        added = b.cmd(f"DEVICE_ADD harddisk parent=/side2/idebus path={card} "
                       f"write_enabled=1").get("ok")
         check(added, "the card would not attach to the SIDE 2's IDE bus")
         b.cmd("COLD_RESET")
@@ -221,6 +288,23 @@ def main(argv):
               f"AUTOEXEC.BAT, and the loader switched the machine to "
               f"{mode} by itself, {t + 100} frames in")
 
+        # -- 3b. the boot screen, while it is held ---------------------------
+        # As the floppy gate reads it (tests/emu/product_boot.py): the
+        # Clock line is the time GEM read, from whichever clock it found.
+        for t in range(0, BOOT_WAIT, STEP):
+            keep_switch(b, STEP, STEP)
+            report = boot_screen(b)
+            if report:
+                break
+        else:
+            check(False, "the boot screen never showed its hint")
+            report = {}
+        if report:
+            print(f"  the boot screen, {t + STEP} frames after the switch:")
+            for ln in screen(b):
+                if ln.strip():
+                    print("   |" + ln)
+
         # -- 4. the desktop ------------------------------------------------
         calls = syms["app_calls"]
         n, still = b.peek16(calls), 0
@@ -238,6 +322,7 @@ def main(argv):
         check(fault == 0, f"irq_fault {fault} (src/sys/irq.s)")
         check(not any(REFUSAL in ln for ln in screen(b)),
               "GEM refused the 65C816 as well: the switch did not take")
+        clock_checks(check, b, syms, cfg_clock(fs), report)
 
         bad = []
         for a in far_probes(far, chunk):

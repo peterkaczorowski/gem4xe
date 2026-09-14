@@ -221,6 +221,22 @@ instead of three, a size byte of 1, a boot header that loads at $0440 --
 `ATDiskFSSDX2::InitNew`, and CLX 1.9 checks it).
 `tests/host/test_apt.py` holds it to those rules, field by field.
 
+**The SD-card shape, for a SubCart or an AVGCART.**  Those carts hand
+the whole card to the U1MB PBI BIOS through their SIDE 2 / IDE
+emulation, but their own browser wants a FAT32 partition first and only
+ever sees that one.  `make sd` writes `build/gem-sd.img`: a 64 MB FAT32
+partition from LBA 2048 (a `README.TXT` on it says what the rest is),
+the MBR's first entry type `$0C` pointing at it and the `$7F` entry
+second, the APT table right after the FAT, and the same two SDFS
+partitions after that.  `tools/apt.py`'s `write_table(fat=...)` and
+`read_fat` know the shape; `make test-sd` boots it the way `test-cf`
+does.  Needs `mkfs.fat` and `mcopy`, so it is not in `make`.
+
+**A card that stops at the prompt** is what a diagnosis wants:
+`tools/mkcf.py out.img --boot "CD >GEM" --add build/gemdiag.com
+"GEM>GEMDIAG.COM"` gives one where `GEM` and `GEMDIAG` are typed
+(`docs/phase39.md`, "What to do on the hardware").
+
 **`make test-cf` boots it, and nothing on the card is a driver.**  The
 machine this project is for has an Ultimate 1MB, and the U1MB's flash
 carries three things that matter here: SpartaDOS X, the **PBI BIOS**,
@@ -272,6 +288,21 @@ the 6502, the loader refuses the machine, COLDST goes in and the CPU is
 switched, and the desktop comes up on the restart with `DISK A` and
 `DISK B` on it -- the card's two partitions -- pixel for pixel against
 `tools/deskref.py`.
+
+**And on the real machine, two settings in the Rapidus's own menu**
+(HELP at power-on with the card's BIOS installed; docs/phase40.md):
+
+- ***Preference* must be *Rapidus*.**  It is the first option and it
+  is a preset for the rest of the menu -- *Classic*, *Sweet16*, *Warp
+  XE*, *Warp II*, *Rapidus*, *Custom*.  On *Sweet16* the first real
+  board froze before the boot screen: attract-mode colours, then
+  nothing.  On *Rapidus* it booted.
+- ***SDRAM 4k cache: Off*** on a 6S9054E core, per the card's own
+  known-issues list.
+
+The board's `Vectors` line then reads `OS copied ($74/$81/W)`: the
+card takes the native vectors the way its own firmware writes them,
+write-through on, not the way the emulator does.
 
 The table itself was never the problem, and there is direct evidence:
 the firmware's own parser state, read out of the machine while its list

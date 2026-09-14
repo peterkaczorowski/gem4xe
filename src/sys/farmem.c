@@ -225,6 +225,87 @@ uint32_t far_alloc(uint32_t bytes)
     return base;
 }
 
+/* -- A FAR POINTER'S ARITHMETIC IS SIXTEEN BITS.
+ *
+ * This is the fact the three functions below exist for, and it is worth
+ * stating plainly because it is not what "24-bit pointer" suggests and
+ * because getting it wrong is silent.  Calypsi compiles `p + n` on a
+ * `__far` pointer as a 16-bit add to the OFFSET with the bank byte
+ * loaded unchanged -- the carry is dropped:
+ *
+ *     clc
+ *     lda  _Dp        ; the offset
+ *     adc  _Dp+4      ; + n, low 16 bits only
+ *     sta  _Dp
+ *     lda  _Dp+2      ; the bank, UNTOUCHED
+ *
+ * So a walk that runs off the top of a bank comes back at its bottom and
+ * reads somebody else's memory.  (The manual is consistent with this and
+ * says so obliquely: a `far` OBJECT is capped at 64K minus one byte.
+ * Crossing banks is what the `huge` attribute is for, and it widens
+ * size_t to 32 bits everywhere, which is not a trade this system makes.)
+ *
+ * far_alloc's rule follows from it: nothing it hands out crosses a bank,
+ * so anything allocated there can be walked with an ordinary far pointer.
+ * far_put, far_get and far_copy above are correct for exactly that.
+ *
+ * A block that MAY straddle a bank, for the one thing that has to: a
+ * file read into far memory whole (far_read_file).  far_alloc will not
+ * give one, and a file bigger than the room left in the current bank
+ * therefore could not be read AT ALL -- which went unnoticed for as long
+ * as it did because every file gem4xe had loaded was a few KB.  GACS's
+ * shell is 139 KB, and the failure it gave was APP_E_FILE, which reads
+ * like a missing file.
+ *
+ * What lives here must be reached by RECOMPUTING the address for each
+ * access -- far_read8, far_write8, far_copy_span -- and never by walking
+ * a pointer across the boundary. */
+uint32_t far_alloc_span(uint32_t bytes)
+{
+    uint32_t base = farmem.brk;
+    uint32_t end = (uint32_t)(farmem.last_bank + 1) << 16;
+
+    if (!farmem.banks || bytes == 0)
+        return 0;
+    bytes = (bytes + 3) & ~3UL;
+    if (base + bytes > end || base + bytes < base)
+        return 0;
+    farmem.brk = base + bytes;
+    return base;
+}
+
+/* Bank-safe copies, for what far_alloc_span handed out: the address is
+ * rebuilt at every bank boundary instead of being walked over it.  The
+ * inner copies are the ordinary far_put/far_copy, which are correct
+ * because each call is given a run that stays inside one bank. */
+void far_put_span(uint32_t dst, const uint8_t *src, uint16_t len)
+{
+    while (len) {
+        uint32_t room = 0x10000UL - (dst & 0xFFFFUL);
+        uint16_t k = (room >= len) ? len : (uint16_t)room;
+        far_put(dst, src, k);
+        dst += k;
+        src += k;
+        len = (uint16_t)(len - k);
+    }
+}
+
+void far_copy_span(uint32_t dst, uint32_t src, uint32_t len)
+{
+    while (len) {
+        uint32_t droom = 0x10000UL - (dst & 0xFFFFUL);
+        uint32_t sroom = 0x10000UL - (src & 0xFFFFUL);
+        uint32_t k = len;
+        if (k > droom) k = droom;
+        if (k > sroom) k = sroom;
+        if (k > 0x4000UL) k = 0x4000UL;     /* a uint16_t can count it */
+        far_copy(dst, src, (uint16_t)k);
+        dst += k;
+        src += k;
+        len -= k;
+    }
+}
+
 /* Whole banks, for what must not straddle one: an application's code,
  * which the 65816 executes bank by bank (src/gem4xe.scm on why).  The
  * cursor moves up to the next bank boundary first, so the banks come

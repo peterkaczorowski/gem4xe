@@ -23,6 +23,12 @@
  * interrupts off (no irq_install, the polled regime), START waits for a
  * press of START before each step so the marks can be read at leisure.
  *
+ * After step 1 the same line shows what rapidus_speedup found, from
+ * column 18: R or - for a Rapidus accepted or not, the eight bytes of the
+ * signature at $FF0000 as they read, then the MCR and CMCR as found --
+ * the firmware's own setup of the windows, which is the part of a real
+ * card that differs from the emulator's.
+ *
  * Nothing here is a string anyone reads; the digits are screen codes. */
 #ifndef GEM4XE_DIAG_H
 #define GEM4XE_DIAG_H
@@ -36,5 +42,6 @@ extern uint8_t diag_keys;           /* the CONSOL bits, active high */
 
 void diag_init(void);               /* read the keys: first thing in main */
 void diag_mark(uint8_t n);          /* step n is about to run */
+void diag_rapidus(void);            /* after step 1: what the accelerator said */
 
 #endif

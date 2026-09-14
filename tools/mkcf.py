@@ -13,15 +13,25 @@ D1:, D2:, ... through the APT table tools/apt.py writes.
                          AUTOEXEC.BAT       cd into \\GEM and run it
     D2:  documents       empty, and the reason the table has two entries
 
-  python3 tools/mkcf.py <out.img> [--mb 16] [--system-mb 8]
+  python3 tools/mkcf.py <out.img> [--mb 16] [--system-mb 8] [--fat MB]
                         [--add FILE PATH]... [--boot "CD >GEM"]
 
 Every path is SpartaDOS's: `>` between the parts, no drive letter.  The
 image is a plain file of 512-byte blocks -- what a card reader writes to
 a card, and what the emulator's `harddisk` device reads.
+
+`--fat MB` is the SD-card shape: a FAT32 partition of that size first,
+then the APT table and the partitions above.  A SubCart or an AVGCART
+browses the first FAT partition itself and, in its SIDE 2 emulation,
+hands the whole card to the U1MB's PBI BIOS, which finds the table
+through the MBR exactly as it does on a CF card.  The FAT volume is
+made by mkfs.fat and carries one README.TXT; it is the cart's, not
+GEM's.
 """
 import argparse
 import os
+import shutil
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -52,18 +62,61 @@ SYSTEM = [("build/gem.xex", "GEM>GEM.COM"),
           ("build/clock.rsc", "APPS>CLOCK.RSC")]
 DIRS = ["GEM", "APPS"]
 BOOT = ["CD >GEM", "GEM"]
+FAT_LBA = 2048                  # where a PC's tools start the first partition
+FAT_README = """gem4xe is on this card's APT partitions, not here.
+The U1MB PBI BIOS mounts them as D1: (the system) and D2:
+when the cart's SIDE 2 / IDE emulation is on and the U1MB
+setup has PBI BIOS and Hard disk enabled.  This FAT volume
+is the cart's own; put what its browser should see here.
+"""
 
 
-def build(out, mb=16, system_mb=8, adds=(), boot=BOOT, root=None):
+def fat_volume(blocks, out):
+    """A FAT32 file system of `blocks` blocks, made by mkfs.fat beside
+    the image, with the README in it."""
+    tmp = out + ".fat"
+    mkfs = shutil.which("mkfs.fat") or shutil.which("mkfs.vfat")
+    if not mkfs:
+        raise SystemExit("--fat needs mkfs.fat (dosfstools)")
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    subprocess.run([mkfs, "-F", "32", "-n", "GEM4XE", "-C", tmp, str(blocks // 2)],
+                   check=True, stdout=subprocess.DEVNULL)
+    if shutil.which("mcopy"):
+        subprocess.run(["mcopy", "-i", tmp, "-", "::README.TXT"], check=True,
+                       input=FAT_README.replace("\n", "\r\n").encode("ascii"))
+    with open(tmp, "rb") as f:
+        data = f.read()
+    os.remove(tmp)
+    if len(data) != blocks * apt.BLOCK:
+        raise SystemExit(f"{mkfs} made {len(data)} bytes, not {blocks * apt.BLOCK}")
+    return data
+
+
+def build(out, mb=16, system_mb=8, adds=(), boot=BOOT, root=None, fat_mb=0,
+          cfg=None):
     root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    img = apt.Image(mb * MB // apt.BLOCK)
-    parts = apt.layout(img, [system_mb * MB // apt.BLOCK, 0])
-    apt.write_table(img, parts)
+    system = [(cfg if cfg and name == "GEM>GEM4XE.CFG" else path, name)
+              for path, name in SYSTEM]
+    if fat_mb:
+        fat_blocks = fat_mb * MB // apt.BLOCK
+        apt_lba = FAT_LBA + fat_blocks
+        img = apt.Image(apt_lba + mb * MB // apt.BLOCK)
+        parts = apt.layout(img, [system_mb * MB // apt.BLOCK, 0],
+                           at=apt_lba + apt.HEADER_BLOCKS)
+        apt.write_table(img, parts, apt_lba=apt_lba, fat=(FAT_LBA, fat_blocks))
+        fat = fat_volume(fat_blocks, out)
+        img.data[FAT_LBA * apt.BLOCK:apt_lba * apt.BLOCK] = fat
+        print(f"{out}: FAT32 {fat_mb} MB at block {FAT_LBA}, APT table at block {apt_lba}")
+    else:
+        img = apt.Image(mb * MB // apt.BLOCK)
+        parts = apt.layout(img, [system_mb * MB // apt.BLOCK, 0])
+        apt.write_table(img, parts)
     fs = Sdfs.format(parts[0], "GEM4XE")
     Sdfs.format(parts[1], "DOCS")
     for d in DIRS:
         fs.mkdir(d)
-    for path, name in list(SYSTEM) + list(adds):
+    for path, name in system + list(adds):
         with open(os.path.join(root, path), "rb") as f:
             data = f.read()
         fs.add_file(name, data)
@@ -81,12 +134,21 @@ def build(out, mb=16, system_mb=8, adds=(), boot=BOOT, root=None):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("out")
-    ap.add_argument("--mb", type=int, default=16, help="the whole card")
+    ap.add_argument("--mb", type=int, default=16, help="the APT part: the whole card without --fat")
     ap.add_argument("--system-mb", type=int, default=8, help="the first partition")
+    ap.add_argument("--fat", type=int, default=0, metavar="MB",
+                    help="a FAT32 partition of MB first: the SD-card shape")
     ap.add_argument("--add", nargs=2, action="append", default=[],
                     metavar=("FILE", "PATH"))
+    ap.add_argument("--boot", action="append", metavar="LINE",
+                    help="a line of AUTOEXEC.BAT, in order; the default runs "
+                         "GEM.  --boot \"CD >GEM\" alone stops at the prompt, "
+                         "which is what a GEMDIAG session wants")
+    ap.add_argument("--cfg", metavar="FILE",
+                    help="the GEM4XE.CFG to carry instead of build/gem4xe.cfg")
     a = ap.parse_args(argv)
-    build(a.out, a.mb, a.system_mb, a.add)
+    build(a.out, a.mb, a.system_mb, a.add, fat_mb=a.fat,
+          boot=a.boot if a.boot is not None else BOOT, cfg=a.cfg)
     return 0
 
 

@@ -106,9 +106,11 @@ def rsc_imlen(path):
 
 def header(path):
     """The G4A header's link addresses and far banks (src/sys/app.c
-    app_load)."""
-    d = open(path, "rb").read(20)
-    assert d[:4] == b"G4A\x01", d[:4]
+    app_load).  Either format: they differ only in how wide a far fixup
+    offset is, which is past everything read here."""
+    with open(path, "rb") as f:
+        d = f.read(20)
+    assert d[:3] == b"G4A" and d[3] in (1, 2), d[:4]
     link_near, near_size = struct.unpack("<HH", d[4:8])
     return link_near, near_size, d[15]
 

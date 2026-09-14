@@ -248,6 +248,7 @@ def check_image(name, why):
         present, mcr_before, mcr_said, cmcr_said = (b.peek(STATUS + 25 + i)
                                                     for i in range(4))
         irq_fast = b.peek(STATUS + 32)
+        irq_via = b.peek(STATUS + 38)   # IRQ_VIA_*: which RAM under the ROM
         mcr = b.cmd("EVAL db($FF0080)").get("value")
         cmcr = b.cmd("EVAL db($FF0081)").get("value")
         win = lambda a: a >> 14
@@ -258,7 +259,14 @@ def check_image(name, why):
         print(f"speed map  : Rapidus {'present' if present else 'ABSENT'}, "
               f"MCR ${mcr_before:02X} -> ${mcr:02X}, CMCR ${cmcr:02X}; "
               f"program in window(s) {sorted(program)}, MEMAC in {memac}, "
-              f"vectors in {vectors} ({'fast' if irq_fast else 'as found'})")
+              f"vectors in {vectors} ({'fast' if irq_fast else 'as found'}, "
+              f"via {['none', 'SRAM', 'both', 'bus'][irq_via] if irq_via < 4 else irq_via})")
+        # Altirra's model takes the SRAM way, with the motherboard's RAM
+        # under the ROM left to the DOS (docs/phase13.md); anything else
+        # here is the probe order in irq.c changing, and m14's SpartaDOS 3.2
+        # run would be the next thing to fail.
+        if present and irq_via != 1:
+            fails.append(f"{name}: the OS copy went via {irq_via}, not the SRAM (1)")
         if not present:
             fails.append(f"{name}: rapidus_speedup() did not find the board signature")
         mcr_want = mcr_said & ~(1 << vectors) if irq_fast else mcr_said

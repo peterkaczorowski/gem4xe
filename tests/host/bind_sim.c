@@ -103,6 +103,7 @@ int main(void)
     WORD a, b, c, d;
     LONG old;
     char *env;
+    GRECT r1, r2;
 
     /* -- VDI, in opcode order ------------------------------------------ */
     v_opnwk(w16, &a, out);
@@ -210,6 +211,8 @@ int main(void)
     menu_text(tree, 1, "x");
     menu_register(0, "x");
     objc_draw(tree, 0, 8, 1, 2, 3, 4);
+    r1.g_x = 1; r1.g_y = 2; r1.g_w = 3; r1.g_h = 4;
+    objc_draw_grect(tree, 0, 8, &r1);
     objc_find(tree, 0, 8, 1, 2);
     objc_offset(tree, 1, &a, &b);
     objc_order(tree, 1, 0);
@@ -218,9 +221,12 @@ int main(void)
     objc_change(tree, 1, 0, 1, 2, 3, 4, 1, 1);
     form_do(tree, 0);
     form_dial(0, 1, 2, 3, 4, 5, 6, 7, 8);
+    r2.g_x = 5; r2.g_y = 6; r2.g_w = 7; r2.g_h = 8;
+    form_dial_grect(0, &r1, &r2);
     form_alert(1, "[1][x][ OK ]");
     form_error(2);
     form_center(tree, &a, &b, &c, &d);
+    form_center_grect(tree, &r1);
     form_keybd(tree, 1, 0, 13, &a, &b);
     form_button(tree, 1, 1, &a);
     graf_rubbox(1, 2, 3, 4, &a, &b);
@@ -238,10 +244,15 @@ int main(void)
     wind_close(1);
     wind_delete(1);
     wind_get(1, 4, &a, &b, &c, &d);
+    wind_get_grect(1, 4, &r1);
     wind_set(1, 2, 1, 2, 3, 4);
+    r1.g_x = 1; r1.g_y = 2; r1.g_w = 3; r1.g_h = 4;
+    wind_set_grect(1, 2, &r1);
+    wind_set_str(1, WF_NAME, "x");
     wind_find(1, 2);
     wind_update(1);
     wind_calc(0, 0, 1, 2, 3, 4, &a, &b, &c, &d);
+    wind_calc_grect(0, 0, &r1, &r2);
     rsrc_load("X.RSC");
     rsrc_free();
     rsrc_gaddr(0, 1, (void **)&env);
@@ -253,6 +264,13 @@ int main(void)
     shel_put(path, 8);
     shel_find(path);
     shel_envrn(&env, "PATH=");
+    /* rc_intersect and rc_union reach no gate -- they are arithmetic on
+     * two rectangles.  Called here so the surface check sees them; what
+     * they COMPUTE is asserted in the second pass below. */
+    r1.g_x = 0; r1.g_y = 0; r1.g_w = 10; r1.g_h = 10;
+    r2.g_x = 5; r2.g_y = 5; r2.g_w = 10; r2.g_h = 10;
+    rc_intersect(&r1, &r2);
+    rc_union(&r1, &r2);
 
     /* -- GEMDOS, in function order ------------------------------------- */
     Dsetdrv(0);
@@ -333,5 +351,25 @@ int main(void)
     put(3, a, b, c, d, 0);
     wind_calc(0, 0, 1, 2, 3, 4, &a, &b, &c, &d);
     put(3, a, b, c, d, 0);
+    /* The GRECT spellings: the same four words, and the point is that they
+     * land in x, y, w, h IN THAT ORDER.  A wrapper that swapped w and h
+     * would pass every block check above and be wrong on screen. */
+    form_center_grect(tree, &r1);
+    put(3, r1.g_x, r1.g_y, r1.g_w, r1.g_h, 0);
+    wind_get_grect(1, 4, &r1);
+    put(3, r1.g_x, r1.g_y, r1.g_w, r1.g_h, 0);
+    wind_calc_grect(0, 0, &r1, &r2);
+    put(3, r2.g_x, r2.g_y, r2.g_w, r2.g_h, 0);
+    /* rc_intersect: (0,0,10,10) against (5,5,10,10) overlaps in the square
+     * from 5,5 to 10,10 -- and the answer is written into the SECOND
+     * rectangle, which is the ST's order.  rc_union of the same two spans
+     * 0,0 to 15,15. */
+    r1.g_x = 0; r1.g_y = 0; r1.g_w = 10; r1.g_h = 10;
+    r2.g_x = 5; r2.g_y = 5; r2.g_w = 10; r2.g_h = 10;
+    a = rc_intersect(&r1, &r2);
+    put(3, a, r2.g_x, r2.g_y, r2.g_w, r2.g_h);
+    r2.g_x = 5; r2.g_y = 5; r2.g_w = 10; r2.g_h = 10;
+    rc_union(&r1, &r2);
+    put(3, r2.g_x, r2.g_y, r2.g_w, r2.g_h, 0);
     return 0;
 }

@@ -46,7 +46,9 @@ const char *pr_dest = 0;
 
 /* One row's worth, near, because CIO writes from bank $00. */
 static uint8_t row[PR_STRIDE];
-static char    hex[PR_STRIDE * 2 + 2];
+static char    hex[PR_STRIDE + 2];  /* half a row's digits: a whole row's
+                                     * is 162 bytes, in the bank that has
+                                     * none to spare */
 static char    sbuf[80];        /* a literal, on its way through */
 
 static const char FAR digits[] = "0123456789ABCDEF";
@@ -169,7 +171,7 @@ static void emit_pcl(int16_t fd)
  */
 static void emit_ps(int16_t fd)
 {
-    WORD y, i;
+    WORD y, h, i, n;
 
     put(fd, L_PS1);
     putnum(fd, PR_STRIDE);
@@ -187,14 +189,17 @@ static void emit_ps(int16_t fd)
 
     for (y = 0; y < PR_H; y++) {
         row_get(y);
-        for (i = 0; i < PR_STRIDE; i++) {
-            uint8_t b = (uint8_t)~row[i];   /* 0 is black: see the top */
-            hex[i * 2]     = digits[b >> 4];
-            hex[i * 2 + 1] = digits[b & 15];
+        for (h = 0; h < PR_STRIDE; h += PR_STRIDE / 2) {
+            for (i = 0; i < PR_STRIDE / 2; i++) {
+                uint8_t b = (uint8_t)~row[h + i];   /* 0 is black: see the top */
+                hex[i * 2]     = digits[b >> 4];
+                hex[i * 2 + 1] = digits[b & 15];
+            }
+            n = PR_STRIDE;
+            if (h)
+                hex[n++] = '\n';
+            cio_write(fd, hex, n);
         }
-        hex[PR_STRIDE * 2] = '\n';
-        hex[PR_STRIDE * 2 + 1] = 0;
-        cio_write(fd, hex, PR_STRIDE * 2 + 1);
     }
     put(fd, L_PS_END);
 }

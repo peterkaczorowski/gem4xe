@@ -150,6 +150,7 @@ static const char FAR s_antic[]   = "ANTIC";
 static const char FAR s_vbxe[]    = "VBXE ";
 static const char FAR s_u1mb[]    = "U1MB, ";
 static const char FAR s_side[]    = "SIDE, ";
+static const char FAR s_dos[]     = "DOS, ";
 static const char FAR s_ps[]      = "PostScript, ";
 static const char FAR s_pcl[]     = "PCL 5, ";
 static const char FAR s_digit[]   = "0123456789ABCDEF";
@@ -289,11 +290,14 @@ void boot_begin(void)
 
     /* The vectors: how irq_install() reached them, or why it could not
      * (src/sys/irq.h) -- and on a Rapidus the MCR and CMCR as the
-     * firmware left them, which is the board's setup in two bytes.  A
-     * report from a machine no emulator has been near needs this line
-     * more than any other: the native-mode vectors are what every
-     * application calls in through, and this is the one place that
-     * says whether they exist. */
+     * firmware left them, which is the board's setup in two bytes, then
+     * a letter for the RAM under the ROM the copy went to (S the SRAM
+     * alone, W both through write-through, M the motherboard: irq.via),
+     * and after a refusal the byte that read back instead.  A report
+     * from a machine no emulator has been near needs this line more
+     * than any other: the native-mode vectors are what every application
+     * calls in through, and this is the one place that says whether they
+     * exist.  Twenty-six columns, all of them spoken for. */
     p = app(v, lang_str(irq.how == IRQ_ROM_COPIED ? LS_BOOT_IRQ_COPIED
                       : irq.how == IRQ_RAM_FOUND  ? LS_BOOT_IRQ_RAM
                       : irq.fail == IRQ_FAIL_COPY ? LS_BOOT_IRQ_NOCOPY
@@ -307,7 +311,19 @@ void boot_begin(void)
         *p++ = '/';
         *p++ = '$';
         p = hex2(p, rapidus.cmcr_before);
+        *p++ = '/';
+        *p++ = irq.via == IRQ_VIA_SRAM ? 'S'
+             : irq.via == IRQ_VIA_BOTH ? 'W'
+             : irq.via == IRQ_VIA_BUS  ? 'M' : '-';
+        if (irq.fail != IRQ_FAIL_NONE) {
+            *p++ = ':';
+            p = hex2(p, irq.bad_byte);
+        }
         *p++ = ')';
+    } else if (irq.fail != IRQ_FAIL_NONE) {
+        *p++ = ' ';
+        *p++ = '$';
+        p = hex2(p, irq.bad_byte);
     }
     *p = '\0';
     line(LS_BOOT_IRQ, v);
@@ -376,7 +392,7 @@ void boot_clock(void)
         return;
     }
     clock_read(&c);
-    p = app(v, card == CLOCK_U1MB ? s_u1mb : s_side);
+    p = app(v, card == CLOCK_U1MB ? s_u1mb : card == CLOCK_SIDE ? s_side : s_dos);
     p = dec(p, c.year);
     *p++ = '-';
     p = two(p, c.month);

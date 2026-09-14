@@ -46,7 +46,13 @@ void rapidus_speedup(void)
 
     rapidus.present = 0;
     rapidus.synced = 0;
-    if (reg_read(RAP_SIG) != '6' || reg_read(RAP_SIG + 1) != 'S')
+    /* The signature names the FPGA ("6S" for a Spartan 6) and then the
+     * core's version, which is not checked: Altirra's core is 0.38E, the
+     * firmware on a real card was seen loading "6s9054e" (2026-09-13) --
+     * printed in lower case, and whether the bytes at $FF0000 are too
+     * has not been seen, so either case of the S is a Rapidus here.
+     * GEMDIAG.COM shows the eight bytes as found (src/sys/diag.c). */
+    if (reg_read(RAP_SIG) != '6' || (reg_read(RAP_SIG + 1) | 0x20) != 's')
         return;
     rapidus.present = 1;
 

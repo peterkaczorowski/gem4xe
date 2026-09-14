@@ -62,8 +62,9 @@
  * idle tail off with the stamps (tests/emu/bench_gem.py).
  * STATUS[8..13] the DOS (src/sys/dos.h): kind, caps, dirsep, and MEMTOP
  * as a little-endian word, then the CIO name limit.
- * STATUS[30..37] the interrupt regime (src/sys/irq.h): how, fail, fast,
- * timer_div, rom_sum, ram_sum -- the sums as two little-endian words.   */
+ * STATUS[30..39] the interrupt regime (src/sys/irq.h): how, fail, fast,
+ * timer_div, rom_sum, ram_sum -- the sums as two little-endian words --
+ * then via and bad_byte.                                                */
 #define ST_STAGE     2
 #define ST_GO        3
 #define ST_DONE      4
@@ -930,6 +931,8 @@ TASK void main(void)
     STATUS[35] = (unsigned char)(irq.rom_sum >> 8);
     STATUS[36] = (unsigned char)irq.ram_sum;
     STATUS[37] = (unsigned char)(irq.ram_sum >> 8);
+    STATUS[38] = irq.via;
+    STATUS[39] = irq.bad_byte;
 
     if (!vbxe_detect()) {
         STATUS[ST_STAGE] = 0xEE;
