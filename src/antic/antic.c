@@ -90,6 +90,17 @@ void antic_init(uint8_t fg, uint8_t bg)
     REG8(AN_COLOR2) = bg;
     REG8(AN_COLOR4) = bg;
 
+    /* GTIA'S MODE BITS, CLEARED.  ANTIC mode F is hi-res only while the
+     * top two bits of PRIOR are 00: with either set the SAME bytes are
+     * read as GTIA mode 9, 10 or 11 -- and mode 11 is sixteen HUES, which
+     * is exactly what "colour bars where the desktop should be" looks
+     * like on a machine where something before us left them set.  Nothing
+     * here uses players, so the rest of the register is left as found.
+     * The shadow as well as the register, because the OS VBI copies the
+     * shadow over it every frame and would put the bits straight back. */
+    REG8(AN_GPRIOR) = (uint8_t)(REG8(AN_GPRIOR) & 0x3F);
+    REG8(AN_PRIOR)  = REG8(AN_GPRIOR);
+
     REG8(AN_DLISTL)     = (uint8_t)AN_DLIST;
     REG8(AN_DLISTL + 1) = (uint8_t)(AN_DLIST >> 8);
     REG8(AN_SDLSTL)     = (uint8_t)AN_DLIST;

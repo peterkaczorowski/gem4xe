@@ -55,6 +55,7 @@
 #define AN_COLPF1   0xD017U
 #define AN_COLPF2   0xD018U
 #define AN_COLBK    0xD01AU
+#define AN_PRIOR    0xD01BU             /* GTIA priority, and its mode  */
 /* ...and the OS shadows, written too, so that an OS VBI that is running
  * puts back what this file set rather than what the OS last wanted. */
 #define AN_SDMCTL   0x022FU
@@ -62,6 +63,7 @@
 #define AN_COLOR1   0x02C5U
 #define AN_COLOR2   0x02C6U
 #define AN_COLOR4   0x02C8U
+#define AN_GPRIOR   0x026FU             /* ...and the OS shadow of PRIOR*/
 
 /* Build the display list and turn the screen on.  `fg` and `bg` are
  * Atari colour bytes: fg's luminance and bg's hue are what show. */
