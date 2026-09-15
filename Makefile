@@ -1433,6 +1433,22 @@ test-cf-dosclock: build/gem-cf-dosclock.img build/desktop.g4a build/desktop.sym
 	@test -n "$(SRC_U1MB)" || { echo "no U1MB fixture: set [u1mb].flash in fixtures.toml"; exit 1; }
 	python3 tests/emu/cf_boot.py --card build/gem-cf-dosclock.img
 
+# The same card on every U1MB firmware release in [u1mb.firmware] (fixtures.toml,
+# name = flash image).  The gate walks the BIOS setup by what its screen says, so
+# one gate covers releases whose setup pages differ (docs/shipping.md); each
+# release logs to build/cf-firmware/<name>.log, and any failure fails the run.
+U1MB_FW ?= $(shell python3 -c "import tomllib;fw=tomllib.load(open('fixtures.toml','rb'))['u1mb'].get('firmware',{});print(' '.join(k+'='+v for k,v in fw.items()))" 2>/dev/null)
+test-cf-firmware: build/gem-cf.img build/desktop.g4a build/desktop.sym
+	@test -n "$(U1MB_FW)" || { echo "no firmware list: set [u1mb.firmware] in fixtures.toml"; exit 1; }
+	@mkdir -p build/cf-firmware; bad=; \
+	for t in $(U1MB_FW); do \
+	  v=$${t%%=*}; rom=$${t#*=}; \
+	  if python3 tests/emu/cf_boot.py --flash "$$rom" > build/cf-firmware/$$v.log 2>&1; \
+	  then echo "U1MB $$v: PASS"; \
+	  else echo "U1MB $$v: FAIL, build/cf-firmware/$$v.log"; bad="$$bad $$v"; fi; \
+	done; \
+	test -z "$$bad" || { echo "test-cf-firmware: failed on$$bad"; exit 1; }
+
 # A GEM-style desktop drawn entirely through the 37 VDI opcodes, screenshotted
 # and checked against the reference.  A demo that is also a regression test.
 demo: build/m3-boot.atr
@@ -1473,4 +1489,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-boot test-cf test-sd test-cf-dosclock sd demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-boot test-cf test-sd test-cf-dosclock test-cf-firmware sd demo movie bench emu-stop clean

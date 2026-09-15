@@ -264,7 +264,15 @@ Three facts about that machine had to be measured, and each is a step of
   On a machine already configured, HELP with RESET reopens it.  The gate
   drives all of that through `KEYRAW`, from a config directory of its
   own (`build/altirra-cf`), so every run starts from the same fresh
-  NVRAM and the user's emulator profile is left alone.
+  NVRAM and the user's emulator profile is left alone.  It reads the
+  screen after every key rather than counting keys, because the setup
+  changes between firmware releases.  2.0 added a *PBI logo* row
+  between the device ID and *Hard disk*, 4.0 made the device ID a
+  field you open with RETURN and renamed the save item *Save changes
+  and cold boot*, and 1.25-3.10 store their menu as ASCII codes while
+  4.x use the OS's internal codes.  The menu is character rows the
+  display list points at, so the gate finds each field by name and
+  watches its value; `--flash ROM` runs it against any U1MB image.
 - **The PBI device ID must not be 0.**  Setting 0 is PBI bit 0, the
   Rapidus's (docs/phase14.md).
 - **The SIDE must let go of the cartridge window.**  The PBI BIOS's

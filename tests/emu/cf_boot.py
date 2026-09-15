@@ -22,11 +22,16 @@ of the run below:
     settings that matter are off by default: PBI BIOS, and its Hard
     disk.  The gate walks that setup with KEYRAW -- RIGHT and LEFT step
     the pages along the icon row, UP and DOWN move the field cursor,
-    RETURN changes the field under it, and page 8 saves and boots.  So
-    the gate runs the machine's documented setup rather than a profile
-    someone prepared by hand, and it starts from a config directory of
-    its own (build/altirra-cf) so it is the same run every time and the
-    user's own emulator profile is left alone.
+    RETURN changes the field under it, and the last page saves and boots
+    -- reading the screen after every key: the menu is ANTIC character
+    rows, which the bridge's DLIST finds, so each field is found by its
+    name and its value is watched until it reads right.  A count of keys
+    fits one firmware release and sets the wrong field on the next
+    (bios_setup below), and `--flash ROM` runs the gate on any U1MB
+    image, 1.25 to 4.20.  So the gate runs the machine's documented setup
+    rather than a profile someone prepared by hand, and it starts from a
+    config directory of its own (build/altirra-cf) so it is the same run
+    every time and the user's own emulator profile is left alone.
   * The PBI device ID must not be 0.  Setting 0 is PBI bit 0, which is
     the Rapidus's, and the two would collide on real hardware
     (docs/phase14.md).
@@ -50,7 +55,7 @@ the Rapidus behind it and switches the CPU itself, and the desktop comes
 up on the
 restart and is compared with the model.
 
-  python3 tests/emu/cf_boot.py [--shot] [--card build/gem-sd.img]
+  python3 tests/emu/cf_boot.py [--shot] [--card build/gem-sd.img] [--flash ROM]
 
 `--card` boots another image the same way: `build/gem-sd.img` is the
 SD-card shape (`tools/mkcf.py --fat`), a FAT32 partition first and the
@@ -59,6 +64,7 @@ emulation hands the PBI BIOS -- so the same gate proves the BIOS finds
 the table through the MBR when the table is not at LBA 1.
 """
 import os
+import re
 import shutil
 import sys
 import tomllib
@@ -89,7 +95,9 @@ FIXTURES = os.path.join(ROOT, "fixtures.toml")
 BOOT_LINE = b"CD >GEM\x9bGEM\x9b"
 WANT = {"GEM>GEM.COM": "gem.xex", "GEM>DESKTOP.G4A": "desktop.g4a",
         "GEM>DESKTOP.RSC": "desktop.rsc"}
-PBI_BANNER = "Ultimate PBI"
+# The PBI BIOS names itself as it mounts the card: "Ultimate PBI" in 1.25,
+# "U1MB SIDE2 PBI BIOS v.4.20, dev. 6" in 4.20.
+PBI_BANNER = "PBI"
 SDX_BANK = 0xD5E1               # the SIDE's SDX bank register; $80 unmaps it
 DRVMAP = 0x03                   # D1: and D2:, the card's two partitions
 RTC_U1MB = 0xD3E2               # src/sys/clock.c: the chip the U1MB carries
@@ -97,18 +105,148 @@ CLOCK_CARD = {0: "none", 1: "U1MB", 2: "SIDE", 3: "the DOS"}   # src/sys/clock.h
 # the boot screen's Clock line starts with the card (src/sys/bootinfo.c)
 CLOCK_LINE = {1: "U1MB, ", 2: "SIDE, ", 3: "DOS, "}
 
-# The BIOS setup, from the page it opens on ("Memory and System").
-SETUP = [("right", "the clock page"),
-         ("right", "PBI BIOS Settings"),
-         ("return", "PBI BIOS: Enabled"),
-         ("down", "to PBI device ID"),
-         ("return", "an ID that is not the Rapidus's bit 0"),
-         ("down", "to Hard disk"),
-         ("return", "Hard disk: Enabled"),
-         ("right", "SIO"), ("right", "System Information"),
-         ("right", "BIOS Settings"), ("right", "Device Control"),
-         ("right", "Save and Exit"),
-         ("b", "Save changes and boot")]
+# The BIOS setup is walked by what its screen says, not by a count of keys.
+# The fields move between firmware releases -- 2.0 put a PBI logo row
+# between the device ID and Hard disk, 4.0 made the device ID a field that
+# RETURN opens for editing -- and a key count written for one release
+# enables the wrong field on the next and saves it: a card that is never
+# mounted, and a gate that says only that the loader never ran.  What each
+# field must read when the walk is done:
+BIOS_WANT = [("PBI BIOS", lambda v: v.startswith("Enabled")),
+             # not 0, which is PBI bit 0, the Rapidus's (docs/phase14.md)
+             ("PBI device ID", lambda v: v.isdigit() and v != "0"),
+             ("Hard disk", lambda v: v.startswith("Enabled"))]
+# the switch for the banner: "PBI logo" in 2.0, "PBI notice" from 3.10
+NOTICE = ("pbi logo", "pbi notice")
+FIELD = re.compile(r"\s*(\S.*?):?\s{2,}(\S.*?)\s*$")    # label, value
+SAVE = re.compile(r"save changes and (cold )?boot", re.I)
+
+
+def bios_text(raw, internal):
+    """A row of screen bytes as text, bit 7 (inverse) aside: in the OS's
+    internal character order, or as plain ASCII codes drawn in a font of
+    the BIOS's own."""
+    text = ""
+    for c in raw:
+        v = c & 0x7F
+        a = (v + 32 if v < 64 else v - 64 if v < 96 else v) if internal else v
+        text += chr(a) if 32 <= a < 127 else " "
+    return text
+
+
+def bios_rows(b):
+    """The U1MB BIOS setup screen as the character rows ANTIC is showing.
+    The bridge's DLIST gives each text row's playfield address, and its
+    DMACTL the width: 32 columns for the menu, 40 for the lines around
+    it.  Every release from 1.25 to 4.20 draws its menu this way, in mode
+    3 before 4.0 and mode 2 from it, and none through the OS's SAVMSC --
+    but not in one encoding: 1.25 to 3.10 store ASCII codes under a font
+    of their own and 4.0 the OS's internal codes, so both readings are
+    made and the one with capital letters in it is the screen.  Lower
+    case is the same code in both, and each reads the other's capitals
+    as punctuation or blanks; a count of fields cannot tell them apart,
+    because blanks are all a field needs.  Each row is (width, text,
+    inverse), one inverse flag a column: the field cursor is inverse
+    video."""
+    raws, seen = [], set()
+    for e in b.cmd("DLIST").get("entries", []):
+        if e.get("kind") != "graphics" or e.get("mode") not in (2, 3):
+            continue
+        width = {1: 32, 2: 40, 3: 48}.get(int(e["dmactl"].lstrip("$"), 16) & 3)
+        if not width or e["addr"] in seen:
+            continue
+        seen.add(e["addr"])
+        raws.append((width, bytes(b.memdump(int(e["pf"].lstrip("$"), 16), width))))
+    readings = [[(w, bios_text(raw, internal), [bool(c & 0x80) for c in raw])
+                 for w, raw in raws] for internal in (True, False)]
+    return max(readings, key=lambda rows: sum(c.isupper() for _, t, _ in rows for c in t))
+
+
+def bios_fields(rows):
+    """The menu's fields in screen order, (label, value, on_label,
+    on_value): the last two say which half the inverse video is on."""
+    menu = min((w for w, _, _ in rows), default=0)
+    out = []
+    for w, text, inv in rows:
+        m = FIELD.match(text) if w == menu else None
+        if m:
+            out.append((m.group(1), m.group(2), any(inv[m.start(1):m.end(1)]),
+                        any(inv[m.start(2):m.end(2)])))
+    return out
+
+
+def bios_setup(b, check):
+    """Walk the BIOS setup from its first page to BIOS_WANT, then save and
+    boot, reading the screen after every key.  Returns the fields' values
+    by label, with "keys" and "notice" (the banner switch's value, None
+    where the release has none); None if the screen was never the one
+    expected, with the reason checked."""
+    keys = [0]
+
+    def tap(key):
+        b.key_tap(key)
+        b.frames(15)
+        keys[0] += 1
+
+    def find(label):
+        fs = bios_fields(bios_rows(b))
+        at = [i for i, f in enumerate(fs) if f[0].lower() == label.lower()]
+        cur = [i for i, f in enumerate(fs) if f[2] or f[3]]
+        return fs, (at[0] if at else None), (cur[0] if cur else None)
+
+    for _ in range(12):                     # the page, along the icon row
+        if find("Hard disk")[1] is not None:
+            break
+        tap("right")
+    else:
+        check(False, "the BIOS setup never showed a page with Hard disk on it")
+        return None
+    got = {}
+    for label, ok in BIOS_WANT:
+        for _ in range(16):                 # the cursor, down the page
+            fs, at, cur = find(label)
+            if at is None:
+                check(False, f"the PBI page has no {label} field")
+                return None
+            if cur == at:
+                break
+            tap("down" if cur is None or cur < at else "up")
+        else:
+            check(False, f"the field cursor never reached {label}")
+            return None
+        # Which half the cursor inverts says what an open field looks
+        # like: from 4.0 the cursor is on the label and RETURN moves it to
+        # the value, where UP steps it and RETURN closes it; before 4.0
+        # the cursor is on the value and RETURN steps it.
+        on_label = fs[at][2]
+        for _ in range(16):
+            fs, at, _ = find(label)
+            _, value, lab, val = fs[at]
+            editing = on_label and val and not lab
+            if ok(value) and not editing:
+                break
+            tap("up" if editing and not ok(value) else "return")
+        else:
+            check(False, f"{label} never came to a usable value (it reads {value!r})")
+            return None
+        got[label] = value
+    got["notice"] = next((f[1] for f in bios_fields(bios_rows(b))
+                          if f[0].lower() in NOTICE), None)
+    # Save and Exit: "Save changes and boot" before 4.0, "Save changes
+    # and cold boot" from it, with its key at the end of the row -- [B],
+    # or B in an inverse keycap.
+    for _ in range(12):
+        save = [t for _, t, _ in bios_rows(b) if SAVE.search(t)]
+        if save:
+            break
+        tap("right")
+    else:
+        check(False, "the BIOS setup never showed Save changes and boot")
+        return None
+    key = save[0].rstrip().rstrip("]")[-1:].lower()
+    tap(key if key.isalpha() else "b")
+    got["keys"] = keys[0]
+    return got
 
 
 def flash():
@@ -211,7 +349,8 @@ def main(argv):
     keep = "--shot" in argv
     card = (os.path.abspath(argv[argv.index("--card") + 1])   # the emulator's cwd is not ours
             if "--card" in argv else CARD)
-    rom = flash()
+    rom = (os.path.abspath(argv[argv.index("--flash") + 1])
+           if "--flash" in argv else flash())
     if not rom or not os.path.exists(rom):
         print("gem4xe-cf: no U1MB fixture -- set [u1mb].flash in fixtures.toml")
         return 2
@@ -237,7 +376,7 @@ def main(argv):
     os.makedirs(PROFILE)
     os.makedirs(SHOTDIR, exist_ok=True)
     shot = os.path.join(SHOTDIR, "cf-desk.png")
-    print(f"the machine: U1MB {os.path.basename(rom)}, SIDE 2, VBXE, Rapidus")
+    print(f"the machine: U1MB {rom}, SIDE 2, VBXE, Rapidus")
     emu = launch(tag="cf", memsize="1088K", require_real_rom=False,
                  extra_args=["--u1mbrom", rom, "--adddevice", "side2"])
     b = emu.bridge
@@ -249,12 +388,16 @@ def main(argv):
         b.frames(300)
         check(b.has_keyraw(), "this emulator has no KEYRAW: see tools/altirra/")
 
-        # -- 1. the BIOS setup, driven blind -------------------------------
-        for key, why in SETUP:
-            b.key_tap(key)
-            b.frames(15)
-        print(f"  the BIOS configured in {len(SETUP)} keys: "
-              f"{SETUP[2][1]}, {SETUP[6][1]}")
+        # -- 1. the BIOS setup, read off its screen --------------------------
+        got = bios_setup(b, check)
+        if got is None:
+            for _, text, _ in bios_rows(b):
+                if text.strip():
+                    print("   |" + text.rstrip())
+            return 1
+        print(f"  the BIOS configured in {got['keys']} keys: PBI BIOS "
+              f"{got['PBI BIOS']}, device ID {got['PBI device ID']}, Hard disk "
+              f"{got['Hard disk']}, banner {got['notice'] or 'always'}")
 
         # -- 2. and 3. the card boots and the machine switches itself ------
         # As on the floppies (tests/emu/product_boot.py): the PBI BIOS
@@ -282,7 +425,8 @@ def main(argv):
                 if ln.strip():
                     print("   |" + ln)
             return 1
-        check(banner, "no PBI BIOS banner: the card was not mounted by it")
+        if (got["notice"] or "Enabled").startswith("Enabled"):
+            check(banner, "no PBI BIOS banner: the card was not mounted by it")
         mode = b.cmd("HWSTATE").get("cpu", {}).get("mode")
         print(f"  the PBI BIOS mounted the card, SpartaDOS X ran "
               f"AUTOEXEC.BAT, and the loader switched the machine to "
