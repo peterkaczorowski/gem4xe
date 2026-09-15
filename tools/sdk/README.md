@@ -99,6 +99,13 @@ The near part comes out of gem4xe's **2 KB application pool** in bank
 15 MB.  A `char buf[1024]` on the stack is how a first program runs
 out.
 
+**There is no C heap.** Your heap block is zero bytes, because memory
+above bank `$00` is `Malloc`'s to give out. `malloc` and `free` are
+refused at link time -- a call to either fails with an undefined symbol
+named `gem4xe_has_no_heap__use_GEMDOS_Malloc` -- so use `Malloc`.  If you
+build this kit's library from its sources yourself, `lib/clib.c` is what
+carries that refusal.
+
 Leave room in `STACK`: the AES calls back **into** your program --
 a redraw while a dialog is up, for instance -- so the deepest stack is
 not the one your own code makes.

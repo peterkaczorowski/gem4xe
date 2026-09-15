@@ -686,6 +686,9 @@ LONG Fseek(LONG offset, WORD handle, WORD mode);
 LONG Fdelete(const char FAR *name);
 LONG Frename(const char FAR *oldname, const char FAR *newname);
 LONG Fattrib(const char FAR *name, WORD wflag, WORD attr);
+/* There is no C heap: an application's heap block is zero bytes, and
+ * malloc/free refuse at link time (src/sys/clib.c).  Far memory comes from
+ * Malloc. */
 LONG Malloc(LONG size);         /* -1 asks how much is left */
 LONG Mfree(void FAR *block);
 

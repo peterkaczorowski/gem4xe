@@ -1,5 +1,5 @@
 /* clib.c -- the eight C library functions gem4xe uses, so that it uses
- * nobody else's.
+ * nobody else's; and malloc and free, which it refuses (at the end).
  *
  * WHY THIS EXISTS, AND IT IS NOT ABOUT CODE.
  *
@@ -122,4 +122,29 @@ char *strchr(const char *s, int c)
             return 0;
         s++;
     }
+}
+
+/* MALLOC AND FREE REFUSE, AT LINK TIME.  An application's heap block is zero
+ * bytes (src/app/gemapp.scm) because memory above bank $00 is GEMDOS's to hand
+ * out -- Malloc -- so the library's malloc, which a program ported from the ST
+ * reaches for by reflex, used to link cleanly and then answer NULL to every
+ * call: a program found its fonts missing and drew no text, with nothing
+ * failing.  It is Apache 2.0 besides (above).  These stand in front of the
+ * library's and call a function that does not exist, so a program that uses
+ * them does not link, and the error names the fix.  One that does not call
+ * them pays nothing: the linker leaves out what nothing references, in both
+ * data models. */
+extern void gem4xe_has_no_heap__use_GEMDOS_Malloc(void);
+
+void *malloc(size_t n)
+{
+    (void)n;
+    gem4xe_has_no_heap__use_GEMDOS_Malloc();
+    return 0;
+}
+
+void free(void *p)
+{
+    (void)p;
+    gem4xe_has_no_heap__use_GEMDOS_Malloc();
 }
