@@ -52,18 +52,70 @@ SYSTEM = [("build/gem.xex", "GEM>GEM.COM"),
           ("build/gem4xe.cfg", "GEM>GEM4XE.CFG"),
           # the escape hatch the page promises "on the disk": switches a
           # Rapidus by hand if the loader somehow did not (tools/mk816.py)
-          ("build/816.com", "GEM>816.COM"),
-          # the desk accessory: in the system's directory, which is where
-          # the AES looks for *.ACC, and not in \APPS\ with the programs
-          ("build/clockacc.g4a", "GEM>CLOCK.ACC"),
-          ("build/clock.rsc", "GEM>CLOCK.RSC"),
-          ("build/hello_app.g4a", "APPS>HELLO.G4A"),
-          ("build/calc.g4a", "APPS>CALC.G4A"),
-          ("build/calc.rsc", "APPS>CALC.RSC"),
-          ("build/clock.g4a", "APPS>CLOCK.G4A"),
-          ("build/clock.rsc", "APPS>CLOCK.RSC")]
+          ("build/816.com", "GEM>816.COM")]
+# ...and what is not the system: the desk accessory, in the system's
+# directory -- which is where the AES looks for *.ACC, and not in \APPS\
+# with the programs -- and the applications.  The card carries both
+# tables; the floppies carry one each (tools/mkfloppy.py, docs/media.md).
+APPS = [("build/clockacc.g4a", "GEM>CLOCK.ACC"),
+        ("build/clock.rsc", "GEM>CLOCK.RSC"),
+        ("build/hello_app.g4a", "APPS>HELLO.G4A"),
+        ("build/calc.g4a", "APPS>CALC.G4A"),
+        ("build/calc.rsc", "APPS>CALC.RSC"),
+        ("build/clock.g4a", "APPS>CLOCK.G4A"),
+        ("build/clock.rsc", "APPS>CLOCK.RSC")]
 DIRS = ["GEM", "APPS"]
 BOOT = ["CD >GEM", "GEM"]
+
+# INSTALL.BAT, one to a floppy: what that disk holds, onto a drive the user
+# names at the SpartaDOS X prompt -- `-INSTALL D2:`.  One batch a disk and
+# not one that asks for the next, because SpartaDOS X warns against
+# changing the disk a batch file is running from (User Guide 4.48, PAUSE).
+# Every command was run under SDX 4.50 before it was written here, and
+# tests/emu/install.py runs these: IF EXISTS +S sees a directory, a batch
+# goes on past an error, and `>` at the start of a path is the root of the
+# drive the batch was started from.  The system's leaves the drive an
+# AUTOEXEC.BAT that starts GEM, but never over one that is already there.
+INSTALL_SYSTEM = [
+    "; gem4xe: the system onto a drive. -INSTALL D2:",
+    'IF "%1"==""',
+    "  ECHO Which drive? As in: -INSTALL D2:",
+    "  EXIT",
+    "FI",
+    "IF NOT EXISTS +S %1>GEM",
+    "  MD %1>GEM",
+    "FI",
+    "COPY >GEM>*.* %1>GEM>",
+    "IF EXISTS %1>AUTOEXEC.BAT",
+    "  ECHO %1AUTOEXEC.BAT is kept. To start",
+    "  ECHO GEM it wants: CD \\GEM, then GEM",
+    "ELSE",
+    "  COPY >AUTOEXEC.BAT %1>",
+    "FI",
+    "ECHO The system is on %1",
+]
+INSTALL_APPS = [
+    "; gem4xe: the applications onto a drive. -INSTALL D2:",
+    'IF "%1"==""',
+    "  ECHO Which drive? As in: -INSTALL D2:",
+    "  EXIT",
+    "FI",
+    "IF NOT EXISTS +S %1>APPS",
+    "  MD %1>APPS",
+    "FI",
+    "IF NOT EXISTS +S %1>GEM",
+    "  MD %1>GEM",
+    "FI",
+    "COPY >APPS>*.* %1>APPS>",
+    "COPY >GEM>*.* %1>GEM>",
+    "ECHO The applications are on %1",
+]
+
+
+def batch(lines):
+    """A SpartaDOS batch file as the DOS reads it: ATASCII lines, each
+    ending in EOL."""
+    return b"".join(line.encode("ascii") + bytes([EOL]) for line in lines)
 FAT_LBA = 2048                  # where a PC's tools start the first partition
 FAT_README = """gem4xe is on this card's APT partitions, not here.
 The U1MB PBI BIOS mounts them as D1: (the system) and D2:
@@ -99,7 +151,7 @@ def build(out, mb=16, system_mb=8, adds=(), boot=BOOT, root=None, fat_mb=0,
           cfg=None):
     root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     system = [(cfg if cfg and name == "GEM>GEM4XE.CFG" else path, name)
-              for path, name in SYSTEM]
+              for path, name in SYSTEM + APPS]
     if fat_mb:
         fat_blocks = fat_mb * MB // apt.BLOCK
         apt_lba = FAT_LBA + fat_blocks
@@ -124,8 +176,7 @@ def build(out, mb=16, system_mb=8, adds=(), boot=BOOT, root=None, fat_mb=0,
         fs.add_file(name, data)
         print(f"{out}: {name} <- {path} ({len(data)} bytes)")
     if boot:
-        fs.add_file("AUTOEXEC.BAT",
-                    b"".join(line.encode("ascii") + bytes([EOL]) for line in boot))
+        fs.add_file("AUTOEXEC.BAT", batch(boot))
     img.save(out)
     free = fs.free_count() * apt.BLOCK
     print(f"{out}: {img!r}, {len(parts)} partitions; D1: {fs.volname} "

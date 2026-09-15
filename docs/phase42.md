@@ -185,6 +185,29 @@ the pool and the far heap are where they were.
   default 256 bytes of near constants would not hold it.
 - **`clock.c` used `FAR` without `portab.h`,** which `test_portab` says.
 
+## The floppies
+
+All of this is 10,316 bytes of code -- `gemdos.o` 6,373 more, the console
+2,952, the clock's write path 611 -- and 7,602 more bytes of `GEM.COM` on
+a disk, and `make test-boot` said so: the DOS 2 floppy went to 65 free
+sectors, under the floor of 80 kept for a program of the user's own.  The
+floor stayed.  Every floppy is now the system and nothing else; the
+applications and the desk accessory are on a floppy of their own,
+`gem-apps.atr`; and each SpartaDOS floppy carries an `INSTALL.BAT` that
+copies what it holds onto a drive the user names, `-INSTALL D2:`
+(`tools/mkcf.py`).  The DOS 2 floppy is back at 87 free.
+
+The batch files were written from the SpartaDOS X 4.50 manual and run in
+the emulator before they were kept: `IF EXISTS +S` sees a directory, `%1`
+is the drive, `>` at the start of a path is the root of the drive the
+batch started on, and a batch goes on past an error.  One batch a disk
+rather than one that asks for the next, because the manual warns against
+changing the disk a batch is running from.  `make test-install` boots the
+SDX cartridge with a blank disk in D1: and both floppies beside it, runs
+both installs and the system's again over the first, lists the drive,
+and cold-starts it into the desktop with the clock accessory loaded.
+`docs/media.md` has the layout and who each disk is for.
+
 ## Not here
 
 `Maddalt` (there is no memory the probe missed), `Flock`, and MiNT's

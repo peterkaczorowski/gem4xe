@@ -1,6 +1,6 @@
 # Storage: what an Atari can boot gem4xe from, and what to build for it
 
-`make dist` produces four media today — three floppies and a 16 MB CF
+`make dist` produces five media today — four floppies and a 16 MB CF
 card image — and the question this answers is whether that is the right
 set, given what people actually have attached to an Atari in 2026.
 
@@ -73,54 +73,68 @@ Two things follow, and the second is the useful one.
 That last is not built, and the decision is that it does not need to be.
 Someone with an APT drive already has one, with their own partitions and
 their own idea of where things go; what they want is not a card image
-that would overwrite it but **the files, on a floppy they can copy
-from**.  So that is what the SpartaDOS floppy is now: an install disk,
-laid out exactly as the card is.
+that would overwrite it but **the files, on floppies they can install
+from**.  So that is what the SpartaDOS floppies are: the card's system
+partition in two halves, each with an `INSTALL.BAT` that puts it on a
+drive.
 
-    D1:                  the floppy                 D2: (or wherever)
-      GEM>GEM.COM        the system         ---->     GEM>GEM.COM
-      GEM>DESKTOP.G4A                                 GEM>DESKTOP.G4A
-      GEM>DESKTOP.RSC                                 GEM>DESKTOP.RSC
-      GEM>LANG.RSC                                    GEM>LANG.RSC
-      GEM>816.COM                                     GEM>816.COM
-      GEM>GEM4XE.CFG     the screen and the mouse     GEM>GEM4XE.CFG
-      APPS>M11.G4A       the applications             APPS>M11.G4A
-      APPS>CALC.G4A                                   APPS>CALC.G4A
-      APPS>CLOCK.G4A                                  APPS>CLOCK.G4A
+    the system floppy                           D2: (or wherever)
+      GEM>GEM.COM  DESKTOP.G4A  DESKTOP.RSC  ---->  GEM>...
+          PREFS.RSC  LANG.RSC  GEM4XE.CFG  816.COM
+      AUTOEXEC.BAT, if the drive has none    ---->  AUTOEXEC.BAT
+    the applications floppy, gem-apps.atr
+      GEM>CLOCK.ACC  CLOCK.RSC               ---->  GEM>...
+      APPS>HELLO.G4A  CALC.G4A  CALC.RSC     ---->  APPS>...
+          CLOCK.G4A  CLOCK.RSC
 
-Under SpartaDOS that is two commands and no decisions:
+At the SpartaDOS X prompt -- quit GEM to get there -- on the drive the
+floppy is in:
 
-    COPY D1:>GEM>*.* D2:>GEM>*.*
-    COPY D1:>APPS>*.* D2:>APPS>*.*
+    -INSTALL D2:
 
-...and an `AUTOEXEC.BAT` on the drive holding the same two lines the
-floppy's holds, `CD >GEM` and `GEM`.  The floppy keeps 989 sectors
-free, so it is also somewhere to put a program of your own on the way
-past.
+once with each floppy.  One batch a disk rather than one that asks for
+the next, because SpartaDOS X warns against changing the disk a batch
+file is running from.  The system's gives the drive an `AUTOEXEC.BAT`
+holding `CD >GEM` and `GEM` when it has none, and leaves one that is
+there alone and says what it wants; installing a newer gem4xe is the
+same again, over the old.  `make test-install` does exactly that under
+SpartaDOS X 4.50 -- a blank drive, both floppies, the system a second
+time over the first -- and then cold-starts the drive into the desktop
+with the clock accessory loaded beside it.
 
-## The floppy the release can carry
+**Why two floppies and not one.**  Until phase 42 each SpartaDOS floppy
+carried the applications and the accessory as well.  The rest of GEMDOS
+took the smallest disk, the DOS 2 floppy, under its floor of free
+sectors (`docs/phase42.md`), and the answer was not to squeeze it: a
+floppy is where gem4xe starts, not where it lives, so every floppy became
+the system and nothing else, and the rest went onto a floppy of its own
+-- which is also what somebody running from floppies wants in a second
+drive.
+
+## The floppies the release can carry
 
 `gem-sp.atr` boots SpartaDOS 3.2 and `gem-boot.atr` boots a DOS 2, and
 neither DOS is gem4xe's to give away, so the public release
-(`make release`) has had no floppy at all -- the card image and the
-loose files, and a page saying how to make a disk.  **`gem-sdx.atr`**
-(`tools/mkfloppy.py`) is the third floppy and the one that can travel:
-a double-sided double-density SDFS disk, 1440 sectors of 256 bytes,
-carrying the card's system partition -- the same `\GEM\` and
-`\APPS\`, the same `AUTOEXEC.BAT` -- and **no DOS**, its boot sectors
-the blank disk's stub.  It boots under SpartaDOS X, which is the one
-DOS that lives in the machine rather than on the disk: a cartridge, or
-an Ultimate 1MB with it in flash.  SDX comes up, changes to D1: and runs
-the disk's `AUTOEXEC.BAT`, and that is GEM; the loader switches the
-Rapidus as it does from the other two.  `make test-boot` boots it under
-the `[spartados].sdx_cart` fixture, nothing typed, and compares the
-desk with the model as it does the others.
+(`make release`) carries neither.  **`gem-sdx.atr`** and
+**`gem-apps.atr`** (`tools/mkfloppy.py`) are the two that can travel:
+double-sided double-density SDFS disks, 1440 sectors of 256 bytes, with
+**no DOS**, their boot sectors the blank disk's stub.  The first is the
+system -- the card's `\GEM\` without the accessory, the card's
+`AUTOEXEC.BAT` and `INSTALL.BAT` -- and the second the applications and
+the accessory, with an `INSTALL.BAT` of its own and nothing that boots.
 
-Why double-sided: the system is 195 KB, more than a 180 KB
-double-density disk holds and less than a 360 KB one, with about 158 KB
-to spare.  Every SIO emulator, every FAT loader and an XF551 read the
-geometry.  Under any other SpartaDOS it is what `gem-sp.atr` is above:
-an install disk, laid out as the card is.
+The system floppy boots under SpartaDOS X, which is the one DOS that
+lives in the machine rather than on the disk: a cartridge, or an
+Ultimate 1MB with it in flash.  SDX comes up, changes to D1: and runs the
+disk's `AUTOEXEC.BAT`, and that is GEM; the loader switches the Rapidus
+as it does from the other two.  `make test-boot` boots it under the
+`[spartados].sdx_cart` fixture, nothing typed, compares the desk with the
+model as it does the others, and reads the applications floppy file by
+file.
+
+Both stay double-sided, which the system alone -- about 150 KB -- no
+longer needs, so that the pair is one geometry.  Every SIO emulator,
+every FAT loader and an XF551 read it.
 
 The evidence for the FAT-beside-APT card stays written down because it
 is the obvious thing to build if someone asks for a single card a PC can
@@ -132,10 +146,10 @@ here rather than in a forum thread.
 | If you have | Use | Why |
 |---|---|---|
 | U1MB / Incognito, SIDE, SIDE2, SIDE3, IDE Plus 2.0, MyIDE-II | `disks/gem-cf.img` written to a card | APT; the system installs to `\GEM\`, applications to `\APPS\` |
-| An APT drive you have already partitioned | `disks/gem-sdx.atr` (or `gem-sp.atr`), and copy `GEM>` and `APPS>` off it | the floppies are laid out as the card is; nothing of yours is touched |
-| SIDE3 / AVGCART / any FAT loader, with SpartaDOS X in the machine | `disks/gem-sdx.atr` on the card you have | the loader mounts it; SDX boots it; nothing to install -- and it is the one floppy in the public release |
-| SIDE3 / AVGCART / any FAT loader, without | `disks/gem-sp.atr` on the card you have | the loader mounts it; nothing to install |
-| SDrive-MAX, FujiNet, a real drive | `disks/gem-sdx.atr` (SpartaDOS X in the machine), `disks/gem-sp.atr` (SpartaDOS 3.2) or `disks/gem-boot.atr` (DOS 2) | plain floppy images |
+| An APT drive you have already partitioned | `disks/gem-sdx.atr` (or `gem-sp.atr`) and `disks/gem-apps.atr`, and `-INSTALL` from each | the floppies are the card in two halves; nothing of yours is touched |
+| SIDE3 / AVGCART / any FAT loader, with SpartaDOS X in the machine | `disks/gem-sdx.atr` on the card you have, `disks/gem-apps.atr` as a second drive | the loader mounts them; SDX boots the first; nothing to install -- and they are the floppies in the public release |
+| SIDE3 / AVGCART / any FAT loader, without | `disks/gem-sp.atr` on the card you have, `disks/gem-apps.atr` as a second drive | the loader mounts them; nothing to install |
+| SDrive-MAX, FujiNet, a real drive | `disks/gem-sdx.atr` (SpartaDOS X in the machine), `disks/gem-sp.atr` (SpartaDOS 3.2) or `disks/gem-boot.atr` (DOS 2), with `disks/gem-apps.atr` in a second drive under a SpartaDOS | plain floppy images |
 | A DOS you already like | `system/` -- the loose files | put them where you want; give the disk a start-up that runs `GEM` |
 | MIO, BlackBox, original MyIDE | the floppies | their partitioning is their own; nothing here writes it |
 

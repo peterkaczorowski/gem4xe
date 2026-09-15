@@ -21,6 +21,13 @@ There are three of them and they come up the same way by different means:
                      [spartados].sdx_cart) or from Ultimate 1MB flash,
                      which reads its AUTOEXEC.BAT.  Without the fixture
                      its files are still checked; the boot is not.
+  build/gem-apps.atr the applications and the desk accessory, with no DOS
+                     and no AUTOEXEC.BAT: not a boot disk, so it is read
+                     and not booted.
+
+Each of the three boot disks is the system and nothing else, with the
+INSTALL.BAT that copies it onto a drive (tests/emu/install.py runs that),
+since phase 42 took the DOS 2 floppy under its floor of free sectors.
 
 This gate touches no key -- there is no b.key() in this file -- so what
 comes up is what the disk itself started.  It runs the machine's real
@@ -78,7 +85,7 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from a8test.launcher import launch          # noqa: E402
-import aesref, vbxeref, symfile, atr, mkxex  # noqa: E402
+import aesref, vbxeref, symfile, atr, mkxex, mkcf  # noqa: E402
 from deskref import Desktop                 # noqa: E402
 from deskrsc import FILEMENU, QUITITEM      # noqa: E402
 from m4_aes import PRELUDE, SHOTDIR         # noqa: E402
@@ -300,12 +307,16 @@ def one(name, progname, how, batches, cart, keep, check):
               {e.filename.upper(): None for e in fs.entries() if e.in_use})
     print(f"{name}: {img!r}, {how}")
     print(f"  {', '.join(sorted(listed))}")
+    # Every product floppy is the system and nothing else since phase 42:
+    # the applications and the desk accessory are on gem-apps.atr, which
+    # apps_disk() reads (docs/media.md).
     want = ({"GEM>GEM.COM": "gem.xex", "GEM>DESKTOP.G4A": "desktop.g4a",
-             "GEM>DESKTOP.RSC": "desktop.rsc", "APPS>CALC.G4A": "calc.g4a",
-             "APPS>CLOCK.G4A": "clock.g4a"} if sdfs else
+             "GEM>DESKTOP.RSC": "desktop.rsc", "GEM>LANG.RSC": "lang.rsc"} if sdfs else
             {progname: "gem.xex", "DESKTOP.G4A": "desktop.g4a",
-             "DESKTOP.RSC": "desktop.rsc", "CLOCK.ACC": "clockacc.g4a",
-             "CLOCK.RSC": "clock.rsc", "LANG.RSC": "lang.rsc"})
+             "DESKTOP.RSC": "desktop.rsc", "LANG.RSC": "lang.rsc"})
+    strays = sorted(n for n in listed if n.startswith("APPS") or n.endswith(".ACC")
+                    or (n.endswith(".G4A") and n not in want))
+    check(not strays, f"{name}: carries {strays}, which belong on gem-apps.atr")
     for fname, built in want.items():
         check(fname in listed, f"{name}: {fname} is not on the disk")
         if sdfs and fname in listed:
@@ -318,6 +329,13 @@ def one(name, progname, how, batches, cart, keep, check):
             if batch in listed:
                 check(fs.read(batch) == BOOT_LINE,
                       f"{name}: {batch} holds {fs.read(batch)!r}, not {BOOT_LINE!r}")
+        # ...and the installer: what this disk holds, onto a drive the user
+        # names (tools/mkcf.py; tests/emu/install.py runs it).
+        check("INSTALL.BAT" in listed
+              and fs.read("INSTALL.BAT") == mkcf.batch(mkcf.INSTALL_SYSTEM),
+              f"{name}: INSTALL.BAT is not tools/mkcf.py's INSTALL_SYSTEM")
+        check("APPS" not in {e.filename.upper() for e in fs.entries("")},
+              f"{name}: has an \\APPS\\, which belongs on gem-apps.atr")
         # The release floppy carries no DOS: its superblock names no boot
         # file and its boot sectors are the blank disk's stub.  A DOS on
         # it would be somebody else's (tools/mkfloppy.py).
@@ -512,6 +530,35 @@ def one(name, progname, how, batches, cart, keep, check):
         emu.stop()
 
 
+def apps_disk(check):
+    """gem-apps.atr, read and not booted, because it is not a boot disk:
+    every file of tools/mkcf.py's APPS table in its directory, byte for
+    byte and nothing else, its own INSTALL.BAT, no AUTOEXEC.BAT and no
+    DOS."""
+    name = "gem-apps.atr"
+    img = atr.ATRImage.load(os.path.join(BUILD, name))
+    fs = atr.open_fs(img)
+    print(f"{name}: {img!r}, the applications -- read, not booted")
+    on_disk = set()
+    for d in mkcf.DIRS:
+        on_disk.update(f"{d}>{e.filename.upper()}" for e in fs.entries(d))
+    want = {n for _p, n in mkcf.APPS}
+    check(on_disk == want, f"{name}: holds {sorted(on_disk)}, not {sorted(want)}")
+    for path, fname in mkcf.APPS:
+        if fname in on_disk:
+            with open(os.path.join(BUILD, os.path.basename(path)), "rb") as f:
+                check(fs.read(fname) == f.read(),
+                      f"{name}: {fname} is not {path}")
+    root = {e.filename.upper() for e in fs.entries("")}
+    check(root == set(mkcf.DIRS) | {"INSTALL.BAT"},
+          f"{name}: its root holds {sorted(root)}")
+    if "INSTALL.BAT" in root:
+        check(fs.read("INSTALL.BAT") == mkcf.batch(mkcf.INSTALL_APPS),
+              f"{name}: INSTALL.BAT is not tools/mkcf.py's INSTALL_APPS")
+    check(fs.boot_file_map == 0, f"{name}: the superblock names a DOS file")
+    print(f"  {', '.join(sorted(on_disk | root))}")
+
+
 def main(argv):
     keep = "--shot" in argv
     only = [a for a in argv if not a.startswith("--")]
@@ -532,6 +579,8 @@ def main(argv):
             continue
         one(name, progname, how, batches, sdx if wants_cart else None,
             keep, check)
+    if not only or any("apps" in o for o in only):
+        apps_disk(check)
     print(f"{'FAIL' if fails else 'PASS'}: the product disks boot into the "
           f"desktop with nothing typed -- the loader switches the CPU "
           f"itself, {len(fails)} problem(s)")

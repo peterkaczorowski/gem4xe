@@ -65,30 +65,33 @@ DISKS = [
      "SpartaDOS 3.2 on a 320 KB floppy.  It boots straight into GEM: the "
      "disk carries STARTUP.BAT and AUTOEXEC.BAT, four bytes each, because "
      "SpartaDOS 3.2 reads the first and SpartaDOS X the second.  The "
-     "desk accessory is on this one: pull down Desk and there is a "
-     "Clock under the About item."),
+     "system and nothing else, and `INSTALL.BAT`: the applications and "
+     "the desk accessory are on `disks/gem-apps.atr`."),
     ("gem-boot.atr", "disks/gem-boot.atr", "dos2",
      "A double-density DOS 2 floppy, 180 KB.  GEM is AUTORUN.SYS, which "
-     "this DOS runs at boot.  DUP.SYS is NOT on it -- the system wanted "
-     "seven sectors more than the disk had left beside the DOS's own "
-     "shell -- so there is nothing to come back to when GEM quits: use "
-     "one of the other two, or the card, if that matters to you.  The "
-     "system and nothing else: the calculator, the clock and the desk "
-     "accessory are on the other two, because 3 KB is what this disk has "
-     "left once GEM's 127 KB and the desktop are on it, and its "
-     "GEM4XE.CFG is the short form -- the same keys without the prose, "
-     "which is on the other two and in system/.  The Desk menu here "
-     "holds only the About item."),
+     "this DOS runs at boot, and the DOS's own DUP.SYS is beside it, "
+     "which is what GEM hands the machine back to when it quits.  The "
+     "system and nothing else: a DOS 2 cannot read the applications "
+     "floppy's directories, so this disk is for trying GEM rather than "
+     "for keeping it, and its Desk menu holds only the About item."),
     ("gem-sdx.atr", "disks/gem-sdx.atr", "sdfs",
      "A double-sided double-density SDFS floppy, 360 KB, with **no DOS on "
-     "it**: the same `\\GEM\\` and `\\APPS\\` as the card, and an "
-     "`AUTOEXEC.BAT` that changes into `\\GEM\\` and runs GEM.  It "
-     "boots under **SpartaDOS X** -- from a cartridge or from Ultimate "
-     "1MB flash -- which is the one DOS that lives in the machine rather "
-     "than on the disk, and that is why this floppy can be given away "
-     "where the other two cannot.  Put it in D1: and turn the machine "
-     "on.  Any other SpartaDOS reads it as an install disk: `\\GEM\\` "
-     "and `\\APPS\\` copy across as directories."),
+     "it**: the system -- the card's `\\GEM\\`, without the desk "
+     "accessory -- an `AUTOEXEC.BAT` that changes into `\\GEM\\` and runs "
+     "GEM, and `INSTALL.BAT`.  It boots under **SpartaDOS X** -- from a "
+     "cartridge or from Ultimate 1MB flash -- which is the one DOS that "
+     "lives in the machine rather than on the disk, and that is why this "
+     "floppy can be given away where the other two cannot.  Put it in D1: "
+     "and turn the machine on.  Its other half is `disks/gem-apps.atr`."),
+    ("gem-apps.atr", "disks/gem-apps.atr", "sdfs",
+     "The applications: the calculator, the clock and a hello-world "
+     "program in `\\APPS\\`, and the clock desk accessory in `\\GEM\\`, on "
+     "the same 360 KB geometry with no DOS and nothing that boots.  Put it "
+     "in a second drive beside a system disk and the desktop opens it "
+     "there; its `INSTALL.BAT` puts it on your own drive beside the "
+     "system.  An accessory is loaded from the system's own `\\GEM\\` "
+     "when GEM starts, so the Clock is in the Desk menu once this disk "
+     "is installed, not while it sits in a drive."),
     ("gem-cf.img", "disks/gem-cf.img", None,
      "A 16 MB CF card: an APT partition table and two SDFS partitions, "
      "with the system and the desk accessory in `\\GEM\\` and the "
@@ -224,7 +227,7 @@ def card_layout():
     """What goes in which directory of the card, read from the tool that
     builds it, so the page's install-by-hand recipe is the card's own."""
     dirs = {}
-    for _path, name in mkcf.SYSTEM:
+    for _path, name in mkcf.SYSTEM + mkcf.APPS:
         d, n = name.split(">")
         dirs.setdefault(d, []).append(n)
     return dirs
@@ -238,13 +241,15 @@ TESTER = {
     "emu_note": "",
     "install": (
         "**If you already have an APT drive**, do not write the card image "
-        "over\nit.  `gem-sp.atr` is an install disk: it holds the same "
-        "`\\GEM\\` and\n`\\APPS\\` the card does, so putting gem4xe on your "
-        "own drive is a\ndirectory copy --\n\n"
-        "    COPY D1:>GEM>*.* D2:>GEM>*.*\n"
-        "    COPY D1:>APPS>*.* D2:>APPS>*.*\n\n"
-        "-- plus an `AUTOEXEC.BAT` holding the two lines the floppy's "
-        "holds,\n`CD >GEM` and `GEM`.\n\n"
+        "over\nit.  Each SpartaDOS floppy carries an `INSTALL.BAT` that "
+        "copies what it\nholds onto a drive you name.  At the SpartaDOS X "
+        "prompt (quit GEM to\nget there), on the drive the floppy is in, "
+        "`-INSTALL` and the drive\nto put it on --\n\n"
+        "    -INSTALL D2:\n\n"
+        "-- first with `gem-sp.atr`, then with `gem-apps.atr`.  The "
+        "system's gives\nthe drive an `AUTOEXEC.BAT` that starts GEM, "
+        "unless it has one already,\nwhich is left alone.  Installing a "
+        "newer gem4xe is the same again.\n\n"
         "If what you have is a **loader that reads FAT** -- a SIDE3, an "
         "AVGCART\n-- or an SDrive-MAX, a FujiNet or a real drive, then the "
         "floppies are\nwhat you want: copy `gem-sp.atr` onto the card you "
@@ -280,12 +285,16 @@ def public_text():
             "instead.") + "\n",
         "install": fill(
             "**If you already have an APT drive**, do not write the card "
-            "image over it.  `gem-sdx.atr` is an install disk: it holds "
-            "the same `\\GEM\\` and `\\APPS\\` the card does, so "
-            "putting gem4xe on your own drive is a directory copy --") +
-            "\n\n    COPY D1:>GEM>*.* D2:>GEM>*.*\n"
-            "    COPY D1:>APPS>*.* D2:>APPS>*.*\n\n" + fill(
-            f"-- plus an `AUTOEXEC.BAT` of two lines, {boot}.  Or by hand "
+            "image over it.  `gem-sdx.atr` and `gem-apps.atr` each carry "
+            "an `INSTALL.BAT` that copies what the disk holds onto a drive "
+            "you name.  At the SpartaDOS X prompt (quit GEM to get there), "
+            "on the drive the floppy is in, `-INSTALL` and the drive to put "
+            "it on --") +
+            "\n\n    -INSTALL D2:\n\n" + fill(
+            f"-- first with `gem-sdx.atr`, then with `gem-apps.atr`.  The "
+            f"system's gives the drive an `AUTOEXEC.BAT` of two lines, "
+            f"{boot}, unless it has one already, which is left alone; "
+            f"installing a newer gem4xe is the same again.  Or by hand "
             f"from `system/`, the way the card has them: {gemdir} into "
             f"`\\GEM\\`; {appsdir} into `\\APPS\\`.") + "\n\n" + fill(
             "If what you have is a **loader that reads FAT** -- a SIDE3, an "
@@ -391,8 +400,9 @@ def build(out, tar=None, require_clean=False, public=False, zip_path=None):
         disks += ("\n*(" + " and ".join(f"`{d}`" for d in left_out)
                   + ", the other floppies `make dist` builds, are not in "
                   "this download: each boots a DOS that is not gem4xe's to "
-                  "give away.  `disks/gem-sdx.atr` carries none, which is "
-                  "why it is here; *On real storage*, above, says how to "
+                  "give away.  `disks/gem-sdx.atr` and `disks/gem-apps.atr` "
+                  "carry none, which is why they are here; *On real "
+                  "storage*, above, says how to "
                   "make one of the others from `system/`.)*\n")
 
     items = menu_items()

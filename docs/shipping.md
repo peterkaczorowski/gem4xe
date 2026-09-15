@@ -66,13 +66,24 @@ sectors, and prints the figure so the next phase that eats into it sees
 it go.  The paragraphs that follow were true when written and are what
 the packing was measured against.
 
+**Phase 42 was that phase.**  The rest of GEMDOS -- the console, the
+standard handles, Pexec -- is 10 KB of code and 7.6 KB more `GEM.COM` on
+the disk, and the DOS 2 floppy went to 65 sectors free, under the floor.
+The floor stayed and the desk accessory went: from that floppy and from
+every other, which are the system and nothing else now.  The applications
+and the accessory are on a floppy of their own, `gem-apps.atr`, and each
+SpartaDOS floppy carries an `INSTALL.BAT` that puts what it holds on a
+drive (`docs/media.md`).  The DOS 2 floppy has `DUP.SYS`, the full
+`GEM4XE.CFG` and 87 sectors free.
+
 That is the honest shape of the thing rather than a regression to be
 fixed: a 640x240 GUI with a resident AES belongs on a volume measured in
 megabytes, and the machine this project targets (Rapidus, VBXE, U1MB) is
 a machine that has one.  The floppy is a *bootstrap* -- enough to start
 the system, and to carry it to the real volume.  **An application goes
-on the SpartaDOS install disk**, which has 989 sectors (123 KB) free and
-is laid out exactly as the card is (section 4), **or on the card.**
+on the applications floppy, `gem-apps.atr`, or on the card**, and each
+floppy's `INSTALL.BAT` carries what it holds to the real volume, laid out
+as the card is (section 4, and `docs/media.md`).
 
 ## 2. Booting straight into the desktop
 
@@ -378,11 +389,13 @@ form of it instead, the keys without the prose, because the disk had
 `CLOCK.ACC` is the first one shipped.  It is the same `src/apps/clock.c`
 as `\APPS\CLOCK.G4A`, with a different `main`: the program opens its
 panel once and exits, the accessory registers "Clock" in the Desk menu
-and waits to be asked.  It is on every product disk, the DOS 2 floppy
-included -- which for a while it was not, by arithmetic rather than
-decision: `GEM.COM` was 122 KB of a 184 KB disk, and after the desktop
-and its resource there were eleven sectors left where the accessory
-wants twenty.  The packed image (`phase38.md`) is what changed that.
+and waits to be asked.  It is on the card and on the applications
+floppy, and on no system floppy: it was on every product disk from phase
+38, when the packed image made room for it on the DOS 2 floppy, until the
+rest of GEMDOS took that disk under its floor of free sectors in phase 42
+and every floppy became the system and nothing else (section 1).  The
+applications floppy's `INSTALL.BAT` puts it in the installed `\GEM\`,
+where the AES finds it.
 
 `build/gem-cf.img` is that layout, less the two files that do not exist
 yet (section 5's `LANG.RSC` and a font).  The desktop opens a folder in

@@ -203,7 +203,8 @@ class TestDistribution(unittest.TestCase):
                          if e.in_use]
             else:
                 names = [e.filename for e in atr.Sdfs(image).entries("")]
-            section = self.page.split(f"`{dest}`")[1].split("###")[0]
+            # by its heading: another disk's prose may name this one first
+            section = self.page.split(f"### `{dest}`")[1].split("###")[0]
             for n in names:
                 self.assertIn(f"`{n}", section, f"{dest} holds {n} and the "
                               f"page does not say so")
@@ -271,7 +272,7 @@ class TestDistribution(unittest.TestCase):
         self.assertNotIn("--disk disks/gem-sp.atr", page)
         self.assertNotIn("not for redistribution", page)
         self.assertNotRegex(page, r"\{[a-z_]+\}")
-        for _path, name in mkcf.SYSTEM:
+        for _path, name in mkcf.SYSTEM + mkcf.APPS:
             d, n = name.split(">")
             self.assertRegex(page, rf"`{n}`[^;]*into\s+`\\{d}\\`",
                              f"the recipe does not put {n} in \\{d}\\")
@@ -300,7 +301,16 @@ class TestDistribution(unittest.TestCase):
         section = page.split("### `disks/gem-sdx.atr`")[1].split("###")[0]
         self.assertIn("no DOS", section)
         self.assertIn("`GEM\\` (", section)
-        self.assertIn("`APPS\\` (", section)
+        self.assertIn("`INSTALL.BAT`", section)
+        self.assertNotIn("`APPS\\` (", section)
+        # ...and its other half, the applications, which carries no DOS
+        # either and so travels with it
+        if built("gem-apps.atr"):
+            self.assertTrue(os.path.isfile(os.path.join(out, "disks",
+                                                        "gem-apps.atr")))
+            apps = page.split("### `disks/gem-apps.atr`")[1].split("###")[0]
+            self.assertIn("`APPS\\` (", apps)
+            self.assertIn("`INSTALL.BAT`", apps)
 
     def test_the_zip_is_the_tarball_s_tree(self):
         """The same files, the same bytes, the same top-level name:

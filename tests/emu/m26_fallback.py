@@ -202,9 +202,9 @@ def one(tag, disk, has_vbxe, want_cfg, want_dev, geom, syms, keep, check):
         # its tree where the loader put the target's.
         if want_dev == "antic":
             # The desktop's own calls, not every process's: gem_calls
-            # counts the accessory's too, and CLOCK.ACC is back on the
-            # DOS 2 floppy (phase 38) -- seven calls past the first wait,
-            # none of them the desktop's (src/sys/abi.c, gem_entry).
+            # counts an accessory's too, and the DOS 2 floppy carried
+            # CLOCK.ACC from phase 38 to phase 42 -- seven calls past the
+            # first wait, none of them the desktop's (src/sys/abi.c).
             calls = syms["app_calls"]
             kind = b.peek(syms["dos"])
             drvmap = 0x03 if kind != DOS_2 else (b.peek(DRVBYT) or 1)

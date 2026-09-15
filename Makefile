@@ -124,7 +124,7 @@ APP_STACK  = 256
 # linker map).
 all: build/hello-boot.atr build/m2-boot.atr build/m3-boot.atr build/m6split-boot.atr \
      build/m12-d2.atr build/m14-boot.atr build/m17-boot.atr build/gem-boot.atr build/gem-sp.atr \
-     build/gem-sdx.atr build/gem-cf.img
+     build/gem-sdx.atr build/gem-apps.atr build/gem-cf.img
 
 build/%.o: src/%.s
 	@mkdir -p build
@@ -937,12 +937,14 @@ build/dosclock.cfg: dist/gem4xe.cfg
 # The DOS's own DUP.SYS stays: it is what GEM returns to when it quits.
 # (It went, for a while, when the system outgrew the disk with the shell
 # on it -- docs/shipping.md section 2 -- and came back with the packed
-# far image.)  The accessory is found in the directory GEM was started
-# from, which on a DOS 2 disk is the only one there is.
+# far image.)  The system and nothing else, as every floppy is since
+# phase 42: the desk accessory went when the rest of GEMDOS took this disk
+# under its floor of free sectors, and it and the applications are on
+# gem-apps.atr (docs/media.md) -- which a DOS 2 cannot read, so this disk
+# is a gate's more than anybody's way in.
 DOS2_FILES = --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
-	     --add build/lang.rsc LANG.RSC --add build/816.com 816.COM \
-	     --add build/clockacc.g4a CLOCK.ACC --add build/clock.rsc CLOCK.RSC
-build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/gem4xe.cfg $(ACCP_DEPS)
+	     --add build/lang.rsc LANG.RSC --add build/816.com 816.COM
+build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/gem4xe.cfg
 	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
@@ -955,37 +957,46 @@ build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_
 # The same shipped disk with the safe-mode line uncommented: what a user
 # writes from the DOS prompt when the VBXE's output is not something
 # their monitor will show (tests/emu/m26_fallback.py).
-build/gem-antic.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/safe.cfg $(ACCP_DEPS)
+build/gem-antic.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/safe.cfg
 	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
 	    $(DOS2_FILES) --add build/safe.cfg GEM4XE.CFG
 
-SP_LAYOUT = --name "GEM>GEM.COM" --boot "CD >GEM|GEM" --mkdir GEM --mkdir APPS \
+SP_LAYOUT = --name "GEM>GEM.COM" --boot "CD >GEM|GEM" --mkdir GEM \
 	    --add build/desktop.g4a "GEM>DESKTOP.G4A" \
 	    --add build/desktop.rsc "GEM>DESKTOP.RSC" \
 	    --add build/prefs.rsc "GEM>PREFS.RSC" \
 	    --add build/lang.rsc "GEM>LANG.RSC" \
 	    --add build/816.com "GEM>816.COM" \
 	    --add build/gem4xe.cfg "GEM>GEM4XE.CFG" \
+	    --add build/install-sys.bat INSTALL.BAT
+# ...and what gem-shots.atr photographs beside it: the applications and the
+# accessory, which the product's SpartaDOS floppy does not carry.
+SP_APPS   = --mkdir APPS \
 	    --add build/clockacc.g4a "GEM>CLOCK.ACC" \
 	    --add build/clock.rsc "GEM>CLOCK.RSC" \
 	    --add build/calc.g4a "APPS>CALC.G4A" --add build/calc.rsc "APPS>CALC.RSC" \
 	    --add build/clock.g4a "APPS>CLOCK.G4A" --add build/clock.rsc "APPS>CLOCK.RSC"
-SP_DEPS   = build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg $(DESK_DEPS) $(APP_DEPS) $(ACCP_DEPS) tools/mkspdisk.py tools/atr.py
+SP_DEPS   = build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg build/install-sys.bat $(DESK_DEPS) $(APP_DEPS) $(ACCP_DEPS) tools/mkspdisk.py tools/atr.py
+
+# The system floppies' INSTALL.BAT, as a file for tools/mkspdisk.py to
+# carry (tools/mkfloppy.py writes gem-sdx.atr's and gem-apps.atr's itself).
+build/install-sys.bat: tools/mkfloppy.py tools/mkcf.py
+	@mkdir -p build
+	python3 tools/mkfloppy.py --batch system $@
 
 build/gem-sp.atr: $(SP_DEPS)
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(SP_LAYOUT) \
-	    --add build/m11_app.g4a "APPS>M11.G4A"
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(SP_LAYOUT)
 
-# The same floppy without the gate program, for the pictures: \APPS\ is
-# photographed, and M11.G4A is the tests' business, not the product's.
+# The same floppy with the applications on it, for the pictures: \APPS\
+# and the Desk menu's Clock are photographed.
 build/gem-shots.atr: $(SP_DEPS)
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
-	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(SP_LAYOUT)
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(SP_LAYOUT) $(SP_APPS)
 
 # The CF card: an APT table and two SDFS partitions, with the system in
 # \GEM\ and the demonstration application in \APPS\ -- the install
@@ -1027,10 +1038,17 @@ build/gem-sd.img: build/gem-cf.img build/gemdiag.com
 # machine rather than on the disk, so the disk is gem4xe's to give away
 # where gem-sp.atr and gem-boot.atr are not.  Needs no fixture to build;
 # test-boot boots it when [spartados].sdx_cart names a cartridge.
-build/gem-sdx.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/prefs.rsc build/hello_app.g4a \
-                   build/lang.rsc build/gem4xe.cfg build/816.com $(APP_DEPS) $(ACCP_DEPS) tools/mkfloppy.py tools/mkcf.py tools/atr.py
+build/gem-sdx.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/prefs.rsc \
+                   build/lang.rsc build/gem4xe.cfg build/816.com tools/mkfloppy.py tools/mkcf.py tools/atr.py
 	@rm -f $@
 	python3 tools/mkfloppy.py $@
+
+# ...and its other half: the applications and the desk accessory, with an
+# INSTALL.BAT of their own and no AUTOEXEC.BAT, because it is not a boot
+# disk (tools/mkfloppy.py, docs/media.md).  No DOS, so it travels too.
+build/gem-apps.atr: build/hello_app.g4a $(APP_DEPS) $(ACCP_DEPS) tools/mkfloppy.py tools/mkcf.py tools/atr.py
+	@rm -f $@
+	python3 tools/mkfloppy.py --apps $@
 
 # The SpartaDOS disk: a fresh SDFS volume booting the 3.2 fixture's DOS,
 # the same files as the DOS 2 disk, the shell's applications and a
@@ -1149,7 +1167,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-boot
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-boot test-install
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -1204,7 +1222,7 @@ build/gem4xe-sdk.tar.gz: $(SDK_FILES)
 # that could go stale cannot).  DIST is the name it takes: the date and
 # the commit unless you say otherwise.
 DIST ?= build/gem4xe-$(shell date +%F)-$(shell git rev-parse --short HEAD 2>/dev/null || echo local)
-DIST_DISKS = build/gem-sp.atr build/gem-boot.atr build/gem-sdx.atr build/gem-cf.img
+DIST_DISKS = build/gem-sp.atr build/gem-boot.atr build/gem-sdx.atr build/gem-apps.atr build/gem-cf.img
 DIST_SYS   = build/gem.xex build/desktop.g4a build/desktop.rsc \
              build/lang.rsc build/816.com build/hello_app.g4a build/gem4xe.cfg \
              build/prefs.rsc \
@@ -1227,13 +1245,15 @@ dist: $(DIST_SYS) $(DIST_DISKS) build/gem4xe-sdk.tar.gz \
 VERSION := $(shell cat VERSION)
 RELEASE  = build/gem4xe-$(VERSION)
 
-release: $(DIST_SYS) build/gem-cf.img build/gem-sdx.atr build/gem4xe-sdk.tar.gz \
+release: $(DIST_SYS) build/gem-cf.img build/gem-sdx.atr build/gem-apps.atr build/gem4xe-sdk.tar.gz \
          tools/mkdist.py tools/dist/README.md tools/mksdk.py
 	@python3 -c 'import sys; sys.exit(b"version $(VERSION)\0" not in open("build/desktop.rsc","rb").read())' \
 	    || { echo "build/desktop.rsc does not say version $(VERSION) (phase38.md)"; exit 1; }
 	python3 tools/mkdist.py $(RELEASE) --public --tar $(RELEASE).tar.gz --zip $(RELEASE).zip
 	cp build/gem-sdx.atr $(RELEASE).atr
-	cd build && sha256sum gem4xe-$(VERSION).tar.gz gem4xe-$(VERSION).zip gem4xe-$(VERSION).atr > gem4xe-$(VERSION).sha256
+	cp build/gem-apps.atr $(RELEASE)-apps.atr
+	cd build && sha256sum gem4xe-$(VERSION).tar.gz gem4xe-$(VERSION).zip gem4xe-$(VERSION).atr \
+	    gem4xe-$(VERSION)-apps.atr > gem4xe-$(VERSION).sha256
 
 test-emu: 
 	python3 tests/emu/p0_probe.py
@@ -1467,13 +1487,20 @@ test-m21: build/m3-boot.atr build/inv.fnt
 # The third disk, gem-sdx.atr, carries no DOS and boots under the SDX
 # cartridge fixture; with none named it is read but not booted, and the
 # gate says so rather than failing (tests/emu/product_boot.py).
-test-boot: build/gem-sp.atr build/gem-boot.atr build/gem-sdx.atr build/desktop.g4a build/desktop.sym
+test-boot: build/gem-sp.atr build/gem-boot.atr build/gem-sdx.atr build/gem-apps.atr build/desktop.g4a build/desktop.sym
 	python3 tests/emu/product_boot.py --sdx="$(SRC_SDX)"
 
 # The same boot off the product CF card, on the machine this project is
 # for: the U1MB flash's SpartaDOS X and PBI BIOS, a SIDE 2 with the card
 # on its IDE bus.  Outside `make test` for the same reason as test-m14u:
 # it needs both the U1MB fixture and the patched emulator (ALTIRRASDL=).
+# The installer (docs/media.md): SpartaDOS X runs each floppy's INSTALL.BAT
+# onto a blank drive, the drive is listed, and the machine boots GEM from
+# it -- the accessory from the applications disk loaded beside the desktop.
+test-install: build/gem-sdx.atr build/gem-apps.atr build/gem.sym
+	@test -n "$(SRC_SDX)" || { echo "no SDX fixture: set [spartados].sdx_cart in fixtures.toml"; exit 1; }
+	python3 tests/emu/install.py --sdx="$(SRC_SDX)"
+
 test-cf: build/gem-cf.img build/desktop.g4a build/desktop.sym
 	@test -n "$(SRC_U1MB)" || { echo "no U1MB fixture: set [u1mb].flash in fixtures.toml"; exit 1; }
 	python3 tests/emu/cf_boot.py
@@ -1542,4 +1569,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-boot test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-boot test-install test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean

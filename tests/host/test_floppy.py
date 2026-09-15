@@ -6,9 +6,11 @@ a DOS that is not gem4xe's to give away; gem-sdx.atr is the floppy it
 can carry, and what makes it so is what is NOT on it.  So the checks
 here are as much about absence as presence: no boot file named in the
 superblock, the blank disk's stub in the boot sectors, and otherwise
-exactly the card's system partition -- the same files in the same
-directories with the same AUTOEXEC.BAT, read back byte for byte -- on
-a geometry the machine's drives and loaders read.
+exactly the card's system -- tools/mkcf.py's SYSTEM table in \\GEM\\, the
+same AUTOEXEC.BAT, and INSTALL.BAT, read back byte for byte -- on a
+geometry the machine's drives and loaders read.  Its other half,
+gem-apps.atr, is the APPS table on the same geometry, with an INSTALL.BAT
+of its own and nothing that would boot.
 
 Whether it BOOTS is `make test-boot`'s, under the SDX cartridge fixture.
 """
@@ -65,21 +67,24 @@ class TestFloppy(unittest.TestCase):
         self.assertFalse({n for n in names if n.endswith(".DOS")
                           or n.endswith(".SYS")}, names)
 
-    def test_it_is_the_card_s_system_partition(self):
-        """Every file in tools/mkcf.py's table, in its directory, byte
-        for byte -- and nothing else."""
+    def test_it_is_the_card_s_system(self):
+        """Every file in tools/mkcf.py's SYSTEM table, in \\GEM\\, byte for
+        byte -- and nothing else: no \\APPS\\ and no accessory, which are
+        the other floppy's."""
         want = {}
         for path, name in mkcf.SYSTEM:
             with open(os.path.join(ROOT, path), "rb") as f:
                 want[name] = f.read()
         for name, data in want.items():
             self.assertEqual(self.fs.read(name), data, name)
-        on_disk = set()
-        for d in mkcf.DIRS:
-            on_disk.update(f"{d}>{e.filename}" for e in self.fs.entries(d))
+        on_disk = {f"GEM>{e.filename}" for e in self.fs.entries("GEM")}
         self.assertEqual(on_disk, set(want))
         root = {e.filename for e in self.fs.entries("")}
-        self.assertEqual(root, set(mkcf.DIRS) | {"AUTOEXEC.BAT"})
+        self.assertEqual(root, {"GEM", "AUTOEXEC.BAT", "INSTALL.BAT"})
+
+    def test_the_installer_is_mkcf_s(self):
+        self.assertEqual(self.fs.read("INSTALL.BAT"),
+                         mkcf.batch(mkcf.INSTALL_SYSTEM))
 
     def test_the_boot_file_is_the_card_s(self):
         self.assertEqual(self.fs.read("AUTOEXEC.BAT"),
@@ -89,18 +94,71 @@ class TestFloppy(unittest.TestCase):
 
     def test_there_is_room_left_on_it(self):
         """A DESKTOP.INF, at least, and a program of somebody's own:
-        the system is 195 KB and the disk 360, so a hundred KB is the
-        floor, and going under it means the system has grown past what
-        a floppy is for (docs/shipping.md, section 1)."""
+        the system is about 150 KB and the disk 360, so a hundred KB is
+        the floor, and going under it means the system has grown past
+        what a floppy is for (docs/shipping.md, section 1)."""
         free = self.fs.free_count() * (self.img.sector_size - 2)
         self.assertGreater(free, 100 * 1024, free)
 
     def test_the_command_line_adds_a_file(self):
         out = os.path.join(self.dir, "extra.atr")
-        mkfloppy.main([out, "--add", "COPYING", "APPS>COPYING"])
+        mkfloppy.main([out, "--add", "COPYING", "GEM>COPYING"])
         fs = atr.open_fs(atr.ATRImage.load(out))
         with open(os.path.join(ROOT, "COPYING"), "rb") as f:
-            self.assertEqual(fs.read("APPS>COPYING"), f.read())
+            self.assertEqual(fs.read("GEM>COPYING"), f.read())
+
+
+class TestAppsFloppy(unittest.TestCase):
+    """gem-apps.atr: the applications and the accessory, the other half of
+    the card's system partition, and not a boot disk."""
+
+    @classmethod
+    def setUpClass(cls):
+        for path, _name in mkcf.APPS:
+            if not os.path.isfile(os.path.join(ROOT, path)):
+                raise unittest.SkipTest(f"{path} is not built")
+        cls.dir = tempfile.mkdtemp(prefix="gem4xe-apps-")
+        cls.out = os.path.join(cls.dir, "gem-apps.atr")
+        mkfloppy.main([cls.out, "--apps"])
+        cls.img = atr.ATRImage.load(cls.out)
+        cls.fs = atr.open_fs(cls.img)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.dir, ignore_errors=True)
+
+    def test_the_geometry_is_the_system_floppy_s(self):
+        self.assertEqual((self.img.sector_size, self.img.sector_count),
+                         (256, 1440))
+        self.assertIsInstance(self.fs, atr.Sdfs)
+
+    def test_it_carries_no_dos_and_does_not_boot(self):
+        self.assertEqual(self.fs.boot_file_map, 0)
+        root = {e.filename for e in self.fs.entries("")}
+        self.assertNotIn("AUTOEXEC.BAT", root)
+        self.assertEqual(root, set(mkcf.DIRS) | {"INSTALL.BAT"})
+
+    def test_it_is_the_apps_table(self):
+        want = {}
+        for path, name in mkcf.APPS:
+            with open(os.path.join(ROOT, path), "rb") as f:
+                want[name] = f.read()
+        for name, data in want.items():
+            self.assertEqual(self.fs.read(name), data, name)
+        on_disk = set()
+        for d in mkcf.DIRS:
+            on_disk.update(f"{d}>{e.filename}" for e in self.fs.entries(d))
+        self.assertEqual(on_disk, set(want))
+
+    def test_the_installer_is_mkcf_s(self):
+        self.assertEqual(self.fs.read("INSTALL.BAT"),
+                         mkcf.batch(mkcf.INSTALL_APPS))
+
+    def test_the_two_tables_share_no_file(self):
+        """Between them they are the card's system partition, once each."""
+        system = {n for _p, n in mkcf.SYSTEM}
+        apps = {n for _p, n in mkcf.APPS}
+        self.assertFalse(system & apps)
 
 
 if __name__ == "__main__":
