@@ -117,12 +117,22 @@ void far_strput(uint32_t dst, const char *src, uint16_t max)
  *
  * Bank $FF is skipped: on Rapidus it holds the accelerator's registers, and
  * writing the bank number over them would be a poor way to start.
+ *
+ * AND EVERY BYTE THE PROBE WRITES IS PUT BACK.  The RAM above bank $00 is not
+ * only gem4xe's: Rapidus OS hands it out (kmalloc), and SpartaDOS X's
+ * 65816.SYS loads at the top of it -- $EF0000 on a 16 MB Rapidus -- so the
+ * probe's $EF at $EF0100 landed in the driver's code.  The SDX file calls it
+ * serves then failed, and the desktop said DESKTOP.RSC was not on the boot
+ * disk, on a machine where every file was where it should be
+ * (docs/phase41.md).  The saved bytes are a local: 255 bytes of stack for a
+ * moment at start-up, which bank $00's data could not spare as a static.
  */
 void farmem_probe(void)
 {
     uint16_t b;
     uint16_t first = far_first_free_bank();
     uint8_t run_first = 0, run_len = 0, best_first = 0, best_len = 0;
+    uint8_t save[0xFF];                 /* indexed by bank, $01-$FE */
 
     farmem.kind = FARMEM_NONE;
     farmem.first_bank = farmem.last_bank = farmem.banks = 0;
@@ -133,6 +143,8 @@ void farmem_probe(void)
     if (far_read8(0xFF0000UL) == '6' && far_read8(0xFF0001UL) == 'S')
         farmem.kind = FARMEM_RAPIDUS;
 
+    for (b = first; b <= 0xFE; b++)
+        save[b] = far_read8(((uint32_t)b << 16) | PROBE_OFF);
     for (b = first; b <= 0xFE; b++)
         far_write8(((uint32_t)b << 16) | PROBE_OFF, (uint8_t)b);
 
@@ -152,6 +164,12 @@ void farmem_probe(void)
         }
     }
 
+    /* Back as they were, from the top down: of two banks that are one cell,
+     * the lower bank's saved byte is written last, and both read that cell
+     * before any write. */
+    for (b = 0xFE; b >= first; b--)
+        far_write8(((uint32_t)b << 16) | PROBE_OFF, save[b]);
+
     if (!best_len)
         return;
     if (farmem.kind == FARMEM_NONE)
@@ -161,8 +179,7 @@ void farmem_probe(void)
     farmem.last_bank = (uint8_t)(best_first + best_len - 1);
     farmem.bytes = (uint32_t)best_len << 16;
     /* The bump starts at the foot of the run, which is already past the far
-     * code; the probe byte at PROBE_OFF is inside the first allocation and is
-     * dead by then. */
+     * code. */
     farmem.brk = (uint32_t)best_first << 16;
 }
 
