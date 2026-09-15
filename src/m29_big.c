@@ -50,11 +50,18 @@ NEAR WORD m29_first, m29_last;/* big[0] and big[BIG-1] after filling */
 NEAR WORD m29_ran;            /* it got to the end */
 NEAR WORD m29_step;           /* ...and how far it got, if it did not */
 NEAR WORD m29_alert;          /* form_alert with a FAR string: the button, or -1 */
+NEAR WORD m29_wfar;           /* wind_set WF_NAME with a FAR title: 0, refused */
+NEAR WORD m29_wnear;          /* ...and with a NEAR one: 1, taken */
 
 /* In --data-model=large this literal is FAR (Calypsi cfar); the AES reads
  * a string near, so the shim must bounce it (src/sys/abi.c, near_str) or
  * form_alert draws nothing.  Short, to fit the small near scratch. */
 static const char s_alert[] = "[1][far string ok][ OK ]";
+
+/* A window title is the string the shim CANNOT bounce: the AES keeps it.
+ * So a far one must be refused, and a near one taken. */
+static const char s_title[] = " far title ";
+NEAR char n_title[] = " near title ";
 
 int main(void)
 {
@@ -93,6 +100,16 @@ int main(void)
     m29_first = big[0];
     m29_last = big[BIG - 1];
     m29_ran = 1;
+
+    {
+        WORD h = wind_create(NAME, 0, 16, 320, 100);
+        m29_wfar = m29_wnear = -2;          /* no window to ask with */
+        if (h >= 0) {
+            m29_wfar = wind_set_str(h, WF_NAME, s_title);
+            m29_wnear = wind_set_str(h, WF_NAME, n_title);
+            wind_delete(h);
+        }
+    }
 
     /* A far string to the AES, the peer's reported bug (GACS could not
      * form_alert about its missing .DAT tables): the button it returns,

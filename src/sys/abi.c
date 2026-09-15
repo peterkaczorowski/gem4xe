@@ -445,7 +445,16 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
         WORD w[4];
         for (k = 0; k < 4; k++)
             w[k] = int_in[2 + k];
-        ret = wm_set(int_in[0], int_in[1], w);
+        /* WF_NAME and WF_INFO pass a string's address, and the window
+         * manager keeps only its low word (src/aes/wind.c) -- it reads the
+         * title again at every redraw, so it cannot be bounced into a
+         * scratch the way form_alert's text is.  A far address would be
+         * cut to 16 bits and draw whatever is in bank $00 there: a blank
+         * title, silently.  Refused instead, and the call answers 0. */
+        if ((int_in[1] == WF_NAME || int_in[1] == WF_INFO) && w[0] != 0)
+            ret = 0;
+        else
+            ret = wm_set(int_in[0], int_in[1], w);
         break;
     }
     case 106:                       /* wind_find: x, y */

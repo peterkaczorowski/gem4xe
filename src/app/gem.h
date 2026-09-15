@@ -620,6 +620,9 @@ void rc_union(const GRECT *src, GRECT *dst);
 WORD wind_get_grect(WORD handle, WORD field, GRECT *r);
 WORD wind_set_grect(WORD handle, WORD field, const GRECT *r);
 WORD wind_calc_grect(WORD type, WORD kind, const GRECT *in, GRECT *out);
+/* WF_NAME / WF_INFO: the string must be NEAR and must outlive the window --
+ * the AES keeps the pointer and redraws the title from it.  A far address
+ * is refused (the call answers 0) rather than cut to 16 bits. */
 WORD wind_set_str(WORD handle, WORD field, const char *str);
 WORD form_center_grect(OBJECT *tree, GRECT *r);
 WORD form_dial_grect(WORD flag, const GRECT *little, const GRECT *big);

@@ -115,7 +115,7 @@ def main(argv):
         near = b.peek16(syms["app_near"])
         big = {n: bsym[n] + near - link_near
                for n in ("m29_ran", "m29_zeroed", "m29_seedok", "m29_sum",
-                         "m29_first", "m29_last", "m29_step", "m29_alert")}
+                         "m29_first", "m29_last", "m29_step", "m29_alert", "m29_wfar", "m29_wnear")}
         print(f"  M29.G4A ran {tt} frames after B; its near region is at "
               f"${near:04X}, {far_banks} far banks")
 
@@ -131,6 +131,11 @@ def main(argv):
               "its initialised far array did not arrive initialised -- the "
               "crt's data_init_table walk did not reach it")
 
+        wfar, wnear = b.peek16(big["m29_wfar"]), b.peek16(big["m29_wnear"])
+        check(wfar == 0, f"wind_set(WF_NAME) with a FAR title answered {wfar}, not 0 -- "
+                         "the ABI cut a far address to 16 bits instead of refusing it")
+        check(wnear == 1, f"wind_set(WF_NAME) with a NEAR title answered {wnear}, not 1")
+        print(f"  WF_NAME: a far title refused ({wfar}), a near one taken ({wnear})")
         want = [(SEED[i & 7] + i) & 0xFFFF for i in range(N)]
         want = [w - 0x10000 if w >= 0x8000 else w for w in want]
         check(b.peek16(big["m29_first"]) == (want[0] & 0xFFFF),
