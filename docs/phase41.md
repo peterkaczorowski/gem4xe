@@ -124,11 +124,98 @@ as the machine's XL kernel, from a private emulator profile
   byte-for-byte rebuild of the gate application needed the kit to link
   assembly.
 
-## Not yet known
+## SpartaDOS X's 65C816 drivers, and a probe that wrote into one
 
-Whether any of this is behind the report that gem4xe does not work under
-Rapidus OS (Phase 40's aftermath): every release 2.36-2.48 reaches the
-desktop in the emulator, but none of those runs loaded SpartaDOS X's
-65C816 drivers (65816.SYS, SIO816.SYS, CON816.SYS), which are the software
-that would make an OS COP while GEM runs.  They are not in the SDX 4.50
-cartridge image and have not been tried.
+The report that gem4xe does not work under Rapidus OS was still open:
+every release 2.36-2.48 reaches the desktop in the emulator.  None of
+those runs had loaded SpartaDOS X's 65C816 drivers, which are the
+software that would make an OS COP while GEM runs, so they were tried --
+from the SDX 4.50 Toolkit (`drivers/turbobrd/`), loaded from `D1:CONFIG.SYS`
+under the SDX 4.50 cartridge, on Rapidus OS 2.48, on this build and on the
+one before the COP change (`build/sdx816/run.py`).
+
+Loading them from a disk has two rules the manuals half say.  `DEVICE SIO`
+must come before any `DEVICE D1:...` -- the first attempt put `65816`
+ahead of it and every D1: line failed with 132, *No device handler
+installed* -- and SIO816.SYS cannot come from a disk at all: it excludes
+SIO and has to be on CAR:.  So what was tested is 65816.SYS (CON816.SYS
+wants a symbol, 154, from something the Toolkit's copy did not have).
+
+Without the driver both builds reach the desktop.  With it, both stop in
+call 11, the desktop's file read, inside `form_alert`:
+
+    DESKTOP.RSC is not on the boot disk.        [ Quit ]
+
+on a disk where it is.  Not the COP change, then, and not new: 0.1.2 does
+the same.  65816.SYS says where it went -- `65816 v.3.4 loaded at $EF0000`,
+the top of the Rapidus's high RAM, allocated from Rapidus OS's kmem -- and
+the first 512 bytes of that bank, read after the driver loaded and again
+after GEM stopped, differ in exactly one byte:
+
+    $EF0100  $6C -> $EF
+
+`farmem_probe()` sizes the RAM above bank $00 by writing each bank's
+number at `$xx0100` and reading them back, and never put anything back.
+It had been writing into everything that lives up there, and 65816.SYS
+was in the way.
+
+The probe now saves the byte it is about to overwrite in every bank, sizes
+the RAM exactly as before, and puts the bytes back from the top bank down
+-- so of two banks that turn out to be one cell, the lower's saved byte,
+which is that cell's original, is written last.  The saved bytes are a
+255-byte local: bank $00's data has one byte over its floor and could not
+hold them as a static, and the stack is at its shallowest at that point.
+With it, bank $EF's first 512 bytes come through GEM's start untouched.
+
+**And GEM still stopped in the same place, with the same alert.**  The
+byte was real and was not the cause; it was written up as the cause before
+the run that could have said otherwise, and that run said otherwise.
+
+What followed ruled things out one at a time, each against the plain
+machine as a control: the Rapidus's speed-up (GEMDIAG with OPTION held,
+the windows left as the firmware set them), `CRITIC` during the CIO call,
+the `$C000-$FFFF` window's swap, the VBXE memory window at `$8000` (held
+off through the read), SDX's MEMLO (below `$2000` in every case), and the
+driver's data in the banks gem4xe loads into.  A 6502 program at the SDX
+prompt making `rs_load`'s very calls read DESKTOP.RSC whole with 65816.SYS
+loaded, which put the fault on gem4xe's side of the call -- and chunking
+gem4xe's reads to 2 KB, as the start-up reads that worked were, changed
+nothing.  The 809-byte read watched all along turned out to be CLOCK.ACC's
+last piece (4,905 bytes is two 2,048s and 809), perfectly normal.
+
+A diagnostic build that recorded how `rs_load` ended found it had never
+opened the file.  It returned at its first line:
+
+    if (rs_1 && rs_2)               /* one resident and one nested is all */
+        return 0;
+
+with the desktop's two slots holding `$F017` and `$0649` before anything
+had been loaded.  The slots are `p_rsc` and `p_rsc2` in the running
+process's record, and `proc_init()` set a process record up field by
+field -- its state, its queue, its button wait -- from the day those were
+all it had.  The resource slots were added later and never added to the
+list.  The records are taken from the bank-$00 pool, which nobody clears:
+on a plain SpartaDOS X machine that memory is zero, and once 65816.SYS has
+been loaded through it, it holds bytes of the driver (`65 45 EF B5 44 EF`,
+long addresses into bank $EF, where it moves itself).  So the desktop
+started holding two resources it had never loaded, and the "missing" file
+was a refused third.
+
+`proc_init()` now clears the whole record before it sets anything, and
+`proc_new()` clears the resource slots of the record it hands out.  The
+other things taken from the pool and the far heap were read for the same
+mistake -- GEMDOS's tables, the shell's buffers, the window manager's
+rectangle list -- and each is set up in full where it is taken.  With the
+fix the desktop comes up with 65816.SYS loaded, and `make test-sdx816`
+boots that machine every time: Rapidus OS as the kernel, the SDX
+cartridge, and a CONFIG.SYS that loads 65816.SYS after SIO, requiring
+SDX's own `65816 v.` line and the desktop's first wait.  It is the likely
+explanation of the report this phase began with: a Rapidus OS user who
+had asked for 65816.SYS support, where another user without it had no
+trouble.
+
+What the probe fix does not do either is ask Rapidus OS for the memory.
+gem4xe still takes every bank from the end of its far image up, and loads
+that image from bank $01 without asking; allocating through `COP #$01`
+kmalloc when `@:SYSDEF` byte 14 says kmem is there is the proper answer
+and is not done.

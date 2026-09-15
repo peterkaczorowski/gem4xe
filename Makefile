@@ -1271,6 +1271,15 @@ test-m11-os: build/m3-boot.atr build/m11_app.sym
 	@test -n "$(SRC_RAPIDUS_OS)" || { echo "no Rapidus OS fixture: set [rapidus].os in fixtures.toml"; exit 1; }
 	python3 tests/emu/m11_abi.py --os="$(SRC_RAPIDUS_OS)"
 
+# GEM under Rapidus OS with SpartaDOS X's 65816.SYS loaded from CONFIG.SYS
+# ([rapidus].os, [spartados].sdx_cart and .driver_65816): the desktop must
+# come up, which it did not while a process record's resource slots were
+# left as the pool had them (docs/phase41.md).
+SRC_65816 ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['spartados']['driver_65816'])" 2>/dev/null)
+test-sdx816: build/gem-sdx.atr build/gem.sym build/desktop.sym
+	@test -n "$(SRC_RAPIDUS_OS)" && test -n "$(SRC_SDX)" && test -n "$(SRC_65816)" || { echo "needs [rapidus].os, [spartados].sdx_cart and [spartados].driver_65816 in fixtures.toml"; exit 1; }
+	python3 tests/emu/sdx816.py --os="$(SRC_RAPIDUS_OS)" --cart="$(SRC_SDX)" --driver="$(SRC_65816)"
+
 # The file layer: CIO called through the OS from native mode, rsrc_load
 # and rsrc_obfix against tools/rsc.py, the shell library's buffers, and
 # the file selector driven over two disks -- its listings predicted from
@@ -1503,4 +1512,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-boot test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os sd demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-boot test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean

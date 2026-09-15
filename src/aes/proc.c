@@ -7,6 +7,7 @@
  * with the queues and event blocks broken out into lists; the lists earn
  * their keep at a dozen processes and cost more than they save at four.
  */
+#include <string.h>
 #include "aes/proc.h"
 
 PROC *proc_tab;
@@ -28,6 +29,14 @@ WORD proc_init(void *store)
         return FALSE;
     for (i = 0; i < NUM_PROCS; i++) {
         PROC *p = &proc_tab[i];
+        /* EVERY field, not the ones this loop names.  The record comes
+         * from memory nobody cleared, and a field left out is whatever was
+         * there before: p_rsc and p_rsc2 were, so a process could start
+         * with two resources it never loaded, and rs_load refuses a third.
+         * Under SpartaDOS X that memory is zero until 65816.SYS loads, and
+         * then holds bytes of the driver -- and the desktop said
+         * DESKTOP.RSC was not on the boot disk (docs/phase41.md). */
+        memset(p, 0, sizeof *p);
         p->p_stat = P_FREE;
         p->p_evwait = 0;
         p->p_tdead = 0;
@@ -67,6 +76,8 @@ PROC *proc_new(WORD *queue, WORD qmax)
     p->p_queue = q;
     p->p_qmax = qmax;
     p->p_qcount = 0;
+    p->p_rsc = p->p_rsc2 = 0;          /* a new process has no resource yet */
+    p->p_rscmark = p->p_rscmark2 = 0;
     p->p_stat = P_NEW;
     proc_n++;
     return p;
