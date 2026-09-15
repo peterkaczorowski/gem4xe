@@ -365,10 +365,13 @@ WORD sh_main(void)
         return APP_E_POOL;
     if (!sh_desk_blob) {
         char cio[CIO_NAME_MAX + 1];
+        WORD rs;
         sh_cioname(SH_DESKNAME, cio);
-        sh_desk_blob = far_read_file(cio, &sh_desk_len);
-        if (!sh_desk_blob)
-            return APP_E_FILE;
+        rs = far_read_file(cio, &sh_desk_blob, &sh_desk_len);
+        if (rs != APP_OK) {
+            sh_lastrc = rs;             /* the desktop's own load, too */
+            return rs;
+        }
     }
     sh_accs();                  /* before the first program: see above */
 

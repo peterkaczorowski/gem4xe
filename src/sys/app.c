@@ -256,22 +256,28 @@ void app_free(const APP *app)
  * alignment, so they make one extent, which is checked rather than
  * assumed.  CIO hands back fewer bytes than asked only at the end of the
  * file, and a status of EOF there still delivers the bytes before it
- * (src/sys/cio.h). */
-uint32_t far_read_file(const char *cioname, uint32_t *len)
+ * (src/sys/cio.h).  It says why as well as whether (src/sys/app.h): a
+ * file that opened and then failed partway used to come back as the
+ * APP_E_FILE a missing one does, and the shell tells the user a missing
+ * application "cannot be found" -- so a disk error mid-read reported a
+ * file that was plainly there as not existing, with nothing to say how
+ * far the read had got. */
+int16_t far_read_file(const char *cioname, uint32_t *addr, uint32_t *len)
 {
     uint8_t small[64], *slice = 0;
     uint16_t n = 0, got, mark;
     uint32_t start, at, total = 0;
     uint16_t st;                        /* not a byte: B8, tools/ccbug */
-    int16_t fd;
+    int16_t fd, rc = APP_OK;
 
+    *addr = 0;
     *len = 0;
     if (!farmem.banks)
-        return 0;
+        return APP_E_FAR;
     start = farmem.brk;
     fd = cio_open(cioname, CIO_A_READ, 0);
     if (fd < 0)
-        return 0;
+        return APP_E_FILE;
     mark = pool_mark();
     n = pool_room();
     n = n > 2048 ? 2048 : (uint16_t)(n & ~3);
@@ -286,7 +292,7 @@ uint32_t far_read_file(const char *cioname, uint32_t *len)
         if (got > n)
             got = n;
         if (st != CIO_OK && st != CIO_OK_EOF && st != CIO_E_EOF) {
-            total = 0;                  /* a real error: keep nothing */
+            rc = APP_E_READ;            /* a real error, partway */
             break;
         }
         if (got) {
@@ -299,7 +305,7 @@ uint32_t far_read_file(const char *cioname, uint32_t *len)
              * crossing costs it nothing. */
             at = far_alloc_span(got);
             if (at != start + total) { /* out of far memory */
-                total = 0;
+                rc = APP_E_FAR;
                 break;
             }
             /* _span: this block came from far_alloc_span and a 2 KB
@@ -314,12 +320,15 @@ uint32_t far_read_file(const char *cioname, uint32_t *len)
     cio_close(fd);
     if (slice != small)
         pool_release(mark);
-    if (!total) {
-        far_release(start);
-        return 0;
+    *len = total;                       /* how far it got, a failure included */
+    if (rc == APP_OK && !total)
+        rc = APP_E_SHORT;               /* an empty file */
+    if (rc != APP_OK) {
+        far_release(start);             /* nothing is kept */
+        return rc;
     }
-    *len = total;
-    return start;
+    *addr = start;
+    return APP_OK;
 }
 
 int16_t app_load_file(const char *gemname, APP *app)
@@ -329,10 +338,10 @@ int16_t app_load_file(const char *gemname, APP *app)
     int16_t st;
 
     dos_cioname(gemname, cio);
-    blob = far_read_file(cio, &len);
-    if (!blob) {
+    st = far_read_file(cio, &blob, &len);
+    if (st != APP_OK) {
         memset(app, 0, sizeof *app);
-        return APP_E_FILE;
+        return st;
     }
     st = app_load((const uint8_t FAR *)blob, len, app);
     if (st != APP_OK)

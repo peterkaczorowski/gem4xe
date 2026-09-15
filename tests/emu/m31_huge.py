@@ -134,7 +134,7 @@ def main(argv):
                    -2: "APP_E_SHORT", -3: "APP_E_POOL (no bank-$00 room)",
                    -4: "APP_E_FAR (no far bank)",
                    -5: "APP_E_FIXUP (an offset outside its part)",
-                   -6: "APP_E_FILE"}.get(rc, f"status {rc}")
+                   -6: "APP_E_FILE", -7: "APP_E_READ"}.get(rc, f"status {rc}")
             check(False, f"after H: M31.G4A did not run -- sh_runs "
                          f"{b.peek16(runs)}, last load {why}")
             for ln in screen(b):
