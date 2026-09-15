@@ -349,10 +349,24 @@ def rsrc_cases(r, check, b, keep):
         g, w = got[i * 24:(i + 1) * 24], raw[i * 24:i * 24 + 16] + trees[mkrsc.DIALOG][i].pack()[16:]
         check(g == w, f"rsrc_obfix object {i}: {g.hex()} != {w.hex()}")
 
-    # -- a second load is refused while one is held --------------------------------------
+    # -- a second load NESTS over the first; a third is refused ---------------------------
+    # A program may put up a dialog kept in a resource of its own without
+    # freeing the one its trees point into (src/aes/rsrc.c): the pool is a
+    # stack and the nested one comes off first.  Two is the limit.
     rec = aes(RSRC_LOAD, (), name)
-    check(rec[0] == 0 and (rec[1] & 0xFFFF) == hdr,
-          f"a second rsrc_load returned {rec[0]} with rs_hdr ${rec[1] & 0xFFFF:04X}")
+    check(rec[0] == 1, f"a nested rsrc_load returned {rec[0]}")
+    nested = rec[1] & 0xFFFF
+    check(nested != hdr,
+          f"the nested resource is at ${nested:04X}, the same as the outer")
+    rec = aes(RSRC_LOAD, (), name)
+    check(rec[0] == 0,
+          f"a third rsrc_load returned {rec[0]}: one resident and one nested is all")
+    rec = aes(RSRC_FREE)
+    check(rec[0] == 1, f"freeing the nested resource returned {rec[0]}")
+    rec = aes(RSRC_GADDR, (rsc.R_TREE, 0))
+    check((rec[1] & 0xFFFF) == hdr + R.objects[R.trees[mkrsc.DIALOG][0]].off
+          or rec[0] != 0,
+          "the outer resource did not survive the nested one being freed")
 
     # -- the loaded dialog, drawn ---------------------------------------------------
     tree_addr = hdr + R.objects[first].off
