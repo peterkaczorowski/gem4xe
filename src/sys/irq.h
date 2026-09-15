@@ -46,8 +46,10 @@
  *          into an 8-deep ring.  Anything else pending is acknowledged and
  *          ignored.  All POKEY sources are acknowledged through IRQEN with
  *          POKMSK kept consistent, as the OS does.
- *   COP    the application ABI: COP #$73 is a VDI call, COP #$C8 an AES
- *          call, the parameter block in X:C (src/sys/abi.s, src/app/gem.h).
+ *   COP    the application ABI: COP #$56 is a VDI call, #$41 an AES call,
+ *          #$44 GEMDOS, the parameter block in X:C (src/sys/abi.s,
+ *          src/app/gem.h).  Any other COP is Rapidus OS's, passed to it
+ *          when it is there, and refused when it is not.
  *   BRK, ABORT   record which, and park.  ABORT is what a Rapidus raises
  *          for a hardware-protect violation; a BRK is a bug.
  *

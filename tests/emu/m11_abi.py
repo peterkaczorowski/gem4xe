@@ -22,13 +22,25 @@ megabyte, and three counts that must agree -- what main() returned, the
 records the application wrote, the COP calls the ABI took -- with none
 refused.  And the screen, against the reference's.
 
-Phase 14 added the third entry, GEMDOS (COP #$01): after appl_exit the
+Phase 14 added the third entry, GEMDOS (COP #$44): after appl_exit the
 application asks the version, the drive, the boot disk's directory entry
 by entry, a file that is not there, and how much memory is left, into
 dosres[]; the directory count is checked against the image itself and
 the calls are added to the COP reconciliation.
+
+Last, the application makes one COP that is not gem4xe's: Rapidus OS's
+COP #$01 with a function code the OS does not have (src/m11_cop.s).  On
+the stock OS nobody else takes COPs, so gem4xe refuses it -- one call
+refused, Y back as it went in.  With --os=ROM the machine runs that ROM as
+its OS, from a private emulator profile (build/altirra-m11os) whose XL
+kernel entry points at it; under Rapidus OS gem4xe must pass the COP on,
+the OS answers -110, and nothing is refused.
+
+  python3 tests/emu/m11_abi.py [--shot] [--os=XLOS816A.ROM]
 """
 import os
+import re
+import shutil
 import struct
 import sys
 
@@ -50,6 +62,30 @@ APP_G4A = os.path.join(ROOT, "build", "m11_app.g4a")
 LOAD_RUN = 3004
 APP_OK = 0
 REC_WORDS = vdiref.RESULT_WORDS
+FOREIGN_REFUSED = 0x1234        # src/m11_cop.s: Y as it went in
+FOREIGN_OS = -110               # Rapidus OS: an unassigned kmem function
+PROFILE_OS = os.path.join(ROOT, "build", "altirra-m11os")
+
+
+def os_profile(rom):
+    """A private emulator profile whose XL kernel is `rom`: the user's own
+    settings, with the Path of the entry registered for the XL ROM the
+    launcher uses changed.  Set before the emulator starts, which is
+    when it reads XDG_CONFIG_HOME.  None if there is no such entry."""
+    from a8test.launcher import XLROM
+    shared = open(os.path.expanduser("~/.config/altirra/settings.ini")).read()
+    for m in re.finditer(r"\[User\\AltirraSDL\\Firmware\\Available\\[0-9A-F]+\]\n"
+                         r"(?:\"[^\n]*\n)*", shared, re.I):
+        sec = m.group(0)
+        if f'"Path" = "{XLROM}"' in sec:
+            shutil.rmtree(PROFILE_OS, ignore_errors=True)
+            os.makedirs(os.path.join(PROFILE_OS, "altirra"))
+            with open(os.path.join(PROFILE_OS, "altirra", "settings.ini"), "w") as f:
+                f.write(shared.replace(sec, sec.replace(f'"Path" = "{XLROM}"',
+                                                        f'"Path" = "{rom}"')))
+            os.environ["XDG_CONFIG_HOME"] = PROFILE_OS
+            return PROFILE_OS
+    return None
 
 # The application's sequence, as src/m11_app.c makes it -- one entry per
 # record it writes: (script record, int_out words the AES binding asks
@@ -142,13 +178,29 @@ def main(argv):
             fails.append(msg)
             print(f"  FAIL: {msg}")
 
-    emu = launch(tag="m11", memsize="1088K", extra_args=["--disk", DISK])
+    os_rom = next((os.path.abspath(a[5:]) for a in argv if a.startswith("--os=")), None)
+    if os_rom:
+        if not os_profile(os_rom):
+            print("gem4xe-m11: no firmware entry for the XL ROM in "
+                  "~/.config/altirra/settings.ini to point at the ROM")
+            return 2
+        print(f"the OS: {os_rom}")
+    emu = launch(tag="m11", memsize="1088K", extra_args=["--disk", DISK],
+                 require_real_rom=not os_rom)
     b = emu.bridge
     try:
-        b.frames(300)
-        b.poke(0xD1FF, 0x01)
-        b.poke(0xD191, 0x00)
-        b.frames(500)
+        if os_rom:
+            # Rapidus OS halts on the 6502 the machine powers up as, so
+            # the 65C816 is selected before it runs at all, as the
+            # Rapidus BIOS does.
+            b.poke(0xD1FF, 0x01)
+            b.poke(0xD191, 0x00)
+            b.frames(800)
+        else:
+            b.frames(300)
+            b.poke(0xD1FF, 0x01)
+            b.poke(0xD191, 0x00)
+            b.frames(500)
         for k in ("L", "M", "3", "RETURN"):
             b.key(k)
             b.frames(10)
@@ -204,7 +256,6 @@ def main(argv):
         check(far_bank > (top - 1) >> 16, f"far bank ${far_bank:02X} is not above "
               f"the image's top ${top:06X}")
         check(far_bank < 0x10, f"far bank ${far_bank:02X} is outside the first megabyte")
-        check(bad == 0, f"the ABI refused {bad} call(s)")
 
         # -- the application's own records --------------------------------------
         base = near_base - link_near
@@ -212,11 +263,27 @@ def main(argv):
         seq = app_calls(0, 0)
         check(ncalls == len(seq), f"the application wrote {ncalls} records, expected {len(seq)}")
         ndos = b.peek16(app["ndos"] + base)
-        check(main_ret == ncalls and calls == ncalls + ndos,
+
+        # -- the COP that is not gem4xe's ----------------------------------------
+        # Refused on the stock OS: counted as refused and not as a call, Y
+        # untouched.  Passed to Rapidus OS: it never reaches gem_entry, and
+        # the OS answers.  Either way the application's calls number the same.
+        foreign = struct.unpack("<h", b.memdump(app["foreign"] + base, 2))[0]
+        passed = b.peek(syms["gem_cop_pass"])
+        want_foreign, want_bad, extra = ((FOREIGN_OS, 0, 0) if os_rom
+                                         else (FOREIGN_REFUSED, 1, 0))
+        print(f"  the foreign COP #$01: Y {foreign}, gem_cop_pass {passed}, {bad} refused")
+        check(passed == (1 if os_rom else 0),
+              f"gem_cop_pass is {passed}: abi_probe_os() read the OS wrong")
+        check(foreign == want_foreign,
+              f"the foreign COP left Y {foreign}, not {want_foreign}"
+              + (": it did not reach the OS" if os_rom else ": gem4xe touched it"))
+        check(bad == want_bad, f"the ABI refused {bad} call(s), not {want_bad}")
+        check(main_ret == ncalls and calls == ncalls + ndos + extra,
               f"main() returned {main_ret}, {ncalls} records, {ndos} GEMDOS calls, "
               f"{calls} COP calls: they should reconcile")
 
-        # -- GEMDOS through COP #$01 ------------------------------------------
+        # -- GEMDOS through COP #$44 ------------------------------------------
         dosres = list(struct.unpack("<8h", b.memdump(app["dosres"] + base, 16)))
         # What Fsfirst/Fsnext should count: the entries a DOS 2 could be
         # handed (atr.Entry.nameable, the rule src/sys/dos.c lists by); the

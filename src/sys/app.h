@@ -54,6 +54,8 @@
 #define APP_E_FIXUP  -5     /* a fixup offset outside its part */
 #define APP_E_FILE   -6     /* the file would not open (app_load_file) */
 #define APP_E_READ   -7     /* it opened, then a read failed partway */
+#define APP_E_OLDSDK -8     /* a G4A of format 1 or 2, built for the old COP
+                               signatures (src/sys/abi.h): rebuild it */
 
 typedef struct {
     uint16_t near_base;     /* where the near part landed, page aligned */

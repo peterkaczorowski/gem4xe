@@ -23,7 +23,7 @@ else about the layout is assumed: the shifts, the region bases and the
 entry point are read from the ELFs.
 
     G4A file, little-endian:
-      0  'G4A' v                    magic, format version (1 or 2)
+      0  'G4A' v                    magic, format version (3 or 4)
       4  u16 near_base              where the near region was linked
       6  u16 near_size              its whole extent, a page multiple
       8  u16 far_off                the far region's offset in its bank
@@ -37,18 +37,25 @@ entry point are read from the ELFs.
      28  u32 0
      32  near bytes, far bytes, then the four fixup lists
 
-    VERSION 1 and VERSION 2 differ in one thing: how wide a FAR fixup
-    offset is.  v1 writes it as a u16, which caps the far image at 64 KB;
-    v2 writes it as three bytes and has no such cap.  The near lists are
+    VERSION 3 and VERSION 4 differ in one thing: how wide a FAR fixup
+    offset is.  v3 writes it as a u16, which caps the far image at 64 KB;
+    v4 writes it as three bytes and has no such cap.  The near lists are
     u16 in both, and stay that way -- the near region is a page-aligned
     slice of gem4xe's bank-$00 pool and cannot be bigger than the bank.
 
-    A file is written v1 whenever the far image fits in 64 KB, which is
-    every program in this tree but one, so their bytes do not change and
-    their disk images do not grow.  GACS's GEM shell is the exception and
-    the reason v2 exists: 102,862 bytes of farcode and another 11 KB of
-    constants, which is not close to a bank and cannot be made to fit one.
-    The loader reads both (src/sys/app.c).
+    A file is written v3 whenever the far image fits in 64 KB, which is
+    every program in this tree but one.  GACS's GEM shell is the exception
+    and the reason the wide format exists: 102,862 bytes of farcode and
+    another 11 KB of constants, which is not close to a bank and cannot be
+    made to fit one.  The loader reads both (src/sys/app.c).
+
+    Versions 1 and 2 were the same pair, with the same layout, for programs
+    that called gem4xe through COP #$73, #$C8 and #$01.  Those signatures
+    were given up -- $01 is Rapidus OS's own and $80-$FF are reserved by
+    WDC (src/sys/abi.h) -- and the number moved with them, so that the
+    loader refuses an old program by name (APP_E_OLDSDK) and an old loader
+    refuses a new one, instead of either starting a program whose calls
+    go nowhere.
 
     The far IMAGE may now span banks.  It used to be refused here, on the
     ground that the program counter wraps inside a bank so code may not
@@ -68,8 +75,8 @@ import sys
 
 from mkxex import read_elf
 
-MAGIC_V1 = b"G4A\x01"
-MAGIC_V2 = b"G4A\x02"
+MAGIC_V3 = b"G4A\x03"      # far fixups u16
+MAGIC_V4 = b"G4A\x04"      # far fixups three bytes
 
 
 def read_elf_all(path):
@@ -231,14 +238,14 @@ def main(argv):
     if not (fb <= entry < fe):
         raise SystemExit(f"entry ${entry:06X} is not in the far region")
 
-    # v1 unless the far image needs more room than its offsets have. Every
-    # program in this tree but GACS's shell stays v1, byte for byte.
-    v2 = far_size > 0x10000
+    # v3 unless the far image needs more room than its offsets have. Every
+    # program in this tree but GACS's shell is v3.
+    wide = far_size > 0x10000
     for name, lst in (("near", near_hi + near_bank), ("far", far_hi + far_bank)):
         if len(lst) > 0xFFFF:
             raise SystemExit(f"{len(lst)} {name} fixups: the header counts "
                              f"them in a u16")
-    hdr = (MAGIC_V2 if v2 else MAGIC_V1) + struct.pack(
+    hdr = (MAGIC_V4 if wide else MAGIC_V3) + struct.pack(
                               "<HHHIBBHBBHHHHI",
                               nb, near_size, fb & 0xFFFF, far_size, fb >> 16,
                               far_banks,
@@ -249,7 +256,7 @@ def main(argv):
     for lst in (near_hi, near_bank):
         body += b"".join(struct.pack("<H", o) for o in lst)
     for lst in (far_hi, far_bank):
-        if v2:
+        if wide:
             body += b"".join(struct.pack("<I", o)[:3] for o in lst)
         else:
             body += b"".join(struct.pack("<H", o) for o in lst)

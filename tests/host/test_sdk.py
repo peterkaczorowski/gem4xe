@@ -46,7 +46,7 @@ def g4a_header(path):
     """The .g4a header the loader reads (src/sys/app.c, tools/mkg4a.py)."""
     with open(path, "rb") as f:
         d = f.read(20)
-    assert d[:4] == b"G4A\x01", d[:4]
+    assert d[:4] == b"G4A\x03", d[:4]
     near_base, near_size, far_off = struct.unpack("<HHH", d[4:10])
     far_size, = struct.unpack("<I", d[10:14])
     return dict(near_base=near_base, near_size=near_size, far_off=far_off,
@@ -97,6 +97,9 @@ class TestBuildsFromACopy(unittest.TestCase):
         mksdk.build(cls.kit)
         # the gate application's source travels in as an author's would
         shutil.copyfile(M11_APP, os.path.join(cls.kit, "m11_app.c"))
+        # ...with its one COP that is not gem4xe's, in assembly (src/m11_cop.s)
+        shutil.copyfile(os.path.join(os.path.dirname(M11_APP), "m11_cop.s"),
+                        os.path.join(cls.kit, "m11_cop.s"))
 
     @classmethod
     def tearDownClass(cls):
@@ -125,7 +128,7 @@ class TestBuildsFromACopy(unittest.TestCase):
         if not os.path.isfile(M11_G4A):
             self.skipTest("build/m11_app.g4a is not built "
                           "(make build/m11_app.g4a)")
-        self.make("APP=m11_app.c", "BSS=2048", "BITS=256", "STACK=256")
+        self.make("APP=m11_app.c", "ASM=m11_cop.s", "BSS=2048", "BITS=256", "STACK=256")
         with open(os.path.join(self.kit, "m11_app.g4a"), "rb") as f:
             kit = f.read()
         with open(M11_G4A, "rb") as f:

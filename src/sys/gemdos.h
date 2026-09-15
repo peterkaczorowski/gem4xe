@@ -5,8 +5,8 @@
  * Fsnext to list a directory, Fopen/Fread/Fwrite/Fclose, Dsetpath,
  * Dcreate, Frename, Malloc.  gem4xe has CIO behind it (src/sys/cio.h)
  * and one of three DOSes behind that (src/sys/dos.h), so this is the
- * third face of the ABI (src/sys/abi.h): COP #$01 -- the ST's trap
- * number -- with X:C at a block laid out as the ST's stack frame is:
+ * third face of the ABI (src/sys/abi.h): COP #$44 -- 'D', where the ST
+ * has trap #1 -- with X:C at a block laid out as the ST's stack frame is:
  *
  *     +0  LONG  the result, written back
  *     +4  WORD  the function number

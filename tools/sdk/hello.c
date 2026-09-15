@@ -7,7 +7,7 @@
  *
  * A gem4xe application links against nothing of the system's.  It
  * reaches the VDI, the AES and GEMDOS through three call gates
- * (COP #$73, COP #$C8, COP #$01), and gem.h declares every call each of
+ * (COP #$56, COP #$41, COP #$44), and gem.h declares every call each of
  * them serves.  The loader puts this program's near region -- direct
  * page, stack, data -- in gem4xe's bank-$00 pool and its code in a bank
  * of far memory, and calls main(); main's return value is the

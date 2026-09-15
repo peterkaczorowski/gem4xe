@@ -921,8 +921,12 @@ TASK void main(void)
 
     /* Then the interrupt regime: the OS ROM shadowed, the native vectors
      * filled, the VBI and POKEY on.  Reported so the harness can tell a
-     * machine that fell back to polling from one that did not. */
+     * machine that fell back to polling from one that did not.  Then,
+     * as src/gem.c asks it, whether the OS takes COPs of its own: an
+     * application's foreign COP goes to it (src/sys/abi.s).  That is a
+     * CIO call, and a CIO call wants the vectors in first. */
     irq_install();
+    abi_probe_os();
     STATUS[30] = irq.how;
     STATUS[31] = irq.fail;
     STATUS[32] = irq.fast;

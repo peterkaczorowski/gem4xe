@@ -412,9 +412,9 @@ WORD sh_main(void)
         gsx_sclip(&gl_rscreen);
         ob_draw(gl_wtree, ROOT, 0);         /* the desk, edge to edge */
         if (rc)
-            fm_alert(1, rc == APP_E_FILE
-                        ? lang_str(LS_APPNOTFOUND)
-                        : lang_str(LS_APPNOTLOAD));
+            fm_alert(1, rc == APP_E_FILE   ? lang_str(LS_APPNOTFOUND)
+                      : rc == APP_E_OLDSDK ? lang_str(LS_APPOLDSDK)
+                      :                      lang_str(LS_APPNOTLOAD));
         rc = sh_ldapp();
     } while (sh_doexec != 4);
     return rc ? rc : sh_runs;

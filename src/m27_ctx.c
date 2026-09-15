@@ -45,6 +45,7 @@ uint16_t gem_api_sp;
 uint8_t  gem_depth;
 uint16_t gem_calls;
 uint16_t gem_bad;
+uint8_t  gem_cop_pass;      /* abi.s reads it for a COP that is not gem4xe's */
 uint16_t gem_reached;
 
 void gem_entry(void)

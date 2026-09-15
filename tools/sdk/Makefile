@@ -3,6 +3,7 @@
 #     make                          hello.g4a, from example/hello.c
 #     make APP=mine.c               mine.g4a
 #     make APP=mine.c NAME=prog     prog.g4a
+#     make APP=mine.c ASM="a.s b.s" mine.g4a, with your assembly linked in
 #     make clean
 #
 # A program is linked THREE times -- once at the placeholder addresses
@@ -29,6 +30,7 @@
 
 CALYPSI ?= $(HOME)/dev/toolchains/calypsi-65816
 APP     ?= example/hello.c
+ASM     ?=
 NAME    ?= $(basename $(notdir $(APP)))
 BSS     ?= 2048
 BITS    ?= 256
@@ -48,8 +50,13 @@ LDLIB  = clib-lc-sd.a
 # Apache NuttX and Apache 2.0 cannot be linked into a GPLv2 binary -- and
 # gem4xe is GPLv2.  If your program is under something else you may use
 # the library's instead; if it is GPL, use these.
+#
+# ASM names assembly sources of your own, linked after the program in the
+# order given.  Code goes in `farcode`, and a function returns with rtl:
+# every call into it is a jsl.
+ASM_OBJS = $(patsubst %.s,build/%.o,$(notdir $(ASM)))
 OBJS = build/crt_gemapp.o build/gemabi.o build/gemlib.o build/clib.o \
-       build/$(NAME).o
+       build/$(NAME).o $(ASM_OBJS)
 LDOPT = lib/gemapp.scm $(OBJS) $(LDLIB) --rtattr exit=simplified \
         --cstartup gemapp --stack-size $(STACK)
 
@@ -66,6 +73,8 @@ build/%.o: lib/%.c include/gem.h | build
 
 build/$(NAME).o: $(APP) include/gem.h | build
 	$(CC) $(CFLAGS) -o $@ $<
+
+$(foreach s,$(ASM),$(eval build/$(basename $(notdir $(s))).o: $(s) | build ; $$(AS) -o $$@ $$<))
 
 # At the placeholders, then a page up, then a bank up.
 build/$(NAME).elf: $(OBJS) lib/gemapp.scm

@@ -18,7 +18,7 @@
  * record here is a record of what came back THROUGH the ABI's copy-out,
  * not of gem4xe's internal state.
  *
- * After the AES is done it asks GEMDOS -- the third entry, COP #$01 --
+ * After the AES is done it asks GEMDOS -- the third entry, COP #$44 --
  * the questions a desktop asks first: the version, the drive, how many
  * entries the boot disk's directory has, what a missing file answers,
  * how much memory there is.  Those go into dosres[], and ndos counts the
@@ -36,7 +36,10 @@ WORD results[NREC][REC_WORDS];
 WORD ncalls;
 WORD dosres[8];
 WORD ndos;
+WORD foreign;               /* Y after a COP that is not gem4xe's: m11_cop.s */
 static DTA dta;
+
+extern WORD m11_cop01(void);
 
 /* The object tree: a box with a string and a button in it.  The strings
  * are addressed at run time, as rsrc_obfix would address a resource's,
@@ -145,5 +148,10 @@ int main(void)
         dosres[6] = (WORD)(Fgetdta() == &dta);
         ndos = (WORD)(7 + n);
     }
+
+    /* And one COP that is not gem4xe's at all: Rapidus OS's COP #$01,
+     * which gem4xe must pass to the OS when it is running and refuse when
+     * it is not (src/sys/abi.s). */
+    foreign = m11_cop01();
     return ncalls;
 }

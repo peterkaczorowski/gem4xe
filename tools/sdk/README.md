@@ -8,6 +8,7 @@ gates and is loaded, relocated and called at run time.
     make                        example/hello.c  ->  hello.g4a
     make APP=mine.c             mine.c           ->  mine.g4a
     make APP=src/mine.c NAME=ed                  ->  ed.g4a
+    make APP=mine.c ASM="fast.s io.s"            ->  mine.g4a, your assembly linked in
 
 You need **Calypsi for the 65816** (`cc65816`, `as65816`, `ln65816`),
 free for hobby use from <https://www.calypsi.cc/>.  Point `CALYPSI` at
@@ -21,8 +22,10 @@ the packer.
                         the rest -- in one place, for a second compiler
     lib/gemlib.c        the bindings: they fill a parameter block and
                         make the call
-    lib/gemabi.s        the three call gates -- COP #$73 (VDI),
-                        COP #$C8 (AES), COP #$01 (GEMDOS)
+    lib/gemabi.s        the three call gates -- COP #$56 (VDI),
+                        COP #$41 (AES), COP #$44 (GEMDOS); a program
+                        built with an older kit's ($73, $C8, $01) is
+                        refused by the loader and must be rebuilt
     lib/crt_gemapp.s    the start-up: a stack, a direct page, the data
                         sections, main
     lib/gemapp.scm      the linker's rules and your memory budget

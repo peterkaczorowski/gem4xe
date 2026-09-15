@@ -1,7 +1,7 @@
 /* abi.h -- the application binary interface.
  *
- * An application reaches gem4xe with a COP instruction: COP #$73 for the
- * VDI, COP #$C8 for the AES, COP #$01 for GEMDOS (the ST's trap numbers),
+ * An application reaches gem4xe with a COP instruction: COP #$56 'V' for
+ * the VDI, COP #$41 'A' for the AES, COP #$44 'D' for GEMDOS,
  * X:C holding the address of its parameter block (src/app/gem.h documents
  * the application's side).  The handler in abi.s
  * catches the trap, records where the block is and which signature was used,
@@ -22,9 +22,17 @@
 #include "portab.h"
 #include <stdint.h>
 
-#define ABI_GEMDOS 0x01     /* COP signature bytes; the app's gemabi.s */
-#define ABI_VDI    0x73
-#define ABI_AES    0xC8
+/* The COP signature bytes, which the application's gemabi.s makes and
+ * abi.s checks (tests/host/test_bind.py keeps the three in step).  They
+ * are in $02-$7F because the rest is taken: $00 and $01 are Rapidus OS's
+ * -- its system emulation call and kmem, which its SpartaDOS X modules
+ * make as well -- and $80-$FF are reserved by WDC for new instructions.
+ * They were the ST's trap numbers, $73, $C8 and $01, until that was
+ * pointed out; a .g4a built with those is format 1 or 2, and the loader
+ * refuses it by name (APP_E_OLDSDK, src/sys/app.h). */
+#define ABI_VDI    0x56     /* 'V' */
+#define ABI_AES    0x41     /* 'A' */
+#define ABI_GEMDOS 0x44     /* 'D' */
 
 /* Written by the handler in abi.s before gem_entry() runs. */
 extern uint32_t gem_pb;        /* the parameter block: X:C at the COP */
@@ -43,6 +51,13 @@ extern uint16_t gem_calls;     /* COPs served, every process's */
  * resident beside it (src/aes/proc.h). */
 extern uint16_t app_calls;
 extern uint16_t gem_bad;       /* COPs refused: signature, opcode, bank */
+
+/* Nonzero when the OS takes COPs of its own -- Rapidus OS, whose @:SYSDEF
+ * says its native interrupt services are there -- so that a COP which is
+ * not one of gem4xe's three is passed to it by abi.s.  Zero: it is
+ * refused and counted in gem_bad.  abi_probe_os() sets it, once, at start. */
+extern uint8_t gem_cop_pass;
+void abi_probe_os(void);
 
 void gem_entry(void);          /* the C side of the handler */
 

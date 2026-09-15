@@ -6,13 +6,17 @@
  * interrupt, here the 65816's COP, with a parameter block whose five (VDI)
  * or six (AES) fields point at the caller's own arrays:
  *
- *     COP #$73   VDI     X:C = address of a VDIPB     (vdi_call)
- *     COP #$C8   AES     X:C = address of an AESPB    (aes_call)
- *     COP #$01   GEMDOS  X:C = address of a GDPB      (dos_call)
+ *     COP #$56   VDI     X:C = address of a VDIPB     (vdi_call)
+ *     COP #$41   AES     X:C = address of an AESPB    (aes_call)
+ *     COP #$44   GEMDOS  X:C = address of a GDPB      (dos_call)
  *
- * The signature bytes and the block layouts are the ST's (the AES's and
- * GEMDOS's function numbers too), so a GEM binding written for the ST
- * needs only its trap replaced.  gem4xe copies the caller's arrays in before the call
+ * The block layouts are the ST's (the AES's and GEMDOS's function numbers
+ * too), so a GEM binding written for the ST needs only its trap replaced.
+ * The signature bytes are letters, 'V', 'A' and 'D', because the ST's trap
+ * numbers do not fit this machine: $00 and $01 are Rapidus OS's own COPs
+ * and $80-$FF are reserved by WDC (src/sys/abi.h).  A program built with
+ * the old ones ($73, $C8, $01) is refused by the loader: rebuild it.
+ * gem4xe copies the caller's arrays in before the call
  * and out after it -- the DRI entry discipline -- so an application's
  * arrays may be exactly as large as its own calls need, and nothing of the
  * application's is ever read while the call is not in progress.

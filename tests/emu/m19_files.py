@@ -572,7 +572,7 @@ def main(argv):
             # gem_which; a .g4a's block is in bank $00 with its data)
             which = b.peek(syms["gem_which"])
             pb = b.peek16(syms["gem_pb"]) | (b.peek16(syms["gem_pb"] + 2) << 16)
-            kind = {0x01: "GEMDOS", 0x73: "VDI", 0xC8: "AES"}.get(which, hex(which))
+            kind = {0x44: "GEMDOS", 0x56: "VDI", 0x41: "AES"}.get(which, hex(which))
             if pb < 0x10000:
                 ctl = b.peek16(pb) | (b.peek16(pb + 2) << 16)
                 op = b.peek16(ctl & 0xFFFF) if ctl < 0x10000 else -1

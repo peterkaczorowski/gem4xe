@@ -8,13 +8,13 @@
  * invented: the caller's arrays can then be anywhere -- here, anywhere in
  * the 16 MB -- and the handlers never learn.
  *
- * VDI (COP #$73): contrl[0..11], intin[0..contrl[3]-1] and
+ * VDI (COP #$56): contrl[0..11], intin[0..contrl[3]-1] and
  * ptsin[0..2*contrl[1]-1] come in; contrl, intout[0..contrl[4]-1] and
  * ptsout[0..2*contrl[2]-1] go back.  The counts are capped at gem4xe's
  * array sizes, never at the caller's: a caller declares the sizes it
  * built, as on the ST.
  *
- * AES (COP #$C8): control[0..4], int_in[0..control[1]-1] and
+ * AES (COP #$41): control[0..4], int_in[0..control[1]-1] and
  * addr_in[0..control[3]-1] come in, int_out[0..control[2]-1] goes back, and
  * global is written on appl_init.  The dispatch is EmuTOS's crysbind()
  * shape with the same int_in/addr_in packing (include/aesdefs.h there):
@@ -37,7 +37,7 @@
  * near buffer, until a bigger scratch can be afforded.  Message buffers and the parameter block's own arrays are
  * written through far pointers and can be anywhere.
  *
- * GEMDOS (COP #$01): the block is the ST's trap #1 frame with the result
+ * GEMDOS (COP #$44): the block is the ST's trap #1 frame with the result
  * in front of it (src/sys/gemdos.h); gemdos_call() reads its arguments
  * through far pointers and writes the result back, so nothing is copied
  * here.
@@ -47,6 +47,7 @@
 #include "aes/aes.h"
 #include "aes/proc.h"
 #include "sys/abi.h"
+#include "sys/cio.h"
 #include "sys/gemdos.h"
 #include "sys/farmem.h"
 
@@ -57,6 +58,36 @@ uint8_t  gem_depth;
 uint16_t gem_calls;
 uint16_t app_calls;             /* of those, the application's: see abi.h */
 uint16_t gem_bad;
+uint8_t  gem_cop_pass;
+
+/* Whether the OS takes COPs of its own.  Rapidus OS -- drac030's 65C816 XL
+ * OS -- has an "@:" device whose one file, SYSDEF, describes the system
+ * (its specification, "The @: device"): byte 10 is the CPU, 2 for a
+ * 65C816, and bit 0 of byte 13 says the native interrupt services are
+ * there, which is its COP handler and the RAM vectors behind it.  Any
+ * other OS has no @: device, the open fails, and a COP that is not
+ * gem4xe's has nobody to go to. */
+#define SYSDEF_CPU     10
+#define SYSDEF_NATIVE  13
+#define CPU_65C816     2
+
+void abi_probe_os(void)
+{
+    uint8_t def[SYSDEF_NATIVE + 1];
+    uint16_t got = 0;
+    uint8_t st;
+    int16_t n;
+
+    gem_cop_pass = 0;
+    n = cio_open("@:SYSDEF", 4, 0);     /* 4: read */
+    if (n < 0)
+        return;
+    st = cio_read(n, def, sizeof def, &got);
+    cio_close(n);
+    if ((st == CIO_OK || st == CIO_OK_EOF) && got == sizeof def &&
+        def[SYSDEF_CPU] == CPU_65C816 && (def[SYSDEF_NATIVE] & 1))
+        gem_cop_pass = 1;
+}
 
 /* The parameter blocks as they lie in the caller's memory: 32-bit
  * addresses, the ST's layout (src/app/gem.h). */
@@ -622,6 +653,14 @@ static void aes_entry(const AESPB_IMG FAR *pb)
 
 void gem_entry(void)
 {
+    /* A COP that is nobody's here -- not one of the three, and no OS to
+     * pass it to (abi.s) -- is refused and is not a call: counting it
+     * would number an application's calls differently on a machine whose
+     * OS takes that COP, where it never arrives here at all. */
+    if (gem_which != ABI_VDI && gem_which != ABI_AES && gem_which != ABI_GEMDOS) {
+        gem_bad++;
+        return;
+    }
     gem_calls++;
     /* ...and the application's own count, which is what a gate means when
      * it asks "which call is the desktop inside".  gem_calls counts every

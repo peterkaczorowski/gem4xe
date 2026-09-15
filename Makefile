@@ -109,7 +109,8 @@ GEM_OBJS   = $(filter-out build/m3_vdi.o build/app_blob.o,$(M3_OBJS)) \
 
 # A gem4xe application: its own C startup and bindings (src/app), linked
 # against nothing of gem4xe's, on the application's own linker rules.
-APP_OBJS   = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o build/app/m11_app.o
+APP_OBJS   = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o build/app/m11_app.o \
+             build/app/m11_cop.o
 # Its near budget (src/app/gemapp.scm): the stack and data, then the
 # constants; and the stack's share of the first.  Decimal, because a `#`
 # in a make variable starts a comment.
@@ -491,6 +492,11 @@ build/app/%.o: src/app/%.c src/app/gem.h
 build/app/%.o: src/%.c src/app/gem.h
 	@mkdir -p build/app
 	$(CC) $(CFLAGS) -I src/app -o $@ $<
+
+# The gate application's one COP that is not gem4xe's (tests/emu/m11_abi.py).
+build/app/m11_cop.o: src/m11_cop.s
+	@mkdir -p build/app
+	$(AS) -o $@ $<
 
 # The gate application (src/m11_app.c).  The .g4a is what a loader reads
 # from disk; the C array is the same bytes for the runner to load from
@@ -1257,6 +1263,14 @@ test-m10: build/m3-boot.atr
 test-m11: build/m3-boot.atr build/m11_app.sym
 	python3 tests/emu/m11_abi.py
 
+# The same gate with Rapidus OS as the machine's OS ([rapidus].os in
+# fixtures.toml): the application's COP that is not gem4xe's must reach the
+# OS and be answered, where test-m11 requires it refused.
+SRC_RAPIDUS_OS ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['rapidus']['os'])" 2>/dev/null)
+test-m11-os: build/m3-boot.atr build/m11_app.sym
+	@test -n "$(SRC_RAPIDUS_OS)" || { echo "no Rapidus OS fixture: set [rapidus].os in fixtures.toml"; exit 1; }
+	python3 tests/emu/m11_abi.py --os="$(SRC_RAPIDUS_OS)"
+
 # The file layer: CIO called through the OS from native mode, rsrc_load
 # and rsrc_obfix against tools/rsc.py, the shell library's buffers, and
 # the file selector driven over two disks -- its listings predicted from
@@ -1489,4 +1503,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-boot test-cf test-sd test-cf-dosclock test-cf-firmware sd demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-boot test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os sd demo movie bench emu-stop clean

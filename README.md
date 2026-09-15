@@ -183,9 +183,12 @@ held PORTA's left line low through AltirraSDL's input maps. The rig now
 keeps SDL's joystick subsystem off every host input device it can find in
 sysfs.
 
-**Applications call in through `COP`** (`docs/phase10.md`). `COP #$73` is
-a VDI call and `COP #$C8` an AES call, the parameter block's address in
-X:C — the ST's `trap #2` on a 65C816. The handler is the `saveds` entry
+**Applications call in through `COP`** (`docs/phase10.md`). `COP #$56` is
+a VDI call, `COP #$41` an AES call and `COP #$44` a GEMDOS call, the
+parameter block's address in X:C — the ST's `trap #2` and `trap #1` on a
+65C816, with letters for signatures because Rapidus OS owns `$00` and `$01`
+and WDC reserves `$80`-`$FF`; any other COP is passed to Rapidus OS when it
+is running. The handler is the `saveds` entry
 point of the plan: it takes gem4xe's direct page, data bank and stack for
 the duration and gives the caller's back, and the shim behind it keeps
 DRI's copy-in/copy-out discipline, so an application's arrays can be

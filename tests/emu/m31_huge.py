@@ -11,7 +11,9 @@ sitting undisturbed behind that, and NEITHER WOULD HAVE ANNOUNCED ITSELF:
   multi-bank image up front, which hid it -- and that refusal was itself
   wrong, guarding an invariant the packer does not own: no single FUNCTION
   crosses a bank because each is its own linker fragment placed inside one
-  memory, which src/app/gemapp.scm arranges.  Format 2 writes three bytes.
+  memory, which src/app/gemapp.scm arranges.  Format 2 wrote three bytes;
+  it is format 4 now, the same layout renumbered with the COP signatures
+  (docs/phase41.md).
 
   AND app_load COPIED THE IMAGE WITH memcpy_far, WHOSE size_t IS SIXTEEN
   BITS -- gem4xe is built --data-model=small.  A 115 KB image would have
@@ -86,8 +88,8 @@ def main(argv):
         hdr = f.read(32)
     ver = hdr[3]
     far_size = int.from_bytes(hdr[10:14], "little")
-    check(ver == 2, f"M31.G4A is format {ver}, expected 2 -- an image over "
-                    f"a bank cannot be written in format 1")
+    check(ver == 4, f"M31.G4A is format {ver}, expected 4 -- an image over "
+                    f"a bank cannot be written in format 3")
     check(far_size > 0x10000,
           f"M31.G4A's far image is {far_size} bytes, which is not over a "
           f"bank: this gate would not be testing what it exists to test")

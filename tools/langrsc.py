@@ -60,6 +60,8 @@ STRINGS = [
     # the shell, when it cannot run what it was asked for (src/aes/shel.c)
     ("APPNOTFOUND", "[1][This application|cannot be found.][ OK ]"),
     ("APPNOTLOAD", "[1][This application|cannot be loaded.][ OK ]"),
+    ("APPOLDSDK", "[1][This application was built|for an older gem4xe.|"
+                  "Rebuild it with the|current SDK.][ OK ]"),
     # the boot screen (src/sys/bootinfo.c): the labels down its left
     # column, and the few values that are words rather than the machine's
     # own names and numbers.  A label is cut at BOOT_LABEL columns there,

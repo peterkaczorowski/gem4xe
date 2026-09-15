@@ -240,7 +240,11 @@ def main(argv):
         check(nruns == 4, f"sh_runs {nruns}, not 4")
         check(lret == 0, f"the desktop's main() returned {lret}, not 0")
         check(lrc == 0, f"the last load's status {lrc}, not 0")
-        check(calls > 0 and bad == 0, f"{calls} ABI calls, {bad} refused")
+        # One refusal, and only one: M11.G4A makes a COP that is not
+        # gem4xe's (src/m11_cop.s), and on this OS nobody else takes COPs
+        # (src/sys/abi.s).  It is counted as refused, never as a call.
+        check(calls > 0 and bad == 1, f"{calls} ABI calls, {bad} refused, "
+                                      f"not M11.G4A's one foreign COP")
 
         rec = r.run([(ALLOC, (), ())])[0][2:]
         mark2, room2 = rec[6] & 0xFFFF, rec[7]

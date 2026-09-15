@@ -136,16 +136,24 @@ int16_t app_load(const uint8_t FAR *blob, uint32_t len, APP *app)
     b = (uint32_t)blob;              /* an address: see rd8 above */
     if (len < HDR_SIZE)
         return APP_E_SHORT;
-    if (rd8(b) != 'G' || rd8(b + 1) != '4' || rd8(b + 2) != 'A' ||
-        (rd8(b + 3) != 1 && rd8(b + 3) != 2))
+    if (rd8(b) != 'G' || rd8(b + 1) != '4' || rd8(b + 2) != 'A')
         return APP_E_MAGIC;
-    /* The ONE difference between the two formats: how wide a far fixup
-     * offset is.  v1's u16 caps the far image at a bank, which every
-     * program in this tree but GACS's shell fits inside; v2 writes three
-     * bytes and does not.  The near lists are u16 in both, because the
-     * near region is a page-aligned slice of a bank-$00 pool and cannot
-     * be bigger than the bank. */
-    fw = (uint8_t)(rd8(b + 3) == 2 ? 3 : 2);
+    /* Formats 1 and 2 are programs built for the first COP signatures --
+     * $73, $C8 and $01 -- which gem4xe no longer answers ($01 is Rapidus
+     * OS's own, src/sys/abi.h).  They are refused by name, so the shell
+     * can say to rebuild rather than start a program whose first call
+     * goes nowhere. */
+    if (rd8(b + 3) == 1 || rd8(b + 3) == 2)
+        return APP_E_OLDSDK;
+    if (rd8(b + 3) != 3 && rd8(b + 3) != 4)
+        return APP_E_MAGIC;
+    /* The ONE difference between 3 and 4, as between 1 and 2 before them:
+     * how wide a far fixup offset is.  3's u16 caps the far image at a
+     * bank, which every program in this tree but GACS's shell fits inside;
+     * 4 writes three bytes and does not.  The near lists are u16 in both,
+     * because the near region is a page-aligned slice of a bank-$00 pool
+     * and cannot be bigger than the bank. */
+    fw = (uint8_t)(rd8(b + 3) == 4 ? 3 : 2);
     app->link_near = rd16(b + 4);
     near_size      = rd16(b + 6);
     far_off        = rd16(b + 8);

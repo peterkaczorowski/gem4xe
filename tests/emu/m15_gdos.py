@@ -3,7 +3,7 @@
 
 The ST's trap #1, as src/sys/gemdos.h lays it out in a call block, made
 through the runner's sys op 3012 on a block the host stages in bank $00
--- the same block an application will hand the ABI through COP #$01 --
+-- the same block an application will hand the ABI through COP #$44 --
 and every answer compared with what the disk image says (tools/atr.py
 reads both DOS 2 and SDFS): Fsfirst/Fsnext over the root and, where the
 DOS has directories, down the tree, name by name with attribute, size

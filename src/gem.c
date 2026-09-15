@@ -49,6 +49,7 @@
 #include "aes/proc.h"
 #include "sys/farmem.h"
 #include "sys/rapidus.h"
+#include "sys/abi.h"
 #include "sys/irq.h"
 #include "sys/app.h"
 #include "sys/cio.h"
@@ -119,6 +120,9 @@ TASK void main(void)
     MARK(1);  UNLESS(DIAG_SKIP_SPEEDUP) rapidus_speedup();
     DIAG(diag_rapidus());       /* the signature and the windows, as found */
     MARK(2);  UNLESS(DIAG_SKIP_IRQ) irq_install();
+              abi_probe_os();   /* whose COP a foreign one is (src/sys/abi.s);
+                                   a CIO call, so after the vectors, as
+                                   config_read is */
     MARK(3);  config_read();    /* before the screen: it says which one */
     MARK(4);  farmem_probe();   /* LANG.RSC goes in far memory ... */
     MARK(5);  lang_init();      /* ... and the boot screen is in its words */

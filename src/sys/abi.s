@@ -1,10 +1,22 @@
 ;;; ---------------------------------------------------------------------------
 ;;; abi.s -- the COP handler and app_run (65C816 native)
 ;;;
-;;; An application calls gem4xe with COP #$73 (VDI) or COP #$C8 (AES), the
-;;; parameter block's address in X:C (src/app/gem.h).  The CPU pushes PB,
-;;; PC and P, sets I, clears the decimal flag, and arrives here through the
-;;; bank-$00 stub in src/sys/irq.s with M and X as the caller had them.
+;;; An application calls gem4xe with COP #$56 (VDI), COP #$41 (AES) or
+;;; COP #$44 (GEMDOS), the parameter block's address in X:C
+;;; (src/app/gem.h).  The CPU pushes PB, PC and P, sets I, clears the
+;;; decimal flag, and arrives here through the bank-$00 stub in
+;;; src/sys/irq.s with M and X as the caller had them.
+;;;
+;;; A COP that is not one of those three is somebody else's.  Under Rapidus
+;;; OS it is the OS's -- COP #$00 is its system emulation call and #$01 its
+;;; kmem, which its SpartaDOS X modules make as well -- and the OS's
+;;; specification says a program that takes the COP vector ends with a jump
+;;; to the old one.  So when abi_probe_os() found the OS's native services
+;;; (gem_cop_pass), a foreign COP leaves through the OS's own RAM vector,
+;;; VCOPN, with every register and both widths as the caller had them: the
+;;; frame is still the CPU's, and the OS handler restores it and RTIs.  With
+;;; no such OS there is nobody to give it to, and it is refused and counted
+;;; (gem_entry, gem_bad), as before.
 ;;;
 ;;; What this does: save the caller's registers, D and DB; switch to
 ;;; gem4xe's direct page and data bank; note where the parameter block is
@@ -35,7 +47,13 @@
 
               .extern _DirectPageStart, _Dp
               .extern gem_entry, gem_pb, gem_which, gem_api_sp, gem_depth
+              .extern gem_cop_pass
               .public gem_cop, app_run
+
+ABI_VDI:      .equ    0x56            ; src/sys/abi.h, src/app/gemabi.s
+ABI_AES:      .equ    0x41
+ABI_GEMDOS:   .equ    0x44
+VCOPN:        .equ    0x0256          ; Rapidus OS's native COP vector, LONG
 
               .section zdata, bss
 app_entry:    .space  4               ; the application's entry, for JML [abs]
@@ -71,7 +89,15 @@ gem_cop:      rep     #0x30
               sta     dp:.tiny(_Dp+2)
               lda     [.tiny _Dp]
               sta     abs:gem_which
-              lda     10,s            ; the caller's I, read before the
+              cmp     #ABI_VDI
+              beq     gem_cop_ours
+              cmp     #ABI_AES
+              beq     gem_cop_ours
+              cmp     #ABI_GEMDOS
+              beq     gem_cop_ours
+              lda     abs:gem_cop_pass
+              bne     gem_cop_foreign ; the OS's: see the file head
+gem_cop_ours: lda     10,s            ; the caller's I, read before the
               and     #0x04           ; frame goes out of reach
               sta     dp:.tiny(_Dp+4)
               stz     dp:.tiny(_Dp+5)
@@ -108,6 +134,53 @@ gem_cop_go:   jsl     gem_entry
               plx
               pla
               rti
+
+;;; A COP for the OS.  A is 8 bits, DB is $00, and nothing but the five
+;;; saves is on the stack above the CPU's frame.  The caller's M and X are
+;;; read from its P while the frame is in reach, and pick one of four ways
+;;; out: each takes the saves off in 16 bits, gives back the widths the
+;;; caller had, and makes the jump the OS's own $FFE4 stub makes.  (No
+;;; flag can carry the choice past the pulls -- they set N and Z -- and
+;;; there is no long BIT to read it back after DB has gone.)
+gem_cop_foreign:
+              lda     10,s            ; the caller's P
+              and     #0x30           ; M and X
+              beq     gem_cop_f00
+              cmp     #0x10
+              beq     gem_cop_f10
+              cmp     #0x20
+              beq     gem_cop_f20
+              rep     #0x30           ; M 8, X 8
+              plb
+              pld
+              ply
+              plx
+              pla
+              sep     #0x30
+              jmp     [VCOPN]         ; JML through the OS's native COP vector
+gem_cop_f20:  rep     #0x30           ; M 8, X 16
+              plb
+              pld
+              ply
+              plx
+              pla
+              sep     #0x20
+              jmp     [VCOPN]
+gem_cop_f10:  rep     #0x30           ; M 16, X 8
+              plb
+              pld
+              ply
+              plx
+              pla
+              sep     #0x10
+              jmp     [VCOPN]
+gem_cop_f00:  rep     #0x30           ; M 16, X 16
+              plb
+              pld
+              ply
+              plx
+              pla
+              jmp     [VCOPN]
 
 ;;; ---------------------------------------------------------------------------
 ;;; int16_t app_run(uint32_t entry) -- __simple_call, entry in X:C.

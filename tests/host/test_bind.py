@@ -36,6 +36,9 @@ GEMLIB_C = os.path.join(ROOT, "src", "app", "gemlib.c")
 GEM_H = os.path.join(ROOT, "src", "app", "gem.h")
 BIND_SIM_C = os.path.join(ROOT, "tests", "host", "bind_sim.c")
 ABI_C = os.path.join(ROOT, "src", "sys", "abi.c")
+ABI_H = os.path.join(ROOT, "src", "sys", "abi.h")
+ABI_S = os.path.join(ROOT, "src", "sys", "abi.s")
+GEMABI_S = os.path.join(ROOT, "src", "app", "gemabi.s")
 VDI_C = os.path.join(ROOT, "src", "vdi", "vdi.c")
 
 VDI, AES, DOS = 0, 1, 2
@@ -342,6 +345,31 @@ class TestBindingsAreComplete(unittest.TestCase):
         self.assertEqual(sorted(served - bound - AES_NO_BINDING), [],
                          "the shim serves these and the library cannot "
                          "reach them")
+
+
+class TestSignatures(unittest.TestCase):
+    """The three COP signature bytes, on both sides of the call gate."""
+
+    def test_the_gates_and_the_handler_agree_and_are_legal(self):
+        def nums(pattern, path, names=None):
+            found = re.findall(pattern, read(path), re.M)
+            return {(names or {}).get(k, k): int(v, 16) for k, v in found}
+
+        want = nums(r'^#define ABI_(VDI|AES|GEMDOS)\s+0x([0-9A-Fa-f]+)', ABI_H)
+        self.assertEqual(set(want), {"VDI", "AES", "GEMDOS"})
+        self.assertEqual(
+            nums(r'^ABI_(VDI|AES|GEMDOS):\s+\.equ\s+0x([0-9A-Fa-f]+)', ABI_S),
+            want, "the handler (abi.s) checks other bytes than abi.h names")
+        self.assertEqual(
+            nums(r'^(vdi|aes|dos)_call:\s+cop\s+#0x([0-9A-Fa-f]+)', GEMABI_S,
+                 {"vdi": "VDI", "aes": "AES", "dos": "GEMDOS"}),
+            want, "the application's gates (gemabi.s) make other bytes than "
+                  "abi.h names")
+        self.assertEqual(len(set(want.values())), 3)
+        for k, v in want.items():
+            # $00 and $01 are Rapidus OS's; $80-$FF are reserved by WDC
+            self.assertTrue(0x02 <= v <= 0x7F,
+                            f"ABI_{k} ${v:02X} is outside $02-$7F")
 
 
 class TestBlocks(unittest.TestCase):

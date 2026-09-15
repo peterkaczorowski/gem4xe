@@ -486,7 +486,10 @@ def main(argv):
         check(ncalls == total,
               f"the three programs made {ncalls} ABI calls; the model counts {total} "
               f"= {len(d1.script)} + {m11} + {len(d2.script)}")
-        check(bad == 0, f"{bad} ABI calls refused")
+        # M11.G4A's one COP that is not gem4xe's (src/m11_cop.s), refused on
+        # this OS and counted as refused only -- which is why ncalls above
+        # does not include it.
+        check(bad == 1, f"{bad} ABI calls refused, not M11.G4A's one foreign COP")
 
         rec = r.run([(ALLOC, (), ())])[0][2:]
         mark2, room2 = rec[6] & 0xFFFF, rec[7]

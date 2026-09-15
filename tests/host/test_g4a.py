@@ -53,7 +53,7 @@ def unpack(path):
     nb, near_size, far_off, far_size, far_bank, far_banks = \
         struct.unpack("<HHHIBB", d[4:16])
     n_nhi, n_nbank, n_fhi, n_fbank = struct.unpack("<HHHH", d[20:28])
-    fw = 3 if ver == 2 else 2
+    fw = 3 if ver == 4 else 2
     HDR = 32
     near = bytearray(d[HDR:HDR + near_size])
     far = bytearray(d[HDR + near_size:HDR + near_size + far_size])
@@ -131,16 +131,16 @@ class G4AFormat(unittest.TestCase):
         self.assertGreater(sum(seen), 0, f"{name}: nothing to compare")
         return g, f_hi, f_bank
 
-    def test_v1_relocates(self):
-        """m29_big: a large-DATA program, one bank of image, format 1."""
+    def test_v3_relocates(self):
+        """m29_big: a large-DATA program, one bank of image, format 3."""
         g, _, _ = self.relocate_and_compare("m29_big")
-        self.assertEqual(g["ver"], 1, "an image inside one bank stays v1")
+        self.assertEqual(g["ver"], 3, "an image inside one bank is v3")
         self.assertLessEqual(len(g["far"]), 0x10000)
 
-    def test_v2_relocates(self):
-        """m31_huge: an image OVER a bank, which only format 2 can name."""
+    def test_v4_relocates(self):
+        """m31_huge: an image OVER a bank, which only format 4 can name."""
         g, f_hi, f_bank = self.relocate_and_compare("m31_huge")
-        self.assertEqual(g["ver"], 2, "an image over a bank must be v2")
+        self.assertEqual(g["ver"], 4, "an image over a bank must be v4")
         self.assertGreater(len(g["far"]), 0x10000,
                            "m31_huge is supposed to be bigger than a bank")
         self.assertGreater(g["far_banks"], 1)
@@ -149,8 +149,8 @@ class G4AFormat(unittest.TestCase):
                         "no fixup past 64K -- this program is not testing "
                         "what it exists to test")
 
-    def test_every_shipped_app_stays_v1(self):
-        """The format change costs the existing programs nothing.
+    def test_every_shipped_app_is_v3(self):
+        """The wide format costs the existing programs nothing.
 
         They are on floppies with sectors to spare rather than to waste
         (the DOS 2 product disk holds GEM, the desktop and its resource in
@@ -162,7 +162,7 @@ class G4AFormat(unittest.TestCase):
             with self.subTest(app=name):
                 build(f"build/{name}.g4a")
                 g = unpack(os.path.join(ROOT, "build", f"{name}.g4a"))
-                self.assertEqual(g["ver"], 1)
+                self.assertEqual(g["ver"], 3)
 
     def test_fixup_offsets_are_inside_the_image(self):
         """app_load bounds-checks these; a packer that emitted one outside
