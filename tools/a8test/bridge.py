@@ -135,11 +135,15 @@ class Bridge:
         return self.ok(f"POKE ${addr:04X} ${value & 0xFF:02X}")
 
     def has_keyraw(self):
-        """Whether this emulator carries the bridge patch in tools/altirra/
-        (KEYRAW, CONFIG u1mb, and the KEY modifier fix -- one patch, so one
-        probe answers for all three).  `KEYRAW all up` releases nothing
-        that is not held and is refused as an unknown verb by a build
-        without it.  Asked once, remembered."""
+        """Whether this emulator carries the patches in tools/altirra/ -- and
+        it is the CPU, not the keyboard, that makes the answer matter.
+        Upstream PR #88 brought KEYRAW, CONFIG u1mb and the KEY modifier
+        fix in the same change as the two 65C816 native-mode CPU fixes, so
+        a build that does not know KEYRAW has the SEI/IRQ storm that walks
+        the stack through bank $00, and launch() refuses it
+        (require_patched=False to override).  `KEYRAW all up` releases
+        nothing that is not held and is refused as an unknown verb by a
+        build without it.  Asked once, remembered."""
         if self._keyraw is None:
             self._keyraw = bool(self.cmd("KEYRAW all up").get("ok"))
         return self._keyraw

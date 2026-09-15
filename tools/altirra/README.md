@@ -56,7 +56,10 @@ How each was found, and what it cost: `docs/phase14.md`.  `make test-m12`
 failed deterministically on the unpatched emulator by the second one
 when it was written; it no longer does on every build, which is the
 nature of a timing bug -- so a green `test-m12` is **not** evidence that
-an emulator has the fix.
+an emulator has the fix.  So `tools/a8test/launcher.py` does not
+take one on trust: a build that does not answer `KEYRAW` -- which came in
+the same PR -- is stopped at launch with that reason
+(`require_patched=False` overrides it).
 
 The second one bit again in phase 26 and cost three phases of the
 desktop's memory budget before it was recognised (`docs/phase26.md`).

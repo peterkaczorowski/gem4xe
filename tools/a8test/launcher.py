@@ -37,7 +37,16 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 from a8test.bridge import Bridge, BridgeError, find_token  # noqa: E402
 
-ALTIRRA = os.environ.get("ALTIRRASDL", "AltirraSDL")
+# The emulator is read from ALTIRRASDL when a machine is LAUNCHED, not when
+# this module is imported.  It used to be read once at import, so a script
+# that imported the launcher and then set ALTIRRASDL silently ran whatever
+# AltirraSDL was on PATH -- and a probe of the patched build reported it
+# lacking KEYRAW, the opposite of the truth.
+def altirra():
+    return os.environ.get("ALTIRRASDL", "AltirraSDL")
+
+
+ALTIRRA = altirra()     # as found at import, for anything that names it
 XLROM = os.environ.get("ATARIXL_ROM", "/opt/altirra/roms/ATARIXL.ROM")
 
 # --noultimate1mb: the emulator saves its profile to ~/.config/altirra on
@@ -119,18 +128,62 @@ def verify_kernel(b):
     return b.memdump(0xE000, 32) == rom[0x2000:0x2020]
 
 
+# The longest path a Unix socket can bind: sun_path is 108 bytes on Linux,
+# its terminating NUL included.  AltirraSDL does not refuse a longer one --
+# it comes up, never listens, and this used to wait `timeout` seconds and
+# then blame a missing token.  A tree under a deep temporary directory is
+# enough to cross it: the socket lives four levels below the checkout.
+SUN_PATH_MAX = 107
+
+
+def check_socket_path(sock):
+    """Refuse a bridge socket path the kernel cannot bind, before anything
+    is made or started."""
+    n = len(os.fsencode(sock))
+    if n > SUN_PATH_MAX:
+        raise BridgeError(
+            f"the bridge socket path is {n} bytes and a Unix socket takes at "
+            f"most {SUN_PATH_MAX}: {sock} -- the emulator would start and "
+            "never listen.  Run from a checkout at a shorter path.")
+
+
+def check_patched(bridge, exe=None):
+    """Refuse an emulator without the patches in tools/altirra/.
+
+    The keyboard is not the reason.  Upstream PR #88 brought KEYRAW in the
+    same change as two 65C816 native-mode CPU fixes, so a build that does
+    not answer KEYRAW has the SEI-with-an-IRQ-pending storm that walks the
+    stack through all of bank $00.  It is intermittent and worse under
+    load, so a gate can pass on such a build -- which is exactly why a
+    pass from one proves nothing (tools/altirra/README.md)."""
+    exe = exe or altirra()
+    if not bridge.has_keyraw():
+        raise BridgeError(
+            f"{exe} does not answer KEYRAW, so it is a build without "
+            "upstream AltirraSDL PR #88 -- and #88 also carries the 65C816 "
+            "native-mode CPU fixes (tools/altirra/README.md).  On this build "
+            "an SEI with an IRQ pending re-enters the handler at every fetch "
+            "and walks the stack through bank $00, intermittently, so no "
+            "native-mode result from it can be trusted, a green one "
+            "included.  Point ALTIRRASDL at a patched build: "
+            "ALTIRRASDL=/path/to/patched/AltirraSDL")
+
+
 def launch(tag="run", extra_args=(), vbxe=True, rapidus=True, memsize="1088K",
-           timeout=60, require_real_rom=True):
+           timeout=60, require_real_rom=True,
+           require_patched=True):
     run_dir = os.path.join(ROOT, "build", "emu", f"{tag}-{os.getpid()}")
-    os.makedirs(run_dir, exist_ok=True)
     sock = os.path.join(run_dir, "bridge.sock")
+    check_socket_path(sock)             # before anything is made or started
+    os.makedirs(run_dir, exist_ok=True)
     if os.path.exists(sock):
         os.remove(sock)
     env = dict(os.environ, SDL_VIDEODRIVER="offscreen", SDL_AUDIODRIVER="dummy", TMPDIR=run_dir)
     blacklist = host_joystick_ids()
     if blacklist:
         env["SDL_JOYSTICK_BLACKLIST_DEVICES"] = blacklist
-    args = [ALTIRRA, f"--bridge=unix:{sock}", *BASE_ARGS, "--memsize", memsize, "--cleardevices"]
+    exe = altirra()
+    args = [exe, f"--bridge=unix:{sock}", *BASE_ARGS, "--memsize", memsize, "--cleardevices"]
     if vbxe:
         args += ["--adddevice", VBXE_DEVICE]
     if rapidus:
@@ -149,6 +202,12 @@ def launch(tag="run", extra_args=(), vbxe=True, rapidus=True, memsize="1088K",
         raise BridgeError(f"no bridge token in {run_dir} after {timeout}s; log tail:\n{tail}")
     b = Bridge(addr, tok, connect_timeout=timeout)
     emu = Emu(proc, run_dir, b)
+    if require_patched:
+        try:
+            check_patched(b, exe)
+        except BridgeError:
+            emu.stop()
+            raise
     if vbxe and not b.cmd("DEVICE_GET vbxe").get("ok"):
         b.ok("DEVICE_SET vbxe on version=126 base=d600")
     if verify_kernel(b) is False and require_real_rom:
