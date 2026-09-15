@@ -4276,8 +4276,12 @@ class AES:
                 raise ValueError("Malloc(-1): the room is the target's to know")
             if n == 0:
                 return 0
-            ret = self.dos_brk
-            self.dos_brk += (n + 3) & ~3
+            # Each block carries a LONG in front of it, its size, so that
+            # the last one can be given back (src/sys/gemdos.c, MB_HDR):
+            # the address is four past the heap's cursor, and the cursor
+            # moves by the block and the header together, rounded.
+            ret = self.dos_brk + 4
+            self.dos_brk += (n + 4 + 3) & ~3
             return ret
         if fn == 0x39:                  # Dcreate: a folder in a listed
             # directory, empty, and listed itself from now on

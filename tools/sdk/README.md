@@ -72,7 +72,11 @@ serves:
   (`fsel_input`, `fsel_exinput`).
 - **GEMDOS** -- `Fopen`/`Fread`/`Fwrite`/`Fclose`, `Fsfirst`/`Fsnext`,
   `Dcreate`/`Ddelete`/`Dsetpath`/`Dgetpath`, `Frename`, `Fattrib`,
-  `Fdatime`, `Malloc`, the clock.
+  `Fdatime`, `Malloc`/`Mxalloc`/`Mshrink`/`Mfree`, the clock -- and the
+  rest of TOS 1.04's: `Cconws`, `Cconin`, `Cconrs` and the other character
+  calls reach a VT-52 console drawn on GEM's screen, through standard
+  handles `Fdup` and `Fforce` can point at a file; `Pexec` (mode 0) runs
+  another program and has it back; `Pterm` ends yours from anywhere.
 
 Four VDI opcodes have no binding on purpose -- cell array (10 and 27),
 the valuator (29) and 34 -- because the driver answers them with

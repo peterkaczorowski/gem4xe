@@ -22,7 +22,7 @@
  */
 #include "gem.h"
 
-#define NREC   200
+#define NREC   260
 #define RECW   6                /* kind, then five words of the block */
 
 WORD bind_n;
@@ -273,13 +273,33 @@ int main(void)
     rc_union(&r1, &r2);
 
     /* -- GEMDOS, in function order ------------------------------------- */
+    Pterm0();                   /* the recorder returns, so the ends do too */
+    Cconin();
+    Cconout('A');
+    Cauxin();
+    Cauxout('A');
+    Cprnout('A');
+    Crawio(0xFF);
+    Crawcin();
+    Cnecin();
+    Cconws(path);
+    Cconrs(path);
+    Cconis();
     Dsetdrv(0);
+    Cconos();
+    Cprnos();
+    Cauxis();
+    Cauxos();
     Dgetdrv();
     Fsetdta(&dta);
+    Super(path);
     Tgetdate();
+    Tsetdate(0x0021);
     Tgettime();
+    Tsettime(0);
     Fgetdta();
     Sversion();
+    Ptermres(0L, 0);
     Dfree(&disk, 0);
     Dcreate(path);
     Ddelete(path);
@@ -292,9 +312,15 @@ int main(void)
     Fdelete(path);
     Fseek(0L, 6, 0);
     Fattrib(path, 1, 1);
+    Mxalloc(16L, 0);
+    Fdup(1);
+    Fforce(1, 6);
     Dgetpath(path, 0);
     Malloc(16L);
     Mfree(path);
+    Mshrink(path, 8L);
+    Pexec(0, path, name, 0);
+    Pterm(0);
     Fsfirst(path, 0);
     Fsnext();
     Frename(path, name);

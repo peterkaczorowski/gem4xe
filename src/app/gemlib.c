@@ -1401,6 +1401,57 @@ WORD Tgettime(void)
     return (WORD)dos(0x2C);
 }
 
+/* The C functions, the rest of memory, setting the clock and the end:
+ * the calls phase 42 filled in (src/sys/gemdos.c). */
+void Pterm0(void)                       { dos(0x00); }
+LONG Cconin(void)                       { return dos(0x01); }
+void Cconout(WORD c)                    { dw(6, c); dos(0x02); }
+WORD Cauxin(void)                       { return (WORD)dos(0x03); }
+void Cauxout(WORD c)                    { dw(6, c); dos(0x04); }
+WORD Cprnout(WORD c)                    { dw(6, c); return (WORD)dos(0x05); }
+LONG Crawio(WORD c)                     { dw(6, c); return dos(0x06); }
+LONG Crawcin(void)                      { return dos(0x07); }
+LONG Cnecin(void)                       { return dos(0x08); }
+void Cconws(const char FAR *s)          { dl(6, (LONG)s); dos(0x09); }
+void Cconrs(char FAR *buf)              { dl(6, (LONG)buf); dos(0x0A); }
+WORD Cconis(void)                       { return (WORD)dos(0x0B); }
+WORD Cconos(void)                       { return (WORD)dos(0x10); }
+WORD Cprnos(void)                       { return (WORD)dos(0x11); }
+WORD Cauxis(void)                       { return (WORD)dos(0x12); }
+WORD Cauxos(void)                       { return (WORD)dos(0x13); }
+LONG Super(void FAR *stack)             { dl(6, (LONG)stack); return dos(0x20); }
+WORD Tsetdate(UWORD date)               { dw(6, (WORD)date); return (WORD)dos(0x2B); }
+WORD Tsettime(UWORD time)               { dw(6, (WORD)time); return (WORD)dos(0x2D); }
+LONG Mxalloc(LONG size, WORD mode)      { dl(6, size); dw(10, mode); return dos(0x44); }
+LONG Fdup(WORD handle)                  { dw(6, handle); return dos(0x45); }
+LONG Fforce(WORD handle, WORD target)   { dw(6, handle); dw(8, target); return dos(0x46); }
+void Pterm(WORD code)                   { dw(6, code); dos(0x4C); }
+
+LONG Pexec(WORD mode, const char FAR *name, const char FAR *tail,
+           const char FAR *env)
+{
+    dw(6, mode);
+    dl(8, (LONG)name);
+    dl(12, (LONG)tail);
+    dl(16, (LONG)env);
+    return dos(0x4B);
+}
+
+void Ptermres(LONG keep, WORD code)
+{
+    dl(6, keep);
+    dw(10, code);
+    dos(0x31);
+}
+
+LONG Mshrink(void FAR *block, LONG newsize)
+{
+    dw(6, 0);                           /* the ST's binding pushes a zero word */
+    dl(8, (LONG)block);
+    dl(12, newsize);
+    return dos(0x4A);
+}
+
 /* -- The GRECT half of the library (src/app/gem.h).
  *
  * rc_intersect and rc_union are Atari's own, transcribed from the rule

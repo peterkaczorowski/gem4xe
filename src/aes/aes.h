@@ -492,6 +492,7 @@ WORD ev_multi(WORD flags, const MOBLK *pmo1, const MOBLK *pmo2,
               uint32_t tmcount, uint32_t buparm, WORD *mebuff, WORD *prets);
 WORD ev_block(WORD code, uint32_t lvalue);
 WORD ev_keybd(void);
+WORD ev_keyq(WORD *pkey);       /* one poll; a key if one is there, else 0 */
 WORD ev_button(WORD clicks, UWORD mask, UWORD state, WORD *rets);
 WORD ev_mouse(const MOBLK *pmo, WORD *rets);
 WORD ev_timer(uint32_t count);
@@ -665,6 +666,14 @@ extern WORD sh_doexec;              /* shel_write's request: SHW_*, -1 none */
 extern WORD sh_isgem;
 void sh_init(void);
 void sh_read(char *pcmd, char *ptail);
+/* Pexec's child (src/sys/gemdos.c) reads its own name and tail with
+ * shel_read: sh_push keeps the running program's in SH_SAVELEN bytes of
+ * far memory at `save` and puts the child's in their place -- the tail
+ * the ST's way, a length byte and the bytes, from wherever the program
+ * keeps it -- and sh_pop puts the program's back. */
+#define SH_SAVELEN  256
+void sh_push(uint32_t save, const char *cmd, uint32_t tail);
+void sh_pop(uint32_t save);
 WORD sh_write(WORD doex, WORD isgem, WORD isover, const char *pcmd,
               const char *ptail);
 void sh_get(uint32_t pbuffer, WORD len);     /* far addresses */

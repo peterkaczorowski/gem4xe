@@ -807,6 +807,16 @@ WORD ev_keybd(void)
     return ev_block(MU_KEYBD, 0);
 }
 
+/* A key without waiting for one: a poll, then the two checks ev_wait
+ * makes -- the input is the running process's to see, and a key is
+ * there -- with no wait registered.  GEMDOS's console asks this for
+ * Cconis and Crawio (src/sys/con.c). */
+WORD ev_keyq(WORD *pkey)
+{
+    ev_poll();
+    return (WORD)(ct_mine() && gsx_getkey(pkey));
+}
+
 WORD ev_button(WORD clicks, UWORD mask, UWORD state, WORD *rets)
 {
     WORD ret = ev_block(MU_BUTTON, combine_cms(clicks, mask, state));

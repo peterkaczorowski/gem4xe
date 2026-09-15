@@ -67,14 +67,18 @@
 ;;; refuses to start if it ever does.
 #define CTX_REGS  32
 
-;;; Named so that this file may refer to its bounds; nothing is added to
-;;; it here.
+;;; Named so that this file may refer to their bounds; nothing is added to
+;;; either here.  The stack's bottom is what Pexec keeps a child's calls
+;;; above (src/sys/gemdos.c), named the way src/app/crt_gemapp.s names an
+;;; application's stack.
               .section registers, bss
+              .section stack
 
               .section cdata, rodata
-              .public ctx_reg_lo, ctx_reg_hi
+              .public ctx_reg_lo, ctx_reg_hi, ctx_stack_lo
 ctx_reg_lo:   .word   .sectionStart registers
 ctx_reg_hi:   .word   .sectionEnd registers + 1
+ctx_stack_lo: .word   .sectionStart stack
 
               .section zdata, bss
 ctx_to:       .space  2               ; the target, held across the TSC

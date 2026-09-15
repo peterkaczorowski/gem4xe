@@ -59,6 +59,7 @@ uint16_t gem_calls;
 uint16_t app_calls;             /* of those, the application's: see abi.h */
 uint16_t gem_bad;
 uint8_t  gem_cop_pass;
+uint8_t  gem_term;
 
 /* Whether the OS takes COPs of its own.  Rapidus OS -- drac030's 65C816 XL
  * OS -- has an "@:" device whose one file, SYSDEF, describes the system
@@ -653,6 +654,11 @@ static void aes_entry(const AESPB_IMG FAR *pb)
 
 void gem_entry(void)
 {
+    /* Only this call can end the program (abi.s reads the flag after it):
+     * a GEMDOS call a milestone runner makes directly, not through a COP,
+     * can leave it set, and it must not end the next program's first
+     * call. */
+    gem_term = 0;
     /* A COP that is nobody's here -- not one of the three, and no OS to
      * pass it to (abi.s) -- is refused and is not a call: counting it
      * would number an application's calls differently on a machine whose

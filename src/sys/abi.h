@@ -59,10 +59,18 @@ extern uint16_t gem_bad;       /* COPs refused: signature, opcode, bank */
 extern uint8_t gem_cop_pass;
 void abi_probe_os(void);
 
+/* Set by GEMDOS when a program ends itself -- Pterm, Pterm0, Ptermres, or
+ * ^C at the console (src/sys/gemdos.c) -- for the handler in abi.s: the
+ * COP that said so does not return to the program, and the code in its
+ * block goes to the program's loader as main()'s value would have.
+ * gem_entry clears it before every call. */
+extern uint8_t gem_term;
+
 void gem_entry(void);          /* the C side of the handler */
 
 /* Call an application's entry point (a far address) as a subroutine and
- * return what its main() returned.  abi.s. */
+ * return what its main() returned -- or the code it gave Pterm, if it
+ * ended that way.  abi.s. */
 SIMPLE_CALL int16_t app_run(uint32_t entry);
 
 #endif /* GEM4XE_ABI_H */

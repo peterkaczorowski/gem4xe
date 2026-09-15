@@ -95,7 +95,7 @@ M30_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/
              build/wind.o build/ctrl.o build/menu.o build/form.o \
              build/alert.o build/gemdata.o build/lang.o build/lang_rsc.o \
              build/rsrc.o build/apppool.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/m3_vdi.o build/vdi.o build/dev_vbxe.o build/pointer.o build/dev_print.o build/emit.o build/objc.o build/graf.o build/event.o build/proc.o build/ctx.o build/ctxs.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/antic.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/m3_vdi.o build/vdi.o build/dev_vbxe.o build/pointer.o build/dev_print.o build/emit.o build/objc.o build/graf.o build/event.o build/proc.o build/ctx.o build/ctxs.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/antic.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o build/con.o build/config.o
 
 # GEM.COM, the product (src/gem.c): the runner's objects with the runner
 # itself and its compiled-in test application taken out, linked on the
@@ -105,7 +105,7 @@ M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/
 # surface, its driver and its face come in on top of the runner's set.
 GEM_OBJS   = $(filter-out build/m3_vdi.o build/app_blob.o,$(M3_OBJS)) \
              build/dev_antic.o build/font6x6.o \
-             build/config.o build/bootinfo.o build/gem.o
+             build/bootinfo.o build/gem.o
 
 # A gem4xe application: its own C startup and bindings (src/app), linked
 # against nothing of gem4xe's, on the application's own linker rules.
@@ -348,7 +348,15 @@ build/bootinfo.o: src/sys/bootinfo.c src/sys/bootinfo.h src/sys/cio.h src/sys/ir
 	$(CC) $(CFLAGS) -I src -I build -o $@ $<
 
 # GEMDOS for the applications: the ST's trap #1 on CIO, through the seam.
-build/gemdos.o: src/sys/gemdos.c src/sys/clock.h src/sys/gemdos.h src/sys/dos.h src/sys/cio.h src/sys/farmem.h src/sys/app.h
+build/gemdos.o: src/sys/gemdos.c src/sys/clock.h src/sys/gemdos.h src/sys/dos.h src/sys/cio.h src/sys/farmem.h src/sys/app.h \
+             src/sys/abi.h src/sys/con.h src/sys/config.h src/aes/proc.h src/sys/ctx.h src/vdi/vdi.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -o $@ $<
+
+# The console GEMDOS's character calls reach: a VT-52 on GEM's screen,
+# drawn through the AES (src/sys/con.h).  The runner links it and the
+# printer's settings with GEMDOS, so config.o is in M3_OBJS now too.
+build/con.o: src/sys/con.c src/sys/con.h src/sys/farmem.h src/aes/aes.h src/vdi/vdi.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -o $@ $<
 
@@ -811,6 +819,15 @@ build/appld/m29_big.o: src/m29_big.c src/app/gem.h
 BIG_OBJS = $(G4A_LIB_LD) build/appld/m29_big.o
 $(eval $(call g4a,m29_big,$(BIG_OBJS),1024,256,384,,,$(LIB_LD)))
 
+# The console gate application (src/m32_con.c): GEMDOS's character calls,
+# its standard handles and Pterm, run through the shell loop by
+# tests/emu/m32_con.py.  A small-data program like the first one, so its
+# page of VT-52 is near constants: 1 KB of them.
+M32_OBJS = $(G4A_LIB) build/app/m32_con.o
+$(eval $(call g4a,m32_con,$(M32_OBJS),1024,1024,384,,))
+# ...and the child it runs with Pexec (src/m32_kid.c).
+$(eval $(call g4a,m32_kid,$(G4A_LIB) build/app/m32_kid.o,1024,256,384,,))
+
 # The application whose far IMAGE is bigger than a bank (src/m31_huge.c).
 # Nothing in this tree had one until GACS's GEM shell was linked for this
 # machine, so the .G4A's u16 far fixup offsets and app_load's 16-bit
@@ -1062,6 +1079,14 @@ build/m31-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt 
 	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(SHELL_FILES) \
 	    --add build/m31_huge.g4a M31.G4A
 
+# The console gate's disk (test-m32), its own for the same reason: the
+# stand-in desktop, and the program as M32.G4A in the root.
+build/m32-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(SHELL_DEPS) build/m32_con.g4a build/m32_kid.g4a tools/mkspdisk.py tools/atr.py
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(SHELL_FILES) \
+	    --add build/m32_con.g4a M32.G4A --add build/m32_kid.g4a M32KID.G4A
+
 # The desktop gate's disk (test-m17): the runner again, with the real
 # desktop and its resource where test-m16's stand-in was.
 build/m17-boot.atr: build/m3desk.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(DESK_DEPS) tools/mkspdisk.py tools/atr.py
@@ -1124,7 +1149,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-boot
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-boot
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -1372,6 +1397,11 @@ test-m28: build/m28-boot.atr
 test-m29: build/m29-boot.atr
 	python3 tests/emu/m29_big.py
 
+# GEMDOS's console, standard handles, memory calls and Pterm, from a
+# program that never calls the AES (docs/phase42.md).
+test-m32: build/m32-boot.atr build/m32_con.sym
+	python3 tests/emu/m32_con.py
+
 # An application bigger than a bank, loaded and run.  tests/host/test_g4a.py
 # proves the FILE -- that applying its fixups reproduces the linker's own
 # shifted link, byte for byte -- and this proves the LOADER, which is the
@@ -1512,4 +1542,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-boot test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-boot test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean

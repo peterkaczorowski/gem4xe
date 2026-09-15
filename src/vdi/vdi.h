@@ -337,6 +337,11 @@ extern const uint8_t FAR font8x8[];
 void vdi(void);             /* dispatch on contrl[0]; the GSX "SCREEN" entry */
 void vdi_init(void);        /* one-time bring-up of the physical workstation */
 void vdi_close_virtuals(void); /* every virtual workstation closed: a program's, at its end */
+/* ...and for Pexec, which closes a child's and leaves its parent's
+ * (src/sys/gemdos.c): the running context's open ones as a mask of their
+ * slots, and all of those closed but the ones in `keep`. */
+uint16_t vdi_virtuals_open(void);
+void vdi_close_virtuals_but(uint16_t keep);
 
 /* Mouse cursor.  vdi_cursor_move() is what an input poll calls after
  * ptr_poll(): it erases, repositions and redraws only if something changed. */

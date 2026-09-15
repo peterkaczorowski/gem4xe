@@ -146,6 +146,8 @@ SIMPLE_CALL uint16_t dsk_call(uint16_t unused);
 #define DOS_DATE       0x077B   /* day, month, year (binary; 80.. is 19xx) */
 #define DOS_TIME       0x077E   /* hour, minute, second */
 #define DOS_KD_GETTD   100      /* the clock, into DOS_DATE and DOS_TIME */
+#define DOS_KD_SETTD   101      /* ...and set from them (cc65's
+                                 * asminc/atari.inc, SDX_KD_SETTD) */
 SIMPLE_CALL uint16_t dos_call(uint16_t fn);
 
 extern uint16_t cio_calls;      /* round trips made */

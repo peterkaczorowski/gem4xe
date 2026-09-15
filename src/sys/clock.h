@@ -31,6 +31,12 @@ typedef struct {
  * comes back is $FF and fails the check that it is a plausible time. */
 uint8_t clock_read(CLOCK *c);
 
+/* Set it, for GEMDOS's Tsetdate and Tsettime: every field of `c`, which
+ * the caller has range-checked.  1 when a clock took it; 0 when there is
+ * none, or the DOS's driver would not.  The chip is written with its
+ * write protect lifted for the moment and put back as it was. */
+uint8_t clock_write(const CLOCK *c);
+
 /* Which card the clock is on, for the boot screen: probes if clock_read
  * has not yet. */
 #define CLOCK_NONE 0

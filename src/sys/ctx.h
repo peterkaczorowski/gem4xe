@@ -65,6 +65,9 @@ typedef struct {
 extern CTX      *ctx_cur;       /* the running one; never 0 after ctx_init */
 extern CTX      *ctx_root;      /* context 0: where a finished one returns */
 extern uint16_t  ctx_base;      /* the top of the shared extent */
+/* ...and the bottom of the stack it is in, from the linker (ctx.s): what
+ * Pexec measures its child's room against (src/sys/gemdos.c). */
+extern const uint16_t ctx_stack_lo;
 extern uint16_t  ctx_over;      /* parks refused for want of room -- a bug */
 
 /* The caller becomes context 0.  `first` is its record, which must

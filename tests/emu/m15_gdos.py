@@ -43,7 +43,7 @@ FIXTURE = os.path.join(ROOT, "tests", "fixtures", "test.txt")
 # src/sys/gemdos.h
 FN = dict(Dsetdrv=0x0E, Dgetdrv=0x19, Fsetdta=0x1A, Tgetdate=0x2A, Fgetdta=0x2F,
           Sversion=0x30, Dfree=0x36, Dcreate=0x39, Ddelete=0x3A, Dsetpath=0x3B,
-          Tgettime=0x2C, Tsetdate=0x2B,
+          Tgettime=0x2C, Tsetdate=0x2B, Maddalt=0x14,
           Fcreate=0x3C, Fopen=0x3D, Fclose=0x3E, Fread=0x3F, Fwrite=0x40,
           Fdelete=0x41, Fseek=0x42, Fattrib=0x43, Dgetpath=0x47, Malloc=0x48,
           Fdatime=0x57,
@@ -169,9 +169,15 @@ def cases(g, r, check, fs, kind, b, clock=False, dos_clock=False):
     check(ret & 1, f"Dsetdrv's map {ret:#x} lacks A")
     print(f"  drive map {ret:#04x}")
     # A call this seam does not have: the counter of refusals is what
-    # says so, and Tsetdate is one -- nothing here can set a clock.
+    # says so, and Maddalt is one -- there is no memory the probe missed
+    # to add.  Tsetdate used to be the example; it is served now (phase
+    # 42), and a date with day 0 is refused as a bad date, -1, on every
+    # machine -- one with a clock too -- without counting as a refusal.
+    ret, rec = g.call("Maddalt", L(0), L(0))
+    check(ret == EINVFN and rec[BAD_I] == 1, f"Maddalt {ret}, refused {rec[BAD_I]}")
     ret, rec = g.call("Tsetdate", W(0))
-    check(ret == EINVFN and rec[BAD_I] == 1, f"Tsetdate {ret}, refused {rec[BAD_I]}")
+    check(ret == -1 and rec[BAD_I] == 1, f"Tsetdate of day 0 {ret}, refused {rec[BAD_I]} "
+                                         f"(the count is Maddalt's 1 still)")
     dta = r.sc + DTA
     ret, _ = g.call("Fsetdta", L(dta))
     ret, _ = g.call("Fgetdta")
@@ -373,8 +379,10 @@ def cases(g, r, check, fs, kind, b, clock=False, dos_clock=False):
     check(ret == EIHNDL, f"Fdatime on a closed handle {ret}, not EIHNDL")
     ret, _ = g.call("Fclose", W(h))
     check(ret == EIHNDL, f"Fclose twice {ret}, not EIHNDL")
+    # A standard handle is there to close: it goes back to its device
+    # and answers E_OK, as EmuTOS's xclose does (bdos/fsopnclo.c).
     ret, _ = g.call("Fclose", W(3))
-    check(ret == EIHNDL, f"Fclose of a standard handle {ret}, not EIHNDL")
+    check(ret == 0, f"Fclose of a standard handle {ret}, not E_OK")
     ret, _ = g.call("Fopen", L(g.string("A:\\NOPE.TXT")), W(0))
     check(ret == EFILNF, f"Fopen NOPE.TXT {ret}, not EFILNF")
     if tree:

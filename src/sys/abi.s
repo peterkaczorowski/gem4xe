@@ -47,7 +47,7 @@
 
               .extern _DirectPageStart, _Dp
               .extern gem_entry, gem_pb, gem_which, gem_api_sp, gem_depth
-              .extern gem_cop_pass
+              .extern gem_cop_pass, gem_term
               .public gem_cop, app_run
 
 ABI_VDI:      .equ    0x56            ; src/sys/abi.h, src/app/gemabi.s
@@ -125,7 +125,9 @@ gem_cop_go:   jsl     gem_entry
               sei
               sep     #0x20
               dec     abs:gem_depth
-              rep     #0x30
+              lda     abs:gem_term
+              bne     gem_cop_term    ; the program ended itself: see below
+gem_cop_out:  rep     #0x30
               pla
               tcs                     ; the caller's stack
               plb
@@ -134,6 +136,35 @@ gem_cop_go:   jsl     gem_entry
               plx
               pla
               rti
+
+;;; Pterm, Pterm0, Ptermres, or ^C at the console (src/sys/gemdos.c): the
+;;; program has ended, and this COP does not return to it.  It goes where
+;;; the program's main() would have returned to instead -- app_run, whose
+;;; S gem_api_sp has kept since the jsl into the program.  The crt took a
+;;; stack of its own below that, so everything the program pushed, and
+;;; everything this call has, lies under it and is simply left behind.
+;;; The `rtl` is the one the crt's would have been, with the block's
+;;; result -- the code -- in A where main's value would be; D and DB are
+;;; gem4xe's already, and app_run puts the interrupt state back.  With no
+;;; program running there is nothing to end, and the call returns as any
+;;; other does.
+gem_cop_term: stz     abs:gem_term
+              rep     #0x30
+              lda     abs:gem_api_sp
+              beq     gem_cop_out
+              lda     abs:gem_pb      ; the block's result word
+              sta     dp:.tiny(_Dp+0)
+              lda     abs:gem_pb+2
+              sta     dp:.tiny(_Dp+2)
+              lda     [.tiny _Dp]
+              tax
+              sep     #0x20
+              stz     abs:gem_depth
+              rep     #0x20
+              lda     abs:gem_api_sp
+              tcs
+              txa
+              rtl
 
 ;;; A COP for the OS.  A is 8 bits, DB is $00, and nothing but the five
 ;;; saves is on the stack above the CPU's frame.  The caller's M and X are
@@ -188,6 +219,9 @@ gem_cop_f00:  rep     #0x30           ; M 16, X 16
 ;;; Calls the application's entry as a far subroutine and returns what its
 ;;; main() returned.  The application's crt (src/app/crt_gemapp.s) saves
 ;;; and restores S, D and DB itself, so this side has nothing to unwind.
+;;; A program that ends with Pterm comes back here without its crt, from
+;;; the COP handler (gem_cop_term), with interrupts off, so the caller's P
+;;; is kept across the call and put back either way.
 ;;; gem_api_sp is taken INSIDE the trampoline, after the jsl has pushed
 ;;; app_run's return address: S there is the first free byte, and it is
 ;;; the S the crt records as well, so the two agree on where gem4xe's stack
@@ -200,9 +234,11 @@ app_run:      sta     abs:app_entry
               sep     #0x20
               stz     abs:gem_depth
               rep     #0x20
+              php                     ; the caller's I, for a Pterm
               jsl     app_tramp
-              tax                     ; main's return value
+              tax                     ; main's return value, or Pterm's code
               stz     abs:gem_api_sp
+              plp
               txa
               rtl
 app_tramp:    tsc

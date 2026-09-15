@@ -73,12 +73,12 @@ typedef struct {
 
 /* GEMDOS's block is the ST's trap #1 stack frame with the result in front
  * of it: the function number, then the arguments in the ST's order and
- * sizes (WORD 2, LONG 4), little-endian.  16 bytes holds the longest,
- * Fread's. */
+ * sizes (WORD 2, LONG 4), little-endian.  20 bytes holds the longest,
+ * Pexec's. */
 typedef struct {
     LONG ret;
     WORD fn;
-    WORD arg[5];
+    WORD arg[7];
 } GDPB;
 
 /* The three entry points (src/app/gemabi.s).  SIMPLE_CALL puts the
@@ -635,9 +635,9 @@ WORD objc_draw_grect(OBJECT *tree, WORD start, WORD depth, const GRECT *r);
 /* -- GEMDOS, the ST's osbind names.  Pointers are far so that a buffer
  * Malloc gave out -- which is far memory -- can be read into directly;
  * a near pointer widens to one.  Errors are the ST's negative numbers,
- * src/sys/gemdos.h.  Fseek, Fdatime and the clock were the four
- * gaps phase 16 filled; nothing here answers EINVFN any more
- * except Tsetdate, which has no clock to set. */
+ * src/sys/gemdos.h.  Every call TOS 1.04's GEMDOS has is here, and what
+ * each one can mean on this machine is written at its function in
+ * src/sys/gemdos.c. */
 #define E_OK      0L
 #define EINVFN  -32L
 #define EFILNF  -33L
@@ -646,8 +646,11 @@ WORD objc_draw_grect(OBJECT *tree, WORD start, WORD depth, const GRECT *r);
 #define EACCDN  -36L
 #define EIHNDL  -37L
 #define ENSMEM  -39L
+#define EIMBA   -40L
 #define EDRIVE  -46L
 #define ENMFIL  -49L
+#define EGSBF   -67L
+#define EPLFMT  -66L
 
 #define FA_RDONLY  0x01
 #define FA_HIDDEN  0x02
@@ -693,11 +696,64 @@ LONG Fattrib(const char FAR *name, WORD wflag, WORD attr);
 /* There is no C heap: an application's heap block is zero bytes, and
  * malloc/free refuse at link time (src/sys/clib.c).  Far memory comes from
  * Malloc. */
-LONG Malloc(LONG size);         /* -1 asks how much is left */
+LONG Malloc(LONG size);         /* -1 asks how much is left; 0: no room */
 LONG Mfree(void FAR *block);
 
 LONG Fdatime(WORD *timeptr, WORD handle, WORD wflag);   /* two words: time, date */
 WORD Tgetdate(void);
 WORD Tgettime(void);
+
+/* The C functions, through the ST's standard handles: 0 and 1 the
+ * console, a VT-52 on GEM's screen; 2 aux:, with nothing behind it here;
+ * 3 prn:, the printer GEM4XE.CFG names.  Fforce points one at a file or
+ * another device, Fdup keeps one to put back.  An input returns a key as
+ * the ST does: ASCII in the low byte, the scan code in the third. */
+#define GSH_CONIN   0
+#define GSH_CONOUT  1
+#define GSH_AUX     2
+#define GSH_PRN     3
+#define DEV_READY  -1
+#define DEV_BUSY    0
+LONG Cconin(void);
+void Cconout(WORD c);
+WORD Cauxin(void);
+void Cauxout(WORD c);
+WORD Cprnout(WORD c);           /* non-zero if it went */
+LONG Crawio(WORD c);            /* 0xFF reads without waiting: 0, no key */
+LONG Crawcin(void);
+LONG Cnecin(void);
+void Cconws(const char FAR *s);
+void Cconrs(char FAR *buf);     /* buf[0] the most, buf[1] the count, no NUL */
+WORD Cconis(void);
+WORD Cconos(void);
+WORD Cprnos(void);
+WORD Cauxis(void);
+WORD Cauxos(void);
+LONG Fdup(WORD handle);
+LONG Fforce(WORD handle, WORD target);
+
+/* The rest of memory, the clock, and the end.  There is one kind of
+ * memory, so Mxalloc's mode is moot, and no user mode for Super to leave.
+ * Pterm does not return: what it is given is what the program's loader
+ * sees, as it would main()'s value. */
+#define MX_STRAM     0
+#define MX_TTRAM     1
+#define MX_PREFSTRAM 2
+#define MX_PREFTTRAM 3
+#define SUP_INQUIRE  1L
+LONG Mxalloc(LONG size, WORD mode);
+LONG Mshrink(void FAR *block, LONG newsize);    /* smaller only */
+/* Mode 0, load and go, only: the child's code, or an error.  The tail is
+ * the ST's -- a length byte, then the bytes -- and the child reads it with
+ * shel_read; the environment is not passed on. */
+#define PE_LOADGO    0
+LONG Pexec(WORD mode, const char FAR *name, const char FAR *tail,
+           const char FAR *env);
+LONG Super(void FAR *stack);
+WORD Tsetdate(UWORD date);      /* 0; non-zero for a bad date or no clock */
+WORD Tsettime(UWORD time);
+void Pterm0(void);
+void Pterm(WORD code);
+void Ptermres(LONG keep, WORD code);
 
 #endif /* GEM4XE_APP_GEM_H */

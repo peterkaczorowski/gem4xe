@@ -83,6 +83,30 @@ void sh_read(char *pcmd, char *ptail)
     far_get((uint8_t *)ptail, sh_tail_far, SH_TAILLEN);
 }
 
+/* aes.h says SH_SAVELEN; this is the check that it holds both. */
+typedef char sh_savelen_holds_both[(SH_SAVELEN == SH_CMDLEN + SH_TAILLEN) ? 1 : -1];
+
+void sh_push(uint32_t save, const char *cmd, uint32_t tail)
+{
+    if (!sh_cmd_far)
+        return;
+    far_copy(save, sh_cmd_far, SH_CMDLEN);
+    far_copy(save + SH_CMDLEN, sh_tail_far, SH_TAILLEN);
+    far_strput(sh_cmd_far, cmd, SH_CMDLEN);
+    if (tail)
+        far_copy(sh_tail_far, tail, SH_TAILLEN);
+    else
+        far_write8(sh_tail_far, 0);
+}
+
+void sh_pop(uint32_t save)
+{
+    if (!sh_cmd_far)
+        return;
+    far_copy(sh_cmd_far, save, SH_CMDLEN);
+    far_copy(sh_tail_far, save + SH_CMDLEN, SH_TAILLEN);
+}
+
 WORD sh_write(WORD doex, WORD isgem, WORD isover, const char *pcmd,
               const char *ptail)
 {

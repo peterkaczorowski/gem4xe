@@ -44,6 +44,7 @@
  * for a few cycles rather than trusting that.  Nothing here has run on a
  * real Ultimate 1MB.
  */
+#include "portab.h"
 #include "clock.h"
 #include "cio.h"
 #include "dos.h"
@@ -296,5 +297,113 @@ uint8_t clock_read(CLOCK *c)
     c->year = (uint16_t)(bcd(r[6]) < RTC_YEAR_PIVOT ? 2000 + bcd(r[6])
                                                     : 1900 + bcd(r[6]));
     c->present = 1;
+    return 1;
+}
+
+/* ---- setting it ----------------------------------------------------------
+ *
+ * THE CHIP.  An address with bit 7 set is a write, and it advances as a
+ * read's does, so seven bytes sent after $80 are the seconds to the year
+ * -- the same seven read_regs reads, in BCD, the hour in 24-hour form
+ * (bit 6 clear).  The fourth is the day of the week, 1 to 7, which the
+ * chip only counts; Sunday is 1, as Altirra's model has it
+ * (rtcds1305.cpp).  The DS1305 refuses every write while bit 6 of its
+ * control register ($0F, written at $8F) is set, so that bit is cleared
+ * first and the register put back as it was found after.  Altirra's model
+ * keeps no write protect, and it answers every read with the host's own
+ * clock, so what is written here cannot be read back there: the emulator
+ * shows that the call was made, and a real card is the test of the rest.
+ *
+ * THE DOS.  kd_settd is kd_gettd the other way round: the date and time
+ * go into page 7 first, and the kernel hands them to the clock driver.
+ * "Busy" is the carry, as before. */
+#define RTC_WRITE    0x80
+#define RTC_CONTROL  0x0F
+#define RTC_WP       0x40
+
+static uint8_t tobcd(uint16_t v)
+{
+    return (uint8_t)(((v / 10) << 4) | (v % 10));
+}
+
+static const uint8_t FAR month_key[12] = { 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
+
+/* The year into a local before January and February take one off it: a
+ * parameter changed on one path in an inlined static is B10 (tools/ccbug). */
+static uint8_t weekday(uint16_t year, uint16_t m, uint16_t d)
+{
+    uint16_t y = year;
+
+    if (m < 3)
+        y--;
+    return (uint8_t)((y + y / 4 - y / 100 + y / 400 + month_key[m - 1] + d) % 7 + 1);
+}
+
+static void write_regs(const uint8_t *r)
+{
+    uint16_t i, ctl;
+
+    out(0);
+    out(RTC_CE | RTC_LOW);
+    send(RTC_CONTROL);
+    ctl = recv();
+    out(0);
+    out(RTC_CE | RTC_LOW);
+    send(RTC_WRITE | RTC_CONTROL);
+    send(ctl & (uint16_t)~RTC_WP);
+    out(0);
+    out(RTC_CE | RTC_LOW);
+    send(RTC_WRITE);                            /* from the seconds */
+    for (i = 0; i < 7; i++)
+        send(r[i]);
+    out(0);
+    out(RTC_CE | RTC_LOW);
+    send(RTC_WRITE | RTC_CONTROL);
+    send(ctl);
+    out(0);
+}
+
+static uint8_t dos_setclock(const CLOCK *c)
+{
+    volatile uint8_t *dev = (volatile uint8_t *)DOS_DEVICE;
+    volatile uint8_t *d = (volatile uint8_t *)DOS_DATE;
+    volatile uint8_t *t = (volatile uint8_t *)DOS_TIME;
+    uint16_t tries, p = 1, save;
+
+    if (dos.kind != DOS_SDX || *(volatile uint8_t *)DOS_KERNEL != 0x4C)
+        return 0;
+    save = *dev;
+    *dev = DOS_DEV_ANY;
+    for (tries = 0; tries < DOS_TRIES && (p & 1); tries++) {
+        d[0] = c->day;                          /* again each time: page 7 is */
+        d[1] = c->month;                        /* the DOS's to write as well */
+        d[2] = (uint8_t)(c->year % 100);
+        t[0] = c->hour;
+        t[1] = c->minute;
+        t[2] = c->second;
+        p = dos_call(DOS_KD_SETTD);
+    }
+    *dev = (uint8_t)save;
+    return (uint8_t)!(p & 1);
+}
+
+uint8_t clock_write(const CLOCK *c)
+{
+    uint8_t r[7];
+
+    if (!rtc_probed)
+        clock_probe();
+    if (rtc_dos)
+        return dos_setclock(c);
+    if (!rtc)
+        return 0;
+    r[0] = tobcd(c->second);
+    r[1] = tobcd(c->minute);
+    r[2] = tobcd(c->hour);
+    r[3] = weekday(c->year, c->month, c->day);
+    r[4] = tobcd(c->day);
+    r[5] = tobcd(c->month);
+    r[6] = tobcd((uint16_t)(c->year % 100));
+    write_regs(r);
     return 1;
 }

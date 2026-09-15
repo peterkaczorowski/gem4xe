@@ -16,6 +16,11 @@
 #include "farmem.h"
 #include "clock.h"
 #include "app.h"
+#include "abi.h"
+#include "con.h"
+#include "config.h"
+#include "ctx.h"
+#include "../vdi/vdi.h"
 /* ...and the AES's processes, because a program's open files are its
  * own (gemdos_release).  aes.h brings WORD/UWORD/LONG with it, which
  * this file used to declare for itself. */
@@ -49,7 +54,22 @@ typedef int32_t  LONG;
 #define DRVBYT      (*(const uint8_t *)0x070A)  /* DOS 2: drives present */
 
 static uint32_t gd_pb;          /* the call block */
-static uint32_t gd_dirs;        /* GD_DRIVES x GD_DIRMAX */
+/* ALL OF GEMDOS'S FAR STATE, in one block (gemdos_init), and where each
+ * part of it lives.  One address in bank $00 rather than one per part:
+ * the standard handles, the console and the printer wanted more of them,
+ * and bank $00 had one byte to spare (tools/memreport.py). */
+static uint32_t gd_far;
+#define GF_DIRS     0                                       /* GD_DRIVES x GD_DIRMAX */
+#define GF_DTA0     (GF_DIRS + GD_DRIVES * GD_DIRMAX)       /* NUM_PROCS x DTA_SIZE */
+#define GF_FILES    (GF_DTA0 + NUM_PROCS * DTA_SIZE)        /* CIO_IOCBS x FH_SIZE */
+#define GF_SCRATCH  (GF_FILES + CIO_IOCBS * FH_SIZE)        /* a DTA and a path */
+#define GF_CON      (GF_SCRATCH + DTA_SIZE + GD_KEEPNAME)   /* the console, CON_SIZE */
+#define GF_STD      (GF_CON + CON_SIZE)                     /* NUM_PROCS x GD_STDS */
+#define GF_DUP      (GF_STD + NUM_PROCS * GD_STDS)          /* NUM_PROCS x GD_DUPS */
+#define GF_PRN      (GF_DUP + NUM_PROCS * GD_DUPS)          /* BYTE the printer's IOCB */
+#define GF_SLOTS    (GF_PRN + 2)                            /* GD_SLOTS x SL_SIZE */
+#define GF_SIZE     ((uint32_t)GF_SLOTS + (uint32_t)GD_SLOTS * SL_SIZE)
+#define gd_dirs     (gd_far + GF_DIRS)
 /* ...and whether each one has been SET, which is not the same as being
  * the root.  gem4xe keeps its own current directory because the DOS
  * underneath has no GEMDOS to keep one -- but at start-up it does not
@@ -62,9 +82,9 @@ static uint8_t gd_dirset[GD_DRIVES];
  * DTA that owns it (SL_OWNER), so two processes both using "the default"
  * would be handed each other's directory position.  gemdos_init takes
  * NUM_PROCS of them, one per process, and gd_dta0 is the first. */
-static uint32_t gd_dta0;
+#define gd_dta0     (gd_far + GF_DTA0)
 #define gd_dta      (rlr->p_gddta)      /* the running process's */
-static uint32_t gd_slots;       /* GD_SLOTS x SL_SIZE */
+#define gd_slots    (gd_far + GF_SLOTS)
 static uint8_t  gd_drive;       /* the current drive, 0 = A */
 #define gd_owned    (rlr->p_gdowned)    /* the IOCBs Fopen has out, bit n */
 /* Where each open file is, and how to get back to its start.  GEMDOS
@@ -74,19 +94,22 @@ static uint8_t  gd_drive;       /* the current drive, 0 = A */
  * name and the mode go with it, because a seek BACKWARDS on a DOS whose
  * POINT is not byte-addressable is a reopen (gd_seek).
  *
- * All of it FAR, in one record per IOCB.  Eight of these are 552 bytes
+ * All of it FAR, in one record per IOCB.  Eight of these are 560 bytes
  * and bank $00 has none to give: putting the position alone in near
  * memory -- 32 bytes -- was enough to make the linker refuse the
  * program (src/gem4xe.scm: WHAT GOES FAR AND WHAT MUST NOT).  The cost
  * is two far accesses per transfer, against a CIO round trip. */
 #define FH_AT    0              /* LONG  bytes from the start */
 #define FH_MODE  4              /* BYTE  the aux1 it was opened with */
-#define FH_NAME  5              /* the GEMDOS path it was opened by:
+#define FH_REFS  5              /* BYTE  the standard and duplicate handles
+                                 * naming it, which keep it open */
+#define FH_NAME  6              /* the GEMDOS path it was opened by:
                                  * a reopen maps it as an open does, and
                                  * Fdatime looks it up in the directory */
 #define FH_SIZE  (FH_NAME + GD_KEEPNAME)
-static uint32_t gd_files;               /* CIO_IOCBS x FH_SIZE, far */
-static uint32_t gd_scratch;             /* a DTA and a path, for Fdatime */
+#define gd_files    (gd_far + GF_FILES)
+#define gd_scratch  (gd_far + GF_SCRATCH)   /* a DTA and a path, for Fdatime */
+#define gd_con      (gd_far + GF_CON)
 
 #define gd_ateof    (rlr->p_gdateof)
 static uint8_t  gd_ateof_doc;   /* ...and those a read has taken to the end.
@@ -549,29 +572,173 @@ static LONG gd_open(LONG fname, uint8_t aux1)
     gd_ateof &= (uint8_t)~(1 << iocb);
     wr32(gd_file(iocb) + FH_AT, 0);
     far_write8(gd_file(iocb) + FH_MODE, aux1);
+    far_write8(gd_file(iocb) + FH_REFS, 0);
     far_strput(gd_file(iocb) + FH_NAME, gw->full, GD_KEEPNAME);
     return iocb + GD_HANDLE_BASE;
 }
 
-/* A handle of ours to its IOCB, or 0. */
-static uint8_t gd_iocb(WORD h)
-{
-    WORD i = h - GD_HANDLE_BASE;
+/* ---- the standard handles ------------------------------------------------
+ * The ST gives every process six: 0 and 1 the console, 2 aux:, 3 prn:, 4
+ * and 5 reserved.  Each is a byte here naming what it reaches -- an IOCB,
+ * 1..7, when it has been forced onto a file, or a device -- one row of
+ * them per process in far memory, and a row of the four Fdup hands out
+ * beside it.  A file that one of them names counts them (FH_REFS) and
+ * stays open while anything does: Fforce(1, h) and then Fclose(h) is how
+ * a program sends its output into a file and lets go of the handle, and
+ * the ST keeps the file open for handle 1. */
+#define GT_FREE     0           /* a duplicate slot nobody has */
+#define GT_CON      0x80
+#define GT_AUX      0x81
+#define GT_PRN      0x82
+#define GT_NUL      0x83
 
+static const uint8_t FAR gd_stddef[GD_STDS] = {
+    GT_CON, GT_CON, GT_AUX, GT_PRN, GT_NUL, GT_NUL
+};
+
+/* gemdos.h cannot see CIO_IOCBS, so it writes the duplicates' first
+ * handle down as a number; this is the check that the two agree. */
+typedef char gd_dups_follow_the_files[(GD_DUP_BASE == GD_HANDLE_BASE + CIO_IOCBS) ? 1 : -1];
+
+static uint32_t gd_std(void)
+{
+    return gd_far + GF_STD + (uint32_t)proc_pid(rlr) * GD_STDS;
+}
+
+static uint32_t gd_dup(void)
+{
+    return gd_far + GF_DUP + (uint32_t)proc_pid(rlr) * GD_DUPS;
+}
+
+/* What handle h reaches for the running process: an IOCB, a GT_ device,
+ * or 0 for a handle it does not have. */
+static uint8_t gd_target(WORD h)
+{
+    WORD i;
+
+    if (h >= GD_HPRN && h <= GD_HCON)
+        return (uint8_t)(GT_CON + (GD_HCON - h));
+    if (h >= 0 && h < GD_STDS)
+        return far_read8(gd_std() + (uint32_t)h);
+    if (h >= GD_DUP_BASE && h < GD_DUP_BASE + GD_DUPS)
+        return far_read8(gd_dup() + (uint32_t)(h - GD_DUP_BASE));
+    i = h - GD_HANDLE_BASE;
     if (i < 1 || i >= CIO_IOCBS || !(gd_owned & (1 << i)))
         return 0;
     return (uint8_t)i;
 }
 
+/* ...and the file behind it, or 0. */
+static uint8_t gd_iocb(WORD h)
+{
+    uint8_t t = gd_target(h);
+
+    if (t >= 1 && t < CIO_IOCBS)
+        return t;
+    return 0;
+}
+
+static void gd_ref(uint8_t t)
+{
+    uint32_t a;
+
+    if (t >= 1 && t < CIO_IOCBS) {
+        a = gd_file(t) + FH_REFS;
+        far_write8(a, (uint8_t)(far_read8(a) + 1));
+    }
+}
+
+/* One name fewer for a file, which is closed when nothing names it at
+ * all: no standard or duplicate handle, and no process's own. */
+static void gd_unref(uint8_t t)
+{
+    uint32_t a;
+    uint8_t n;
+    WORD i;
+
+    if (t < 1 || t >= CIO_IOCBS)
+        return;
+    a = gd_file(t) + FH_REFS;
+    n = far_read8(a);
+    if (!n)
+        return;
+    far_write8(a, --n);
+    if (n)
+        return;
+    for (i = 0; i < NUM_PROCS; i++)
+        if (proc_tab[i].p_gdowned & (1 << t))
+            return;
+    cio_close(t);
+}
+
 static LONG gd_close(WORD h)
 {
-    uint8_t iocb = gd_iocb(h);
+    uint32_t a;
+    uint8_t t;
+    WORD i;
 
-    if (!iocb)
+    if (h >= GD_HPRN && h <= GD_HCON)
+        return 0;                       /* a device: nothing to close */
+    if (h >= 0 && h < GD_STDS) {        /* a standard handle: back to what it was */
+        a = gd_std() + (uint32_t)h;
+        t = far_read8(a);
+        far_write8(a, gd_stddef[h]);
+        gd_unref(t);
+        return 0;
+    }
+    if (h >= GD_DUP_BASE && h < GD_DUP_BASE + GD_DUPS) {
+        a = gd_dup() + (uint32_t)(h - GD_DUP_BASE);
+        t = far_read8(a);
+        if (t == GT_FREE)
+            return GD_EIHNDL;
+        far_write8(a, GT_FREE);
+        gd_unref(t);
+        return 0;
+    }
+    i = h - GD_HANDLE_BASE;
+    if (i < 1 || i >= CIO_IOCBS || !(gd_owned & (1 << i)))
         return GD_EIHNDL;
-    cio_close(iocb);
-    gd_owned &= (uint8_t)~(1 << iocb);
-    gd_ateof &= (uint8_t)~(1 << iocb);
+    gd_owned &= (uint8_t)~(1 << i);
+    gd_ateof &= (uint8_t)~(1 << i);
+    if (!far_read8(gd_file((uint8_t)i) + FH_REFS))
+        cio_close(i);
+    return 0;
+}
+
+/* Fdup: a handle of the program's own for what standard handle `std`
+ * reaches now, to put it back with Fforce after forcing it elsewhere. */
+static LONG gd_fdup(WORD std)
+{
+    uint32_t dup = gd_dup();
+    uint8_t t;
+    WORD i;
+
+    if (std < 0 || std >= GD_STDS)
+        return GD_EIHNDL;
+    t = far_read8(gd_std() + (uint32_t)std);
+    for (i = 0; i < GD_DUPS; i++)
+        if (far_read8(dup + (uint32_t)i) == GT_FREE) {
+            far_write8(dup + (uint32_t)i, t);
+            gd_ref(t);
+            return GD_DUP_BASE + i;
+        }
+    return GD_ENHNDL;
+}
+
+/* Fforce: standard handle `std` reaches what `h` does -- a file, a device,
+ * or what another standard or duplicate handle reaches. */
+static LONG gd_fforce(WORD std, WORD h)
+{
+    uint32_t a;
+    uint8_t t = gd_target(h), old;
+
+    if (std < 0 || std >= GD_STDS || !t)
+        return GD_EIHNDL;
+    a = gd_std() + (uint32_t)std;
+    old = far_read8(a);
+    gd_ref(t);                          /* first: it may be the same file */
+    far_write8(a, t);
+    gd_unref(old);
     return 0;
 }
 
@@ -579,16 +746,14 @@ static LONG gd_close(WORD h)
  * is handed over as it is, in pieces; one anywhere else goes through a
  * slice of the pool -- or, when the pool is spoken for, sixty-four
  * bytes of stack, slowly. */
-static LONG gd_xfer(WORD h, LONG count, LONG buf, WORD write)
+static LONG gd_xfer(uint8_t iocb, LONG count, LONG buf, WORD write)
 {
-    uint8_t iocb = gd_iocb(h), small[64], *slice = 0;
+    uint8_t small[64], *slice = 0;
     WORD st = CIO_OK;                   /* not a byte: B8, tools/ccbug --
                                          a byte st shared m's slot */
     uint32_t a = (uint32_t)buf, done = 0;
     uint16_t mark = 0, n = 0, m, got;
 
-    if (!iocb)
-        return GD_EIHNDL;
     if (count <= 0 || (!write && (gd_ateof & (1 << iocb))))
         return 0;
     if ((a >> 16) != 0) {
@@ -1131,16 +1296,87 @@ static LONG gd_drvmap(void)
     return 0x03;
 }
 
+/* ---- memory ---------------------------------------------------------------
+ * The far heap is a bump allocator (src/sys/farmem.h): nothing can be
+ * given back from the middle of it.  What can be done is done.  Every
+ * block Malloc hands out carries a LONG in front of it, its size and a
+ * mark, and the LAST block -- the one ending at the heap's cursor -- is
+ * given back by Mfree and cut down in place by Mshrink, which is what a
+ * program that allocates, uses and frees in turn needs.  A block below it
+ * keeps its memory until the program ends, and the call succeeds.  The
+ * mark tells an address Malloc never gave out (EIMBA), and a block Mfree
+ * has had loses it, so a second Mfree of it is refused as well.
+ *
+ * Malloc that cannot answers 0, the ST's NULL.  It answered ENSMEM here
+ * until the C functions came, which a program testing for NULL would have
+ * taken for an address. */
+#define MB_HDR      4
+#define MB_MARK     0xA5000000UL
+#define MB_SIZE     0x00FFFFFFUL
+
 static LONG gd_malloc(LONG n)
 {
-    uint32_t a;
+    uint32_t a, room;
 
-    if (n < 0)
-        return (LONG)(((uint32_t)(farmem.last_bank + 1) << 16) - farmem.brk);
-    if (n == 0)
+    if (n < 0) {
+        room = ((uint32_t)(farmem.last_bank + 1) << 16) - farmem.brk;
+        if (room <= MB_HDR)
+            return 0;
+        return (LONG)(room - MB_HDR);
+    }
+    if (n == 0 || (uint32_t)n > MB_SIZE)
         return 0;
-    a = far_alloc((uint32_t)n);
-    return a ? (LONG)a : GD_ENSMEM;
+    a = far_alloc((uint32_t)n + MB_HDR);
+    if (!a)
+        return 0;
+    wr32(a, (LONG)(MB_MARK | (uint32_t)n));
+    return (LONG)(a + MB_HDR);
+}
+
+/* The header of the block Malloc gave out at `a`, or 0. */
+static uint32_t gd_block(LONG a)
+{
+    uint32_t h = (uint32_t)a - MB_HDR;
+
+    if ((uint32_t)a < 0x10000UL + MB_HDR || (uint32_t)a > farmem.brk)
+        return 0;
+    if (((uint32_t)rd32(h) & ~MB_SIZE) != MB_MARK)
+        return 0;
+    return h;
+}
+
+/* Where that block ends, rounded as far_alloc rounded it. */
+static uint32_t gd_block_end(uint32_t h)
+{
+    return h + ((MB_HDR + ((uint32_t)rd32(h) & MB_SIZE) + 3) & ~3UL);
+}
+
+static LONG gd_mfree(LONG a)
+{
+    uint32_t h = gd_block(a);
+
+    if (!h)
+        return GD_EIMBA;
+    if (gd_block_end(h) == farmem.brk)
+        far_release(h);
+    wr32(h, 0);
+    return 0;
+}
+
+/* Mshrink: smaller only, as on the ST (EGSBF for bigger). */
+static LONG gd_mshrink(LONG a, LONG n)
+{
+    uint32_t h = gd_block(a), end;
+
+    if (!h)
+        return GD_EIMBA;
+    if (n < 0 || (uint32_t)n > ((uint32_t)rd32(h) & MB_SIZE))
+        return GD_EGSBF;
+    end = gd_block_end(h);
+    wr32(h, (LONG)(MB_MARK | (uint32_t)n));
+    if (end == farmem.brk)
+        far_release(gd_block_end(h));
+    return 0;
 }
 
 /* Fattrib: setting read-only is the DOS's lock; the rest of the ST's
@@ -1153,17 +1389,523 @@ static LONG gd_fattrib(LONG path, WORD wflag, WORD attr)
     return gd_xio((attr & FA_RDONLY) ? CIO_X_LOCK : CIO_X_UNLOCK, path, 0);
 }
 
+/* ---- characters ------------------------------------------------------------
+ * The C functions, and Fread and Fwrite on a device.  Every one goes
+ * through the standard handle it is the ST's for -- Cconout 1, Cauxout 2,
+ * Cprnout 3, the inputs 0 and 2 -- so a forced handle takes them with it.
+ * The console is src/sys/con.c; prn: is gd_prn below; aux: has no device
+ * behind it yet, no serial port being one gem4xe drives, so it takes
+ * nothing, gives GD_CEOF and is never ready. */
+#define C_BS        0x08
+#define C_TAB       0x09
+#define C_LF        0x0A
+#define C_CR        0x0D
+#define C_DEL       0x7F
+#define CTRL_C      0x03
+#define CTRL_R      0x12
+#define CTRL_U      0x15
+#define CTRL_X      0x18
+
+/* A bank-$00 buffer, as the far address the file calls take. */
+#define NEAR_BUF(p) ((LONG)(uint16_t)(p))
+
+/* What Super(0L) hands back for "the old stack": only something to give
+ * Super again, and neither 0 nor 1, which would be taken for a question. */
+#define SUP_STACK   0x0100L
+
+/* The program ends: the flag abi.s acts on when this call is over, and
+ * the code its loader is given. */
+static LONG gd_term(WORD code)
+{
+    gem_term = 1;
+    return (LONG)code;
+}
+
+/* What standard handle n reaches. */
+static WORD gd_stdt(WORD n)
+{
+    return far_read8(gd_std() + (uint32_t)n);
+}
+
+/* prn:, opened on its first byte and kept open until the program ends:
+ * GEM4XE.CFG's PRINTTO, where a page goes too (src/sys/config.h).  With
+ * PRINTER=NONE, the default, the machine has said it has no printer, and
+ * nothing is opened to wait for one.  The Atari's printer handler prints
+ * a line at an EOL, which a program's CR LF is not; the last of it comes
+ * out when the program ends and this is closed. */
+static WORD gd_prn(void)
+{
+    WORD p = far_read8(gd_far + GF_PRN);
+    int16_t r;
+
+    if (p || config.printer == CFG_PRINT_NONE)
+        return p;
+    r = cio_open(config.printto, CIO_A_WRITE, 0);
+    if (r < 0)
+        return 0;
+    far_write8(gd_far + GF_PRN, (uint8_t)r);
+    return r;
+}
+
+/* One byte to what a handle reaches: 1 if it went. */
+static WORD gd_putdev(WORD t, uint8_t ch)
+{
+    WORD p;
+
+    if (t == GT_CON) {
+        con_write(gd_con, &ch, 1);
+        return 1;
+    }
+    if (t == GT_NUL)
+        return 1;
+    if (t == GT_AUX)
+        return 0;
+    if (t == GT_PRN) {
+        p = gd_prn();
+        if (!p || cio_write(p, &ch, 1) != CIO_OK)
+            return 0;
+        return 1;
+    }
+    return (WORD)(gd_xfer((uint8_t)t, 1, NEAR_BUF(&ch), 1) == 1);
+}
+
+/* One byte from what a handle reaches.  The console gives a key as the C
+ * functions return one -- ASCII low, scan code in the third byte -- and
+ * waits for it, or answers 0 when told not to; a file gives its next
+ * byte; the end of a file, and the devices with nothing to give, give
+ * GD_CEOF. */
+static LONG gd_getdev(WORD t, WORD wait)
+{
+    uint8_t ch;
+    WORD k;
+
+    if (t == GT_CON) {
+        k = con_key(gd_con, wait);
+        return ((LONG)((k >> 8) & 0xFF) << 16) | (LONG)(k & 0xFF);
+    }
+    if (t >= 1 && t < CIO_IOCBS && gd_xfer((uint8_t)t, 1, NEAR_BUF(&ch), 0) == 1)
+        return (LONG)ch;
+    return GD_CEOF;
+}
+
+/* n bytes of far memory to what a handle reaches; how many went. */
+static LONG gd_writedev(WORD t, uint32_t a, uint32_t n)
+{
+    uint8_t buf[64];
+    uint32_t done = 0, at, room;
+    uint16_t m;
+    WORD p = 0;
+
+    if (t >= 1 && t < CIO_IOCBS)
+        return gd_xfer((uint8_t)t, (LONG)n, (LONG)a, 1);
+    if (t == GT_NUL)
+        return (LONG)n;
+    if (t == GT_PRN)
+        p = gd_prn();
+    if (t == GT_AUX || (t == GT_PRN && !p))
+        return 0;
+    while (done < n) {
+        at = a + done;
+        room = 0x10000UL - (at & 0xFFFFUL);     /* far_get stays in its bank */
+        m = sizeof buf;
+        if (n - done < m)
+            m = (uint16_t)(n - done);
+        if (room < m)
+            m = (uint16_t)room;
+        far_get(buf, at, m);
+        if (t == GT_CON)
+            con_write(gd_con, buf, m);
+        else if (cio_write(p, buf, m) != CIO_OK)
+            break;
+        done += m;
+    }
+    return (LONG)done;
+}
+
+static void gd_echo(uint8_t ch)
+{
+    con_write(gd_con, &ch, 1);
+}
+
+/* A character of a line being typed, as it is shown: a control as ^X, a
+ * TAB as the spaces to the next stop. */
+static void gd_cooked(uint8_t ch)
+{
+    if (ch < ' ' && ch != C_TAB) {
+        gd_echo('^');
+        ch |= 0x40;
+    }
+    gd_echo(ch);
+}
+
+/* The column after character ch is shown at column col. */
+static WORD gd_width(WORD ch, WORD col)
+{
+    if (ch == C_TAB)
+        return (WORD)((col + 8) & ~7);
+    if (ch < ' ')
+        return (WORD)(col + 2);
+    return (WORD)(col + 1);
+}
+
+/* Cconrs's line editor, and Fread's of the console: up to max bytes from
+ * the keyboard into far memory at buf, echoed.  The keys are GEMDOS's
+ * (EmuTOS bdos/console.c, cgets; the Compendium's list under Cconrs):
+ * RETURN or ^J ends the line and goes back to its start, BACKSPACE or
+ * DELETE takes back a character, ^X the whole line, ^U starts again and
+ * ^R retypes it -- each after a '#', on a line of its own -- and ^C ends
+ * the program.  The count; or the program's end, with gem_term set. */
+static LONG gd_conline(uint32_t buf, WORD max)
+{
+    WORD n = 0, i, stcol = con_col(gd_con), col, back, k;
+    uint8_t ch;
+
+    while (n < max) {
+        k = con_key(gd_con, 1);
+        ch = (uint8_t)k;
+        if (ch == C_CR || ch == C_LF) {
+            gd_echo(C_CR);
+            break;
+        }
+        if (ch == CTRL_C)
+            return gd_term(GD_TERM_CTRLC);
+        if (ch == C_BS || ch == C_DEL || ch == CTRL_X) {
+            while (n) {
+                n--;
+                col = stcol;
+                for (i = 0; i < n; i++)
+                    col = gd_width(far_read8(buf + (uint32_t)i), col);
+                for (back = (WORD)(con_col(gd_con) - col); back > 0; back--) {
+                    gd_echo(C_BS);
+                    gd_echo(' ');
+                    gd_echo(C_BS);
+                }
+                if (ch != CTRL_X)
+                    break;
+            }
+            continue;
+        }
+        if (ch == CTRL_U || ch == CTRL_R) {
+            gd_echo('#');
+            gd_echo(C_CR);
+            gd_echo(C_LF);
+            for (i = 0; i < stcol; i++)
+                gd_echo(' ');
+            if (ch == CTRL_U)
+                n = 0;
+            for (i = 0; i < n; i++)
+                gd_cooked(far_read8(buf + (uint32_t)i));
+            continue;
+        }
+        far_write8(buf + (uint32_t)n, ch);
+        n++;
+        gd_cooked(ch);
+    }
+    return n;
+}
+
+/* Cconin and Cnecin: a key from handle 0, and at the console its echo
+ * (Cconin's) and ^C. */
+static LONG gd_conin(WORD echo)
+{
+    WORD t = gd_stdt(0);
+    LONG c = gd_getdev(t, 1);
+
+    if (t != GT_CON)
+        return c;
+    if (echo)
+        gd_echo((uint8_t)c);
+    if ((c & 0xFF) == CTRL_C)
+        return gd_term(GD_TERM_CTRLC);
+    return c;
+}
+
+/* Cconrs: buf[0] the most to take, buf[1] how many came, the bytes from
+ * buf[2] with no NUL after them.  From a file, a line of it, the CR of a
+ * CR LF dropped. */
+static LONG gd_conrs(LONG buf)
+{
+    uint32_t b = (uint32_t)buf;
+    WORD t = gd_stdt(0), max = far_read8(b), n = 0;
+    LONG c;
+
+    if (t == GT_CON) {
+        c = gd_conline(b + 2, max);
+        if (gem_term)
+            return c;
+        n = (WORD)c;
+    } else
+        while (n < max) {
+            c = gd_getdev(t, 1);
+            if (c == GD_CEOF || c == C_LF)
+                break;
+            if (c != C_CR) {
+                far_write8(b + 2 + (uint32_t)n, (uint8_t)c);
+                n++;
+            }
+        }
+    far_write8(b + 1, (uint8_t)n);
+    return n;
+}
+
+static LONG gd_conws(LONG s)
+{
+    uint32_t a = (uint32_t)s, n = 0;
+
+    while (n < 0xFFFFUL && far_read8(a + n))
+        n++;
+    return gd_writedev(gd_stdt(1), a, n);
+}
+
+/* Fread and Fwrite, whatever the handle reaches.  Reading the console
+ * reads a line as Cconrs does, or one key, echoed, when only one byte is
+ * asked for (EmuTOS bdos/bdosmain.c). */
+static LONG gd_rw(WORD h, LONG count, LONG buf, WORD write)
+{
+    WORD t = gd_target(h), n;
+    uint8_t ch;
+
+    if (!t)
+        return GD_EIHNDL;
+    if (t < CIO_IOCBS)
+        return gd_xfer((uint8_t)t, count, buf, write);
+    if (count <= 0)
+        return 0;
+    if (write)
+        return gd_writedev(t, (uint32_t)buf, (uint32_t)count);
+    if (t != GT_CON)
+        return 0;                       /* aux:, prn: and nul: have nothing */
+    if (count == 1) {
+        ch = (uint8_t)gd_getdev(t, 1);
+        gd_echo(ch);
+        far_write8((uint32_t)buf, ch);
+        return 1;
+    }
+    n = 0x7FFF;                         /* a local, not the parameter: B10 */
+    if (count < n)
+        n = (WORD)count;
+    return gd_conline((uint32_t)buf, n);
+}
+
+/* Cconis, Cauxis: whether the handle has a byte to give. */
+static LONG gd_instat(WORD std)
+{
+    WORD t = gd_stdt(std);
+
+    if (t == GT_CON) {
+        if (con_ready(gd_con))
+            return GD_DEV_READY;
+        return GD_DEV_BUSY;
+    }
+    if (t >= 1 && t < CIO_IOCBS && !(gd_ateof & (1 << t)))
+        return GD_DEV_READY;
+    return GD_DEV_BUSY;
+}
+
+/* Cconos, Cauxos, Cprnos: whether it would take one. */
+static LONG gd_outstat(WORD std)
+{
+    WORD t = gd_stdt(std);
+
+    if (t == GT_AUX || (t == GT_PRN && !gd_prn()))
+        return GD_DEV_BUSY;
+    return GD_DEV_READY;
+}
+
+/* Tsetdate and Tsettime: the half given, checked, and the other half as
+ * the clock has it now.  GD_ERROR for a date or a time that cannot be
+ * one, and for a machine with no clock to set. */
+static LONG gd_settime(UWORD v, WORD date)
+{
+    CLOCK c;
+    UWORD lo = v & 0x1F, mid = (v >> 5) & 0x3F, hi = v >> 11;
+
+    if (date) {
+        mid &= 0x0F;
+        hi = (UWORD)((v >> 9) & 0x7F);  /* years since 1980 */
+        if (lo < 1 || lo > 31 || mid < 1 || mid > 12 || hi > 99)
+            return GD_ERROR;            /* the clock keeps 1980..2079 */
+    } else if (hi > 23 || mid > 59 || lo > 29)
+        return GD_ERROR;
+    clock_read(&c);
+    if (date) {
+        c.day = (uint8_t)lo;
+        c.month = (uint8_t)mid;
+        c.year = (uint16_t)(1980 + hi);
+    } else {
+        c.hour = (uint8_t)hi;
+        c.minute = (uint8_t)mid;
+        c.second = (uint8_t)(lo << 1);
+    }
+    if (!clock_write(&c))
+        return GD_ERROR;
+    return 0;
+}
+
+/* The calls that name no path, served before gemdos_call takes its work
+ * area from the pool: some of them WAIT, for a key, while the other
+ * processes have turns and use the pool and GEMDOS themselves -- and one
+ * of those holding the pool across this one's return, or this one across
+ * theirs, frees what the other is using.  So these hold nothing of it.
+ *
+ * The result, or GD_PATHCALL for a call that is not one of them.  NOT a
+ * flag with the result stored through a pointer: this function is
+ * inlined into its one caller, and Calypsi 5.18 lost that store -- every
+ * call answered whatever gemdos_call's `r` last held (3, as it happened),
+ * so Cconis said a key was there and Cnecin waited for one.  The same
+ * compiler's `*out = ...` in an inlined static is written up at gsx_tcalc
+ * (src/aes/graf.c).  test-m32 found it. */
+#define GD_PATHCALL 0x7FFFFFFFL         /* no call here answers this */
+
+static LONG gd_nopath(WORD fn)
+{
+    LONG r;
+
+    switch (fn) {
+    case GD_PTERM0:
+        r = gd_term(0);
+        break;
+    case GD_PTERM:
+        r = gd_term(arg_w(6));
+        break;
+    case GD_PTERMRES:                   /* nothing is left resident */
+        r = gd_term(arg_w(10));
+        break;
+    case GD_CCONIN:
+        r = gd_conin(1);
+        break;
+    case GD_CNECIN:
+        r = gd_conin(0);
+        break;
+    case GD_CRAWCIN:
+        r = gd_getdev(gd_stdt(0), 1);
+        break;
+    case GD_CRAWIO:
+        if ((arg_w(6) & 0xFF) == 0xFF)
+            r = gd_getdev(gd_stdt(0), 0);
+        else {
+            gd_putdev(gd_stdt(1), (uint8_t)arg_w(6));
+            r = 0;
+        }
+        break;
+    case GD_CCONOUT:
+        gd_putdev(gd_stdt(1), (uint8_t)arg_w(6));
+        r = 0;
+        break;
+    case GD_CAUXOUT:
+        gd_putdev(gd_stdt(2), (uint8_t)arg_w(6));
+        r = 0;
+        break;
+    case GD_CPRNOUT:
+        r = 0;                          /* not a ?: at this join: B9 */
+        if (gd_putdev(gd_stdt(3), (uint8_t)arg_w(6)))
+            r = GD_DEV_READY;
+        break;
+    case GD_CAUXIN:
+        r = gd_getdev(gd_stdt(2), 1);
+        break;
+    case GD_CCONWS:
+        r = gd_conws(arg_l(6));
+        break;
+    case GD_CCONRS:
+        r = gd_conrs(arg_l(6));
+        break;
+    case GD_CCONIS:
+        r = gd_instat(0);
+        break;
+    case GD_CAUXIS:
+        r = gd_instat(2);
+        break;
+    case GD_CCONOS:
+        r = gd_outstat(1);
+        break;
+    case GD_CAUXOS:
+        r = gd_outstat(2);
+        break;
+    case GD_CPRNOS:
+        r = gd_outstat(3);
+        break;
+    case GD_SUPER:
+        /* A 65C816 program already has the whole machine: there is no
+         * user mode to leave.  Super(1L) asks, and is told what TOS tells
+         * a supervisor, -1 (EmuTOS bdos/rwa.S); anything else changes
+         * nothing. */
+        if (arg_l(6) == 1)
+            r = -1L;
+        else if (arg_l(6) == 0)
+            r = SUP_STACK;
+        else
+            r = 0;
+        break;
+    case GD_TSETDATE:
+        r = gd_settime((UWORD)arg_w(6), 1);
+        break;
+    case GD_TSETTIME:
+        r = gd_settime((UWORD)arg_w(6), 0);
+        break;
+    case GD_MALLOC:
+    case GD_MXALLOC:                    /* one kind of memory: the mode is moot */
+        r = gd_malloc(arg_l(6));
+        break;
+    case GD_MFREE:
+        r = gd_mfree(arg_l(6));
+        break;
+    case GD_MSHRINK:
+        r = gd_mshrink(arg_l(8), arg_l(12));
+        break;
+    case GD_FCLOSE:
+        r = gd_close(arg_w(6));
+        break;
+    case GD_FREAD:
+        r = gd_rw(arg_w(6), arg_l(8), arg_l(12), 0);
+        break;
+    case GD_FWRITE:
+        r = gd_rw(arg_w(6), arg_l(8), arg_l(12), 1);
+        break;
+    case GD_FDUP:
+        r = gd_fdup(arg_w(6));
+        break;
+    case GD_FFORCE:
+        r = gd_fforce(arg_w(6), arg_w(8));
+        break;
+    default:
+        r = GD_PATHCALL;
+        break;
+    }
+    return r;
+}
+
+/* The ST's device names, which Fopen and Fcreate answer with the device's
+ * own handle; 0 for any other name. */
+static const char FAR gd_devnames[] = "CON:AUX:PRN:";
+
+static WORD gd_devname(LONG path)
+{
+    char n[6];
+    WORD i, k;
+
+    far_strget(n, (uint32_t)path, sizeof n);
+    for (k = 0; n[k]; k++)
+        if (n[k] >= 'a' && n[k] <= 'z')
+            n[k] -= 0x20;
+    if (k != 4)
+        return 0;
+    for (i = 0; i < 3; i++) {
+        for (k = 0; k < 4 && n[k] == gd_devnames[i * 4 + k]; k++)
+            ;
+        if (k == 4)
+            return (WORD)(GD_HCON - i);
+    }
+    return 0;
+}
+
 /* ---- entry ---------------------------------------------------------- */
 
 void gemdos_init(void)
 {
     WORD i;
 
-    gd_dirs = far_alloc(GD_DRIVES * GD_DIRMAX);
-    gd_dta0 = far_alloc((uint32_t)NUM_PROCS * DTA_SIZE);
-    gd_slots = far_alloc((uint32_t)GD_SLOTS * SL_SIZE);
-    gd_files = far_alloc((uint32_t)CIO_IOCBS * FH_SIZE);
-    gd_scratch = far_alloc(DTA_SIZE + GD_KEEPNAME);
+    gd_far = far_alloc(GF_SIZE);
     for (i = 0; i < GD_DRIVES; i++) {
         far_write8(gd_dirs + (uint32_t)i * GD_DIRMAX, 0);
         gd_dirset[i] = 0;
@@ -1175,9 +1917,20 @@ void gemdos_init(void)
     }
     for (i = 0; i < NUM_PROCS; i++) {
         PROC *p = &proc_tab[i];
+        uint32_t std = gd_far + GF_STD + (uint32_t)i * GD_STDS;
+        uint32_t dup = gd_far + GF_DUP + (uint32_t)i * GD_DUPS;
+        WORD j;
         p->p_gddta = gd_dta0 + (uint32_t)i * DTA_SIZE;
         p->p_gdowned = p->p_gdateof = 0;
+        for (j = 0; j < GD_STDS; j++)
+            far_write8(std + (uint32_t)j, gd_stddef[j]);
+        for (j = 0; j < GD_DUPS; j++)
+            far_write8(dup + (uint32_t)j, GT_FREE);
     }
+    for (i = 0; i < CIO_IOCBS; i++)
+        far_write8(gd_file((uint8_t)i) + FH_REFS, 0);
+    far_write8(gd_far + GF_PRN, 0);
+    con_reset(gd_con);
     gd_drive = 0;
     gd_age = 0;
 }
@@ -1205,13 +1958,30 @@ void gemdos_home(void)
  * program -- an application is process 0 and the shell runs in its
  * context -- so an accessory's open files are left exactly where they
  * are, which is what an accessory needs to hold one at all. */
-void gemdos_release(void)
+static void gd_release_files(void)
 {
-    WORD i;
+    uint32_t std = gd_std(), dup = gd_dup();
+    WORD i, t;
 
+    /* Its standard and duplicate handles, back to the defaults: a file
+     * one of them kept open is let go (gd_unref), unless the process owns
+     * it as well, in which case it closes with the rest just after. */
+    for (i = 0; i < GD_STDS; i++) {
+        t = far_read8(std + (uint32_t)i);
+        far_write8(std + (uint32_t)i, gd_stddef[i]);
+        gd_unref((uint8_t)t);
+    }
+    for (i = 0; i < GD_DUPS; i++) {
+        t = far_read8(dup + (uint32_t)i);
+        far_write8(dup + (uint32_t)i, GT_FREE);
+        gd_unref((uint8_t)t);
+    }
     for (i = 1; i < CIO_IOCBS; i++)
-        if (gd_owned & (1 << i))
-            cio_close((int16_t)i);
+        if (gd_owned & (1 << i)) {
+            gd_owned &= (uint8_t)~(1 << i);
+            if (!far_read8(gd_file((uint8_t)i) + FH_REFS))
+                cio_close((int16_t)i);
+        }
     gd_owned = gd_ateof = 0;
     for (i = 0; i < GD_SLOTS; i++)
         if ((uint32_t)rd32(gd_slot(i) + SL_OWNER) == gd_dta)
@@ -1219,18 +1989,162 @@ void gemdos_release(void)
     gd_dta = gd_dta0 + (uint32_t)proc_pid(rlr) * DTA_SIZE;
 }
 
+/* ...and at a program's end, what the machine's devices were left holding
+ * too: the printer closed, and the console as the next program finds it.
+ * A Pexec child's end does only gd_release_files: the printer and the
+ * console are its parent's to go on with. */
+void gemdos_release(void)
+{
+    WORD p;
+
+    gd_release_files();
+    p = far_read8(gd_far + GF_PRN);
+    if (p) {
+        cio_close(p);
+        far_write8(gd_far + GF_PRN, 0);
+    }
+    con_reset(gd_con);
+}
+
+/* ---- Pexec -------------------------------------------------------------------
+ * Mode 0, load and go: the ST's way for one program to run another and
+ * have it back.  The child is loaded above its parent -- the pool and the
+ * far heap are bump allocators, and the child's end winds both back to
+ * where its load found them (src/sys/app.h) -- and entered as its parent
+ * was, with gem_api_sp its own; this call waits inside it, on the engine's
+ * stack under the parent's COP, until its main() returns or it ends with
+ * Pterm, and either one's code is the answer.
+ *
+ * It runs as the same process -- the ST's AES does not know about Pexec
+ * either -- so what GEMDOS keeps per process is kept for it here: the
+ * child starts with its parent's standard handles and none of its files,
+ * a DTA of its own, and shel_read answering with its name and the tail it
+ * was given; at its end its files close and its searches go, and all of it
+ * is the parent's again.  A virtual workstation it left open is closed,
+ * its resource slots are put back, and what it took of the pool and the
+ * far heap goes back.  What it did to the screen, the windows or the menu
+ * bar is its own business, as on the ST.
+ *
+ * Mode 0 only.  3, 4, 5 and 6 are about a basepage -- memory laid out the
+ * 68000's way for a loader to fill in -- which a .G4A is not loaded into;
+ * they say EINVFN.  The environment is not passed on: the one there is,
+ * is the AES's (shel_envrn).
+ *
+ * The child's calls are served below this one on the engine stack, so a
+ * Pexec with less than GD_PEXEC_STACK of it left is refused, ENSMEM,
+ * rather than let the child's calls run down into the globals under it. */
+#define PE_LOADGO       0
+#define GD_PEXEC_STACK  1024
+
+static LONG gd_loaderr(WORD st)
+{
+    if (st == APP_E_FILE)
+        return GD_EFILNF;
+    if (st == APP_E_POOL || st == APP_E_FAR)
+        return GD_ENSMEM;
+    if (st == APP_E_READ)
+        return GD_EREADF;
+    return GD_EPLFMT;
+}
+
+static LONG gd_pexec(WORD mode, LONG fname, LONG tail)
+{
+    PROC *p = rlr;
+    APP child;
+    uint32_t std, dup, keep, save, pdta;
+    uint8_t rows[GD_STDS + GD_DUPS];
+    uint16_t owned, ateof, near, api_sp, vwk, rscmark, rscmark2;
+    void *rsc, *rsc2;
+    WORD depth, i, st;
+    LONG r;
+
+    if (mode != PE_LOADGO)
+        return GD_EINVFN;
+    if ((uint16_t)(void *)&depth < (uint16_t)(ctx_stack_lo + GD_PEXEC_STACK))
+        return GD_ENSMEM;
+    r = gd_name(fname);
+    if (r < 0)
+        return r;
+    keep = farmem.brk;
+    save = far_alloc(SH_SAVELEN + DTA_SIZE);    /* the shell's words, the child's DTA */
+    if (!save)
+        return GD_ENSMEM;
+    near = app_near;
+    st = app_load_file(gw->full, &child);
+    if (st != APP_OK) {
+        far_release(keep);
+        app_near = near;
+        return gd_loaderr(st);
+    }
+    sh_push(save, gw->full, (uint32_t)tail);
+
+    /* The parent's, kept; the child's made. */
+    std = gd_std();
+    dup = gd_dup();
+    far_get(rows, std, GD_STDS);
+    far_get(rows + GD_STDS, dup, GD_DUPS);
+    owned = p->p_gdowned;
+    ateof = p->p_gdateof;
+    pdta = p->p_gddta;
+    rsc = p->p_rsc;
+    rscmark = p->p_rscmark;
+    rsc2 = p->p_rsc2;
+    rscmark2 = p->p_rscmark2;
+    api_sp = gem_api_sp;
+    depth = gem_depth;
+    vwk = vdi_virtuals_open();
+    for (i = 0; i < GD_STDS; i++)
+        gd_ref(rows[i]);                /* the child's copies name them too */
+    far_fill(dup, GT_FREE, GD_DUPS);
+    p->p_gdowned = 0;
+    p->p_gdateof = 0;
+    p->p_gddta = save + SH_SAVELEN;
+
+    r = (LONG)app_exec(&child);
+
+    /* The child's gone; the parent's back. */
+    gem_api_sp = api_sp;
+    gem_depth = (uint8_t)depth;
+    gd_release_files();
+    far_put(std, rows, GD_STDS);
+    far_put(dup, rows + GD_STDS, GD_DUPS);
+    p->p_gdowned = owned;
+    p->p_gdateof = ateof;
+    p->p_gddta = pdta;
+    p->p_rsc = rsc;
+    p->p_rscmark = rscmark;
+    p->p_rsc2 = rsc2;
+    p->p_rscmark2 = rscmark2;
+    vdi_close_virtuals_but(vwk);
+    pool_release(child.pool_mark);
+    far_release(child.far_mark);
+    sh_pop(save);
+    far_release(keep);
+    app_near = near;
+    return r;
+}
+
 void gemdos_call(uint32_t pb)
 {
     LONG r;
     WORD fn;
-    uint16_t mark = pool_mark();
+    uint16_t mark;
 
     gd_pb = pb;
     gemdos_calls++;
     fn = arg_w(4);
+    /* The result goes through `pb`, not gd_pb: a call that waited for a
+     * key let other processes make calls of their own, and the last of
+     * those left gd_pb at its block. */
+    r = gd_nopath(fn);
+    if (r != GD_PATHCALL) {
+        wr32(pb, r);
+        return;
+    }
+    mark = pool_mark();
     gw = (gd_work_t *)pool_alloc(sizeof(gd_work_t), 2);
     if (!gw) {
-        wr32(gd_pb, GD_ENSMEM);
+        wr32(pb, GD_ENSMEM);
         return;
     }
     switch (fn) {
@@ -1268,20 +2182,15 @@ void gemdos_call(uint32_t pb)
         r = gd_setpath(arg_l(6));
         break;
     case GD_FCREATE:
-        r = gd_open(arg_l(6), CIO_A_WRITE);
+        r = gd_devname(arg_l(6));
+        if (!r)
+            r = gd_open(arg_l(6), CIO_A_WRITE);
         break;
     case GD_FOPEN:
-        r = gd_open(arg_l(6), (arg_w(10) & 3) == GD_O_READ
-                                  ? CIO_A_READ : CIO_A_UPDATE);
-        break;
-    case GD_FCLOSE:
-        r = gd_close(arg_w(6));
-        break;
-    case GD_FREAD:
-        r = gd_xfer(arg_w(6), arg_l(8), arg_l(12), 0);
-        break;
-    case GD_FWRITE:
-        r = gd_xfer(arg_w(6), arg_l(8), arg_l(12), 1);
+        r = gd_devname(arg_l(6));
+        if (!r)
+            r = gd_open(arg_l(6), (arg_w(10) & 3) == GD_O_READ
+                                      ? CIO_A_READ : CIO_A_UPDATE);
         break;
     case GD_FDELETE:
         r = gd_xio(CIO_X_DELETE, arg_l(6), 0);
@@ -1301,12 +2210,6 @@ void gemdos_call(uint32_t pb)
         break;
     case GD_DGETPATH:
         r = gd_getpath(arg_l(6), arg_w(10));
-        break;
-    case GD_MALLOC:
-        r = gd_malloc(arg_l(6));
-        break;
-    case GD_MFREE:
-        r = 0;
         break;
     case GD_FSFIRST:
         r = gd_fsfirst(arg_l(6), arg_w(10));
@@ -1338,11 +2241,15 @@ void gemdos_call(uint32_t pb)
     case GD_FDATIME:
         r = gd_datime(arg_l(6), arg_w(10), arg_w(12));
         break;
-    default:                            /* Tset*, Fforce, Pexec: not here */
+    case GD_PEXEC:                      /* it waits, holding gw: the child's
+                                         * pool is above it and goes first */
+        r = gd_pexec(arg_w(6), arg_l(8), arg_l(12));
+        break;
+    default:                            /* Maddalt, Flock, MiNT's: not here */
         gemdos_bad++;
         r = GD_EINVFN;
         break;
     }
     pool_release(mark);
-    wr32(gd_pb, r);
+    wr32(pb, r);
 }

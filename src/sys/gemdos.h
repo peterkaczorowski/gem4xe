@@ -33,8 +33,31 @@
  * the ST's 44 bytes, in the application's memory wherever it says.
  *
  * MEMORY.  Malloc is the far heap (src/sys/farmem.h): the bump
- * allocator, wound back when the application exits, so Mfree is a
- * no-op and a leak lasts one run.  Malloc(-1) says how much is left.
+ * allocator, wound back when the application exits.  Each block carries
+ * its size, so the LAST one can be given back (Mfree) or cut down
+ * (Mshrink) in place, which is all a bump allocator can mean by either;
+ * a block below it keeps its memory until the program ends.  Malloc(-1)
+ * says how much is left.
+ *
+ * CHARACTERS.  The ST's six standard handles are here: 0 and 1 the
+ * console, 2 aux:, 3 prn:, 4 and 5 nothing.  The console is a VT-52 drawn
+ * on GEM's screen (src/sys/con.h) and read from its keyboard; prn: is
+ * where GEM4XE.CFG sends the printer (PRINTTO), and nowhere when it says
+ * there is no printer; aux: has no device behind it yet.  Fforce points a
+ * standard handle at a file or another device and Fdup keeps one to put
+ * back, and every C function reads and writes through the handle it is
+ * the ST's for -- so a program's Cconws lands in a file once handle 1
+ * has been forced onto one.
+ *
+ * PROCESSES.  Pterm, Pterm0 and Ptermres end the program there and then:
+ * the COP does not return to it, and its loader sees the code as it would
+ * have seen main()'s (src/sys/abi.s).  Nothing stays resident after
+ * Ptermres; there is nothing on this machine for a TSR to hook.  Pexec
+ * runs another program and has it back: mode 0, load and go, with the
+ * child above its parent in the pool and the far heap and given back
+ * when it ends, and what GEMDOS keeps per process -- the handles, the
+ * DTA, the name shel_read answers -- the child's while it runs and the
+ * parent's again after it.
  */
 #ifndef GEM4XE_GEMDOS_H
 #define GEM4XE_GEMDOS_H
@@ -42,13 +65,33 @@
 #include <stdint.h>
 
 /* Function numbers: the ST's. */
+#define GD_PTERM0    0x00
+#define GD_CCONIN    0x01
+#define GD_CCONOUT   0x02
+#define GD_CAUXIN    0x03
+#define GD_CAUXOUT   0x04
+#define GD_CPRNOUT   0x05
+#define GD_CRAWIO    0x06
+#define GD_CRAWCIN   0x07
+#define GD_CNECIN    0x08
+#define GD_CCONWS    0x09
+#define GD_CCONRS    0x0A
+#define GD_CCONIS    0x0B
 #define GD_DSETDRV   0x0E
+#define GD_CCONOS    0x10
+#define GD_CPRNOS    0x11
+#define GD_CAUXIS    0x12
+#define GD_CAUXOS    0x13
 #define GD_DGETDRV   0x19
 #define GD_FSETDTA   0x1A
+#define GD_SUPER     0x20
 #define GD_TGETDATE  0x2A
+#define GD_TSETDATE  0x2B
 #define GD_TGETTIME  0x2C
+#define GD_TSETTIME  0x2D
 #define GD_FGETDTA   0x2F
 #define GD_SVERSION  0x30
+#define GD_PTERMRES  0x31
 #define GD_DFREE     0x36
 #define GD_DCREATE   0x39
 #define GD_DDELETE   0x3A
@@ -61,15 +104,23 @@
 #define GD_FDELETE   0x41
 #define GD_FSEEK     0x42
 #define GD_FATTRIB   0x43
+#define GD_MXALLOC   0x44
+#define GD_FDUP      0x45
+#define GD_FFORCE    0x46
 #define GD_DGETPATH  0x47
 #define GD_MALLOC    0x48
 #define GD_MFREE     0x49
+#define GD_MSHRINK   0x4A
+#define GD_PEXEC     0x4B
+#define GD_PTERM     0x4C
 #define GD_FSFIRST   0x4E
 #define GD_FSNEXT    0x4F
 #define GD_FRENAME   0x56
 #define GD_FDATIME   0x57
 
 /* Errors: the ST's. */
+#define GD_ERROR    -1L         /* the generic one: Tsetdate's refusal */
+#define GD_EREADF   -11L        /* a read failed partway: Pexec's load */
 #define GD_EINVFN   -32L        /* no such function here */
 #define GD_EFILNF   -33L        /* file not found */
 #define GD_EPTHNF   -34L        /* path not found */
@@ -77,9 +128,22 @@
 #define GD_EACCDN   -36L        /* access denied: locked, full, exists */
 #define GD_EIHNDL   -37L        /* not a handle of ours */
 #define GD_ENSMEM   -39L        /* no memory */
+#define GD_EIMBA    -40L        /* not a block Malloc gave out */
 #define GD_EDRIVE   -46L        /* no such drive */
 #define GD_ENMFIL   -49L        /* no more files */
 #define GD_ERANGE   -64L        /* a seek past the end of the file */
+#define GD_EPLFMT   -66L        /* not a program Pexec can load */
+#define GD_EGSBF    -67L        /* Mshrink asked to make a block bigger */
+
+/* What a character call says about a device, and what a program ends
+ * with when ^C ends it at the console. */
+#define GD_DEV_READY  -1L
+#define GD_DEV_BUSY   0L
+#define GD_TERM_CTRLC -32
+/* Input that will never come -- a forced handle at the end of its file,
+ * or aux: with nothing behind it.  The ST hangs there; MiNT answers this,
+ * and so does gem4xe. */
+#define GD_CEOF     0xFF1AL
 
 /* File attributes, in Fsfirst's mask and the DTA. */
 #define FA_RDONLY   0x01
@@ -103,28 +167,36 @@
 #define GD_O_WRITE  1
 #define GD_O_RDWR   2
 
-/* A handle is its IOCB's number plus this; 0..5 are the ST's standard
- * handles, which gem4xe does not hand out. */
+/* HANDLES.  0..5 are the standard handles; a file Fopen or Fcreate opens
+ * is its IOCB's number plus GD_HANDLE_BASE, 7..13; Fdup's are the four
+ * after those.  The devices have handles of their own, the ST's negative
+ * ones, which Fopen answers for their names -- "CON:", "AUX:", "PRN:". */
+#define GD_STDS        6
 #define GD_HANDLE_BASE 6
+#define GD_DUP_BASE    14       /* GD_HANDLE_BASE + CIO_IOCBS */
+#define GD_DUPS        4
+#define GD_HCON       -1
+#define GD_HAUX       -2
+#define GD_HPRN       -3
 
-/* The call block's size, the largest argument list being Fread's. */
-#define GD_PB_SIZE  16
+/* The call block's size, the largest argument list being Pexec's. */
+#define GD_PB_SIZE  20
 
 /* The largest sector gd_dfree will read into the pool: SDFS on a CF card
  * (tools/apt.py) is 512, and nothing gem4xe mounts is bigger. */
 #define GD_SECMAX   512
 
 /* Once, after dos_ident and farmem_probe and before any application is
- * loaded: the search slots and the per-drive directories are far
- * allocations that must not be in the region an application's exit
- * winds back. */
+ * loaded: GEMDOS's state is a far allocation that must not be in the
+ * region an application's exit winds back. */
 void gemdos_init(void);
 
 /* One call: the block at `pb`, the result written into it. */
 void gemdos_call(uint32_t pb);
 
 /* The application has exited: its handles closed, its searches freed,
- * the DTA back to the default. */
+ * the DTA and the standard handles back to the defaults, the printer
+ * closed and the console as a program finds it. */
 void gemdos_release(void);
 /* The current drive and directory as the boot left them: what the
  * shell restores before the desktop runs again. */

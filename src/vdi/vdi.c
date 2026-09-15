@@ -719,16 +719,31 @@ static void vdi_v_clsvwk(void)
  * it when a program has ended, and at that moment the running process is
  * that program -- an application is process 0 and the shell runs in its
  * context -- so an accessory's stays open. */
-void vdi_close_virtuals(void)
+uint16_t vdi_virtuals_open(void)
+{
+    WORD i;
+    uint16_t m = 0;
+    for (i = 1; i < NUM_VWK; i++)
+        if (vwk_own[i] == (void *)ctx_cur)
+            m |= (uint16_t)(1 << i);
+    return m;
+}
+
+void vdi_close_virtuals_but(uint16_t keep)
 {
     WORD i;
     for (i = 1; i < NUM_VWK; i++)
-        if (vwk_own[i] == (void *)ctx_cur) {
+        if (vwk_own[i] == (void *)ctx_cur && !(keep & (1 << i))) {
             vwk_tab[i].handle = 0;
             vwk_own[i] = 0;
         }
     if (vwk_cur != 0 && vwk_tab[vwk_cur].handle == 0)
         vwk_to_phys();
+}
+
+void vdi_close_virtuals(void)
+{
+    vdi_close_virtuals_but(0);
 }
 
 static void vdi_vq_extnd(void)
