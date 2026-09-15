@@ -77,6 +77,9 @@ from mkxex import read_elf
 
 MAGIC_V3 = b"G4A\x03"      # far fixups u16
 MAGIC_V4 = b"G4A\x04"      # far fixups three bytes
+# What formats 3 and 4 promise the loader: the call gates' COP signatures
+# (src/sys/abi.h, src/app/gemabi.s).
+GATES = {"vdi_call": 0x56, "aes_call": 0x41, "dos_call": 0x44}
 
 
 def read_elf_all(path):
@@ -237,6 +240,21 @@ def main(argv):
     entry = b_syms["__program_start"]
     if not (fb <= entry < fe):
         raise SystemExit(f"entry ${entry:06X} is not in the far region")
+
+    # The call gates the program was linked with must be the ones the format
+    # number stamped below promises (src/sys/abi.h).  Objects built from an
+    # older kit's gemabi.s would otherwise leave here as a format 3 or 4 file
+    # whose every call is refused on the Atari, with nothing on the host to
+    # say so.  A program that links no gate is not asked.
+    for name, sig in GATES.items():
+        a = b_syms.get(name)
+        if a is None or not fb <= a < fe - 1:
+            continue
+        got = far_img[a - fb:a - fb + 2]
+        if got != bytes((0x02, sig)):
+            raise SystemExit(f"{name} is {got.hex(' ')}, not COP #${sig:02X}: "
+                             f"the program was linked with an older kit's "
+                             f"gemabi.s -- rebuild its objects with this kit")
 
     # v3 unless the far image needs more room than its offsets have. Every
     # program in this tree but GACS's shell is v3.

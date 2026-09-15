@@ -138,6 +138,30 @@ class TestBuildsFromACopy(unittest.TestCase):
                          "from this tree's, so what test-m11 proves does "
                          "not carry over to the kit")
 
+    def test_a_program_linked_with_the_old_gates_is_refused_on_the_host(self):
+        """tools/mkg4a.py checks the gates it is about to stamp format 3 or
+        4 over.  Objects built from an older kit's gemabi.s -- COP #$73,
+        #$C8, #$01 -- must stop the build here, not come out as a file the
+        Atari's loader accepts and whose every call it then refuses."""
+        old = os.path.join(self.dir, "old-gates")
+        shutil.copytree(self.kit, old,
+                        ignore=shutil.ignore_patterns("build", "*.g4a"))
+        p = os.path.join(old, "lib", "gemabi.s")
+        with open(p) as f:
+            s = f.read()
+        for new, was in (("#0x56", "#0x73"), ("#0x41", "#0xc8"), ("#0x44", "#0x01")):
+            self.assertIn(new, s)
+            s = s.replace(new, was)
+        with open(p, "w") as f:
+            f.write(s)
+        env = dict(os.environ, CALYPSI=CALYPSI)
+        r = subprocess.run(["make", "-s"], cwd=old, capture_output=True,
+                           text=True, env=env, timeout=600)
+        self.assertNotEqual(r.returncode, 0,
+                            "a program with the old gates was packed")
+        self.assertIn("not COP #$56", r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(old, "hello.g4a")))
+
 
 class TestTheExampleIsShapedLikeAGemProgram(unittest.TestCase):
     """The example is the file an author copies first, so the ORDER of

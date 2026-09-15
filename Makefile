@@ -1166,7 +1166,7 @@ test-host: $(if $(wildcard $(CC65816)),build/m11_app.g4a build/gem.xex)
 SDK_FILES = tools/mksdk.py tools/sdk/README.md tools/sdk/Makefile \
             tools/sdk/hello.c src/app/gem.h src/portab.h src/app/gemlib.c \
             src/app/gemabi.s src/app/crt_gemapp.s src/app/gemapp.scm \
-            tools/mkg4a.py tools/mkxex.py COPYING
+            src/sys/clib.c tools/mkg4a.py tools/mkxex.py COPYING
 
 sdk: build/gem4xe-sdk.tar.gz
 build/gem4xe-sdk.tar.gz: $(SDK_FILES)
