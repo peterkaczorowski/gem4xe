@@ -1137,7 +1137,18 @@ check-cc:
 # The host tests want the gate application built, because the kit's own
 # test rebuilds it out of the kit and compares the bytes: what test-m11
 # proves about that binary is what the kit inherits.
-test-host: build/m11_app.g4a
+# Built only when the Calypsi tool chain is here.  The host tests are the
+# part of the suite that needs nothing but Python 3, and CI runs them on a
+# machine that has no compiler (.github/workflows/host-tests.yml); every
+# case that wants a built program skips itself when it is absent, but a
+# prerequisite cannot, so these are asked for conditionally rather than
+# always.  GEM.COM is here because tests/host/test_licence.py refuses to
+# pass by skipping: it asserts build/gem.map exists, so the product must
+# be linked before the host tests run.  `make test` puts test-host first
+# and on a clean tree nothing had linked it -- the m11_app fixture alone
+# makes *a* map, which lifts that file's "no maps" skip without making
+# the one it actually checks.
+test-host: $(if $(wildcard $(CC65816)),build/m11_app.g4a build/gem.xex)
 	python3 -m unittest discover -s tests/host -t .
 
 # The application kit (tools/mksdk.py, tools/sdk/): what somebody who is
