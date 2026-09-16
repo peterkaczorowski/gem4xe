@@ -123,7 +123,7 @@ APP_STACK  = 256
 # target, otherwise boots a stale image and compares it against a fresh
 # linker map).
 all: build/hello-boot.atr build/m2-boot.atr build/m3-boot.atr build/m6split-boot.atr \
-     build/m12-d2.atr build/m14-boot.atr build/m17-boot.atr build/gem-boot.atr build/gem-sp.atr \
+     build/m12-d2.atr build/m14-boot.atr build/m17-boot.atr build/gem-boot.atr \
      build/gem-sdx.atr build/gem-apps.atr build/gem-cf.img
 
 build/%.o: src/%.s
@@ -950,10 +950,6 @@ build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
 	    $(DOS2_FILES) --add build/gem4xe.cfg GEM4XE.CFG
 
-# The product's SpartaDOS floppy is an INSTALL disk: the same \GEM\ and
-# \APPS\ layout the card has, so copying it onto an APT hard drive is a
-# directory copy and not a decision, and none of the file layer's
-# fixtures -- those belong on a gate's disk (--tree) and not on this one.
 # The same shipped disk with the safe-mode line uncommented: what a user
 # writes from the DOS prompt when the VBXE's output is not something
 # their monitor will show (tests/emu/m26_fallback.py).
@@ -963,36 +959,26 @@ build/gem-antic.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
 	    $(DOS2_FILES) --add build/safe.cfg GEM4XE.CFG
 
+# The pictures' disk (make shots): SpartaDOS 3.2 booting the card's layout,
+# the system and the applications, so that \APPS\ and the Desk menu's Clock
+# can be photographed.  It was the SpartaDOS 3.2 product floppy's layout
+# too, until that floppy was retired after phase 42: the installer is
+# SpartaDOS X's, and a machine with a drive to install onto has SpartaDOS X
+# in its flash (docs/media.md).
 SP_LAYOUT = --name "GEM>GEM.COM" --boot "CD >GEM|GEM" --mkdir GEM \
 	    --add build/desktop.g4a "GEM>DESKTOP.G4A" \
 	    --add build/desktop.rsc "GEM>DESKTOP.RSC" \
 	    --add build/prefs.rsc "GEM>PREFS.RSC" \
 	    --add build/lang.rsc "GEM>LANG.RSC" \
 	    --add build/816.com "GEM>816.COM" \
-	    --add build/gem4xe.cfg "GEM>GEM4XE.CFG" \
-	    --add build/install-sys.bat INSTALL.BAT
-# ...and what gem-shots.atr photographs beside it: the applications and the
-# accessory, which the product's SpartaDOS floppy does not carry.
+	    --add build/gem4xe.cfg "GEM>GEM4XE.CFG"
 SP_APPS   = --mkdir APPS \
 	    --add build/clockacc.g4a "GEM>CLOCK.ACC" \
 	    --add build/clock.rsc "GEM>CLOCK.RSC" \
 	    --add build/calc.g4a "APPS>CALC.G4A" --add build/calc.rsc "APPS>CALC.RSC" \
 	    --add build/clock.g4a "APPS>CLOCK.G4A" --add build/clock.rsc "APPS>CLOCK.RSC"
-SP_DEPS   = build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg build/install-sys.bat $(DESK_DEPS) $(APP_DEPS) $(ACCP_DEPS) tools/mkspdisk.py tools/atr.py
+SP_DEPS   = build/gem.xex build/lang.rsc build/816.com build/gem4xe.cfg $(DESK_DEPS) $(APP_DEPS) $(ACCP_DEPS) tools/mkspdisk.py tools/atr.py
 
-# The system floppies' INSTALL.BAT, as a file for tools/mkspdisk.py to
-# carry (tools/mkfloppy.py writes gem-sdx.atr's and gem-apps.atr's itself).
-build/install-sys.bat: tools/mkfloppy.py tools/mkcf.py
-	@mkdir -p build
-	python3 tools/mkfloppy.py --batch system $@
-
-build/gem-sp.atr: $(SP_DEPS)
-	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
-	@rm -f $@
-	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) $(SP_LAYOUT)
-
-# The same floppy with the applications on it, for the pictures: \APPS\
-# and the Desk menu's Clock are photographed.
 build/gem-shots.atr: $(SP_DEPS)
 	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
 	@rm -f $@
@@ -1036,8 +1022,8 @@ build/gem-sd.img: build/gem-cf.img build/gemdiag.com
 # double-density SDFS disk, and NO DOS -- it boots under the SpartaDOS X
 # in a cartridge or in U1MB flash, which is the one DOS that lives in the
 # machine rather than on the disk, so the disk is gem4xe's to give away
-# where gem-sp.atr and gem-boot.atr are not.  Needs no fixture to build;
-# test-boot boots it when [spartados].sdx_cart names a cartridge.
+# where gem-boot.atr is not.  Needs no fixture to build; test-boot boots
+# it when [spartados].sdx_cart names a cartridge.
 build/gem-sdx.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/prefs.rsc \
                    build/lang.rsc build/gem4xe.cfg build/816.com tools/mkfloppy.py tools/mkcf.py tools/atr.py
 	@rm -f $@
@@ -1222,7 +1208,7 @@ build/gem4xe-sdk.tar.gz: $(SDK_FILES)
 # that could go stale cannot).  DIST is the name it takes: the date and
 # the commit unless you say otherwise.
 DIST ?= build/gem4xe-$(shell date +%F)-$(shell git rev-parse --short HEAD 2>/dev/null || echo local)
-DIST_DISKS = build/gem-sp.atr build/gem-boot.atr build/gem-sdx.atr build/gem-apps.atr build/gem-cf.img
+DIST_DISKS = build/gem-boot.atr build/gem-sdx.atr build/gem-apps.atr build/gem-cf.img
 DIST_SYS   = build/gem.xex build/desktop.g4a build/desktop.rsc \
              build/lang.rsc build/816.com build/hello_app.g4a build/gem4xe.cfg \
              build/prefs.rsc \
@@ -1233,15 +1219,15 @@ dist: $(DIST_SYS) $(DIST_DISKS) build/gem4xe-sdk.tar.gz \
 	python3 tools/mkdist.py $(DIST) --tar $(DIST).tar.gz
 
 # The release: the distribution for the public.  What differs is what it
-# does NOT carry -- gem-sp.atr and gem-boot.atr boot a DOS that is not
-# gem4xe's to give away (fixtures.toml.example), so they stay home and
-# the page says so -- and the name, which is the version in VERSION
-# rather than the date.  It comes as a tarball and, for Windows, the same
-# tree as a zip; the DOS-less floppy travels on its own as well, under the
-# release's name, for whoever wants the disk and nothing else.  One
-# checksum file covers the three, for the release page.  The first
-# line asks the desktop's resource what version its About box says,
-# because 0.1.1 went out saying 0.1 (phase38.md).
+# does NOT carry -- gem-boot.atr boots a DOS that is not gem4xe's to give
+# away (fixtures.toml.example), so it stays home and the page says so --
+# and the name, which is the version in VERSION rather than the date.  It
+# comes as a tarball and, for Windows, the same tree as a zip; the two
+# DOS-less floppies travel on their own as well, under the release's name,
+# for whoever wants the disks and nothing else.  One checksum file covers
+# the four, for the release page.  The first line asks the desktop's
+# resource what version its About box says, because 0.1.1 went out
+# saying 0.1 (phase38.md).
 VERSION := $(shell cat VERSION)
 RELEASE  = build/gem4xe-$(VERSION)
 
@@ -1480,14 +1466,15 @@ test-m21: build/m3-boot.atr build/inv.fnt
 # The product disk booting into the desktop with nothing typed: the
 # batch file the SpartaDOSes run, the loader's refusal on the 6502, the
 # switch, and the desk against the model (docs/shipping.md, section 2).
-# BOTH product disks: the gate boots both, and naming only one here left
-# the other stale whenever GEM.COM was rebuilt -- which looked exactly
+# EVERY product disk: the gate reads them all, and naming only one here
+# left the other stale whenever GEM.COM was rebuilt -- which looked exactly
 # like the far image being mangled by the DOS, and cost an afternoon
 # twice (docs/phase16.md).
-# The third disk, gem-sdx.atr, carries no DOS and boots under the SDX
-# cartridge fixture; with none named it is read but not booted, and the
-# gate says so rather than failing (tests/emu/product_boot.py).
-test-boot: build/gem-sp.atr build/gem-boot.atr build/gem-sdx.atr build/gem-apps.atr build/desktop.g4a build/desktop.sym
+# gem-sdx.atr carries no DOS and boots under the SDX cartridge fixture;
+# with none named it is read but not booted, and the gate says so rather
+# than failing.  gem-apps.atr is not a boot disk and is only read
+# (tests/emu/product_boot.py).
+test-boot: build/gem-boot.atr build/gem-sdx.atr build/gem-apps.atr build/desktop.g4a build/desktop.sym
 	python3 tests/emu/product_boot.py --sdx="$(SRC_SDX)"
 
 # The same boot off the product CF card, on the machine this project is

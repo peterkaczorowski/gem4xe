@@ -1,6 +1,6 @@
 # Storage: what an Atari can boot gem4xe from, and what to build for it
 
-`make dist` produces five media today — four floppies and a 16 MB CF
+`make dist` produces four media today — three floppies and a 16 MB CF
 card image — and the question this answers is whether that is the right
 set, given what people actually have attached to an Atari in 2026.
 
@@ -74,7 +74,7 @@ That last is not built, and the decision is that it does not need to be.
 Someone with an APT drive already has one, with their own partitions and
 their own idea of where things go; what they want is not a card image
 that would overwrite it but **the files, on floppies they can install
-from**.  So that is what the SpartaDOS floppies are: the card's system
+from**.  So that is what the two SDFS floppies are: the card's system
 partition in two halves, each with an `INSTALL.BAT` that puts it on a
 drive.
 
@@ -113,9 +113,12 @@ drive.
 
 ## The floppies the release can carry
 
-`gem-sp.atr` boots SpartaDOS 3.2 and `gem-boot.atr` boots a DOS 2, and
-neither DOS is gem4xe's to give away, so the public release
-(`make release`) carries neither.  **`gem-sdx.atr`** and
+`gem-boot.atr` boots a DOS 2, which is not gem4xe's to give away, so the
+public release (`make release`) does not carry it.  A SpartaDOS 3.2
+floppy, `gem-sp.atr`, was the same and was retired after phase 42: the
+installer is SpartaDOS X's, and a machine with a drive to install onto
+has SpartaDOS X in its flash, so a disk that boots 3.2 was one more thing
+to build and gate for nobody.  **`gem-sdx.atr`** and
 **`gem-apps.atr`** (`tools/mkfloppy.py`) are the two that can travel:
 double-sided double-density SDFS disks, 1440 sectors of 256 bytes, with
 **no DOS**, their boot sectors the blank disk's stub.  The first is the
@@ -146,10 +149,10 @@ here rather than in a forum thread.
 | If you have | Use | Why |
 |---|---|---|
 | U1MB / Incognito, SIDE, SIDE2, SIDE3, IDE Plus 2.0, MyIDE-II | `disks/gem-cf.img` written to a card | APT; the system installs to `\GEM\`, applications to `\APPS\` |
-| An APT drive you have already partitioned | `disks/gem-sdx.atr` (or `gem-sp.atr`) and `disks/gem-apps.atr`, and `-INSTALL` from each | the floppies are the card in two halves; nothing of yours is touched |
+| An APT drive you have already partitioned | `disks/gem-sdx.atr` and `disks/gem-apps.atr`, and `-INSTALL` from each | the floppies are the card in two halves; nothing of yours is touched |
 | SIDE3 / AVGCART / any FAT loader, with SpartaDOS X in the machine | `disks/gem-sdx.atr` on the card you have, `disks/gem-apps.atr` as a second drive | the loader mounts them; SDX boots the first; nothing to install -- and they are the floppies in the public release |
-| SIDE3 / AVGCART / any FAT loader, without | `disks/gem-sp.atr` on the card you have, `disks/gem-apps.atr` as a second drive | the loader mounts them; nothing to install |
-| SDrive-MAX, FujiNet, a real drive | `disks/gem-sdx.atr` (SpartaDOS X in the machine), `disks/gem-sp.atr` (SpartaDOS 3.2) or `disks/gem-boot.atr` (DOS 2), with `disks/gem-apps.atr` in a second drive under a SpartaDOS | plain floppy images |
+| SIDE3 / AVGCART / any FAT loader, without | `disks/gem-boot.atr` on the card you have | the loader mounts it and it boots its own DOS 2: the system, nothing else |
+| SDrive-MAX, FujiNet, a real drive | `disks/gem-sdx.atr` with `disks/gem-apps.atr` in a second drive (SpartaDOS X in the machine), or `disks/gem-boot.atr` (DOS 2) | plain floppy images |
 | A DOS you already like | `system/` -- the loose files | put them where you want; give the disk a start-up that runs `GEM` |
 | MIO, BlackBox, original MyIDE | the floppies | their partitioning is their own; nothing here writes it |
 
@@ -178,3 +181,26 @@ Two things are cheap and neither is needed yet:
   knob is a few lines.  16 MB was chosen because it is the smallest
   thing that comfortably holds two 8 MB partitions, and because a
   16 MB file is a reasonable thing to put in a release.
+
+Two more are wanted and are not built either:
+
+- **A minimal install.**  The system is about 150 KB and nearly all of
+  it is `GEM.COM`'s far image; what a small partition, a single-density
+  floppy or a machine short of room wants is that image and the desktop,
+  without `LANG.RSC`'s spare languages, without `\APPS\` and without the
+  accessory, and a `DESKTOP.INF` that does not expect them.
+  `tools/mkcf.py`'s tables are already the seam -- a third table beside
+  `SYSTEM` and `APPS` -- so the work is deciding what comes out, not
+  where to put the knob.
+- **A slot in flash, rather than a file a DOS loads.**  Ultimate 1MB
+  holds selectable OS images in its flash and so does Antonia 2, and the
+  question worth answering is whether gem4xe can be one of them.  It is
+  a question and not a plan: a slot holds a kernel that answers the
+  machine's vectors out of `$C000-$FFFF`, while gem4xe is a program a
+  DOS loads into far banks it probes for at run time, so a slot would
+  hold a loader that finds the rest rather than the system itself --
+  which is close to what `src/farload.s` already is.  The prior art to
+  read first is flashjazzcat's, which boots its GUI from a flash
+  cartridge on this same class of machine (`PLAN.md`, *Prior art*).
+  What it would buy is a machine that comes up in the desktop with no
+  disk at all, and what it costs is a second way in to keep working.

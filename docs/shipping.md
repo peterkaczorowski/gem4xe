@@ -102,11 +102,13 @@ looks for `D1:AUTORUN.SYS` and for `STARTUP.BAT`: both names are in
 `X32G.DOS`, and `CHANGES.32G` on the same disk documents the batch file.
 It does *not* look for `AUTOEXEC.BAT`.  **SpartaDOS X** boots from the
 cartridge or from U1MB flash and reads `CONFIG.SYS` then `AUTOEXEC.BAT`
-off `D1:`.  A product disk cannot know which one booted it, so
-`build/gem-sp.atr` carries **both batch files**, four bytes each (`GEM`
-and an EOL), and the program keeps the name a person would type
-(`tools/mkspdisk.py --boot GEM`).  `test-boot` boots that disk with
-nothing typed and compares the desk it comes up in against the model.
+off `D1:`.  A product disk cannot know which one booted it, so the
+SpartaDOS 3.2 product disk carried **both batch files**, four bytes each
+(`GEM` and an EOL), and the program kept the name a person would type
+(`tools/mkspdisk.py --boot GEM`); `test-boot` booted it with nothing typed
+and compared the desk against the model.  That disk was retired after
+phase 42 -- the installer is SpartaDOS X's (`docs/media.md`) -- and the
+screenshot disk is what still carries the pair.
 
 **DOS II+/D 6.4** -- the DOS 2 fixture -- **has no `AUTORUN.SYS` at
 all**: the string is nowhere in its `DOS.SYS`, and a disk built with the
@@ -632,16 +634,16 @@ changes when somebody decides it does.
 
 `make release` is `make dist` for the public, and the version is its
 name: `build/gem4xe-0.1.1.tar.gz`, the same tree again as
-`gem4xe-0.1.1.zip` for Windows, the floppy on its own as
-`gem4xe-0.1.1.atr`, and one `gem4xe-0.1.1.sha256` covering the three for
-the release page; the inner `VERSION` still carries the date and commit.
-What it leaves out is `gem-sp.atr` and `gem-boot.atr`, because each
-boots a DOS that is not gem4xe's to give away (`fixtures.toml.example`);
-the card image and `gem-sdx.atr` are built from this tree alone and
-carry no DOS, so they travel (`docs/media.md`, *The floppy the release
-can carry*).  The page says which files are missing and how to make one
-of the others from `system/` rather than pretending the download is the
-same one a tester gets.
+`gem4xe-0.1.1.zip` for Windows, the floppies on their own as
+`gem4xe-0.1.1.atr` and (since phase 42) `gem4xe-0.1.1-apps.atr`, and one
+`gem4xe-0.1.1.sha256` covering them for the release page; the inner
+`VERSION` still carries the date and commit.  What it leaves out is
+`gem-boot.atr`, because it boots a DOS that is not gem4xe's to give away
+(`fixtures.toml.example`); the card image, `gem-sdx.atr` and
+`gem-apps.atr` are built from this tree alone and carry no DOS, so they
+travel (`docs/media.md`, *The floppies the release can carry*).  The
+page says which file is missing and how to make one from `system/`
+rather than pretending the download is the same one a tester gets.
 
 The About box's other number is the **AES version**, 1.40, filled in at
 run time from `global[0]`.  That is the AES gem4xe claims to be -- TOS

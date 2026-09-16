@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
 """The product disks boot into the desktop, with nothing typed at all.
 
-There are three of them and they come up the same way by different means:
+Two of them boot, and they come up the same way by different means:
 
-  build/gem-sp.atr   SpartaDOS 3.2 on an SDFS volume, GEM.COM started by
-                     the batch file the DOS runs at boot -- two of them,
-                     STARTUP.BAT for SpartaDOS 3.2 and AUTOEXEC.BAT for
-                     SpartaDOS X, because a disk cannot know which one
-                     booted it (tools/mkspdisk.py --boot);
   build/gem-boot.atr a double-density DOS 2 disk, the system named
                      AUTORUN.SYS because that is what the DOS runs at
                      boot, beside the DOS's own DUP.SYS, which is what
@@ -15,9 +10,9 @@ There are three of them and they come up the same way by different means:
                      docs/shipping.md section 2);
   build/gem-sdx.atr  a double-sided double-density SDFS disk with NO DOS
                      on it (tools/mkfloppy.py): the one the release
-                     carries, because the other two boot a DOS that is
-                     not gem4xe's to give away.  It boots under SpartaDOS
-                     X from a cartridge (--sdx=CART, the fixture
+                     carries, because the other boots a DOS that is not
+                     gem4xe's to give away.  It boots under SpartaDOS X
+                     from a cartridge (--sdx=CART, the fixture
                      [spartados].sdx_cart) or from Ultimate 1MB flash,
                      which reads its AUTOEXEC.BAT.  Without the fixture
                      its files are still checked; the boot is not.
@@ -25,9 +20,11 @@ There are three of them and they come up the same way by different means:
                      and no AUTOEXEC.BAT: not a boot disk, so it is read
                      and not booted.
 
-Each of the three boot disks is the system and nothing else, with the
-INSTALL.BAT that copies it onto a drive (tests/emu/install.py runs that),
-since phase 42 took the DOS 2 floppy under its floor of free sectors.
+Each boot disk is the system and nothing else, since phase 42 took the
+DOS 2 floppy under its floor of free sectors; the SDX one carries the
+INSTALL.BAT that copies it onto a drive (tests/emu/install.py runs that).
+A SpartaDOS 3.2 product floppy, gem-sp.atr, was retired after phase 42:
+the installer is SpartaDOS X's.
 
 This gate touches no key -- there is no b.key() in this file -- so what
 comes up is what the disk itself started.  It runs the machine's real
@@ -98,7 +95,6 @@ from m17_desktop import (header, listing, menu, rsc_imlen,  # noqa: E402
 BUILD = os.path.join(ROOT, "build")
 SYMS = os.path.join(BUILD, "gem.sym")
 ELF = os.path.join(BUILD, "gem.elf")
-BOOT_FILES = ("STARTUP.BAT", "AUTOEXEC.BAT")
 # two lines now: the system lives in \GEM\ on the install disk
 BOOT_LINE = b"CD >GEM\x9bGEM\x9b"
 COLDST = 0x0244                 # the OS: non-zero at RESET means come up cold
@@ -122,8 +118,6 @@ HEAD = 64                       # and at the head of every chunk: where a DOS
 # (the image, what starts GEM on it, how it says so, the batch files an
 # SDFS disk must carry, and whether it wants the SDX cartridge to boot)
 PRODUCTS = [
-    ("gem-sp.atr", "GEM.COM", "SpartaDOS 3.2, STARTUP.BAT and AUTOEXEC.BAT",
-     BOOT_FILES, False),
     ("gem-boot.atr", "AUTORUN.SYS", "a double-density DOS 2, AUTORUN.SYS",
      (), False),
     ("gem-sdx.atr", "GEM.COM", "no DOS on the disk: SpartaDOS X from the "

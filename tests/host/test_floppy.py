@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Host tests for the release floppy (tools/mkfloppy.py).
 
-The release cannot carry gem-sp.atr or gem-boot.atr, because each boots
-a DOS that is not gem4xe's to give away; gem-sdx.atr is the floppy it
-can carry, and what makes it so is what is NOT on it.  So the checks
-here are as much about absence as presence: no boot file named in the
-superblock, the blank disk's stub in the boot sectors, and otherwise
-exactly the card's system -- tools/mkcf.py's SYSTEM table in \\GEM\\, the
-same AUTOEXEC.BAT, and INSTALL.BAT, read back byte for byte -- on a
-geometry the machine's drives and loaders read.  Its other half,
-gem-apps.atr, is the APPS table on the same geometry, with an INSTALL.BAT
-of its own and nothing that would boot.
+The release cannot carry gem-boot.atr, because it boots a DOS that is
+not gem4xe's to give away; gem-sdx.atr is the floppy it can carry, and
+what makes it so is what is NOT on it.  So the checks here are as much
+about absence as presence: no boot file named in the superblock, the
+blank disk's stub in the boot sectors, and otherwise exactly the card's
+system -- tools/mkcf.py's SYSTEM table in \\GEM\\, the same AUTOEXEC.BAT,
+and INSTALL.BAT, read back byte for byte -- on a geometry the machine's
+drives and loaders read.  Its other half, gem-apps.atr, is the APPS
+table on the same geometry, with an INSTALL.BAT of its own and nothing
+that would boot.
 
 Whether it BOOTS is `make test-boot`'s, under the SDX cartridge fixture.
 """
