@@ -34,7 +34,7 @@ from aesref import (Obj, Layout, Text, NIL, G_BOX, G_IBOX, G_BUTTON,   # noqa: E
                     EDINIT, EDCHAR, EDEND, BACKSPACE, DELETE, ESCAPE,
                     ARROW_LEFT, ARROW_RIGHT,
                     GSX_START, OBJC_DRAW, OBJC_FIND, OBJC_OFFSET, OBJC_EDIT,
-                    OBJC_CHANGE, FORM_CENTER)
+                    OBJC_CHANGE, OBJC_ADD, OBJC_DELETE, FORM_CENTER)
 
 DISK = os.path.abspath(os.path.join(ROOT, "build", "m3-boot.atr"))
 SYMS = os.path.join(ROOT, "build", "m3.sym")
@@ -238,6 +238,22 @@ CASES = [
      [(FORM_CENTER,), draw(), find(320, 120), (OBJC_OFFSET, (), (2,))]),
     ("form_center of an outlined, shadowed root", nested,
      [(FORM_CENTER,), draw(), (OBJC_OFFSET, (), (4,))]),
+    # Every defined branch of the two, with a draw after each so the links
+    # are checked on the screen as well as in the tree's own memory
+    # (mem_diff).  Deleting an object that is ALREADY out of the chain is
+    # not here on purpose: ob_get_par walks ob_next until it finds the
+    # object, and on a detached one that walk reaches NIL and indexes
+    # tree[-1] -- out of bounds in the C and the last object in Python, so
+    # the donor is no more defined there than we are.
+    ("objc_add and objc_delete: every branch of the chain", dialog,
+     [draw(),
+      (OBJC_DELETE, (), (2,)), draw(),      # a middle child: the chain closes
+      (OBJC_DELETE, (), (1,)), draw(),      # the head: ob_head moves on
+      (OBJC_DELETE, (), (4,)), draw(),      # the tail: ob_tail moves back
+      (OBJC_DELETE, (), (3,)), draw(),      # the last one left: both go NIL
+      (OBJC_ADD, (), (0, 1)), draw(),       # a first child: head AND tail
+      (OBJC_ADD, (), (0, 3)), draw(),       # a second: on the end of the chain
+      (OBJC_DELETE, (), (0,))]),            # the root cannot go: 0
     ("outward borders: negative spec thickness", borders,
      [draw()] + [find(x, y) for x, y in [(110, 80), (98, 58), (390, 90)]]),
 ]

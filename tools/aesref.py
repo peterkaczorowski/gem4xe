@@ -4040,6 +4040,15 @@ class AES:
         elif n == 35:
             io[0] = self.mn_register(ints[0], ints[1])
             c4 = 1
+        elif n == 40:
+            # objc_add and objc_delete: the tree surgery objc.c already did
+            # for the window manager, now an application's to call as well.
+            self.ob_add(self.tree, ints[0], ints[1])
+            io[0] = 1
+            c4 = 1
+        elif n == 41:
+            io[0] = 1 if self.ob_delete(self.tree, ints[0]) else 0
+            c4 = 1
         elif n == 42:
             self.draw(ints[0], ints[1], pts[0:4])
         elif n == 43:
@@ -4439,6 +4448,7 @@ class AES:
 
 AES_OP = 1000
 GSX_START, OBJC_DRAW, OBJC_FIND, OBJC_OFFSET = 1000, 1042, 1043, 1044
+OBJC_ADD, OBJC_DELETE = 1040, 1041
 OBJC_EDIT, OBJC_CHANGE, FORM_CENTER = 1046, 1047, 1054
 EVNT_KEYBD, EVNT_BUTTON, EVNT_MOUSE, EVNT_TIMER = 1020, 1021, 1022, 1024
 EVNT_MULTI, EVNT_DCLICK = 1025, 1026

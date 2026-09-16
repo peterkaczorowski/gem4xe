@@ -892,6 +892,21 @@ WORD menu_tnormal(OBJECT *tree, WORD title, WORD normal)
     return aes(33, 2, 1, 1, 0);
 }
 
+WORD objc_add(OBJECT *tree, WORD parent, WORD child)
+{
+    int_in[0] = parent;
+    int_in[1] = child;
+    addr_in[0] = tree_addr(tree);
+    return aes(40, 2, 1, 1, 0);
+}
+
+WORD objc_delete(OBJECT *tree, WORD obj)
+{
+    int_in[0] = obj;
+    addr_in[0] = tree_addr(tree);
+    return aes(41, 1, 1, 1, 0);
+}
+
 WORD objc_find(OBJECT *tree, WORD start, WORD depth, WORD mx, WORD my)
 {
     int_in[0] = start;

@@ -580,6 +580,15 @@ static void run_script(void)
                                         (const char *)(uint16_t)intin[1]);
                 c4 = 1;
                 break;
+            case 40:                        /* objc_add: parent, child */
+                ob_add(tree, intin[0], intin[1]);
+                intout[0] = 1;
+                c4 = 1;
+                break;
+            case 41:                        /* objc_delete: obj */
+                intout[0] = ob_delete(tree, intin[0]);
+                c4 = 1;
+                break;
             case 42:                        /* objc_draw */
                 clip.g_x = ptsin[0]; clip.g_y = ptsin[1];
                 clip.g_w = ptsin[2]; clip.g_h = ptsin[3];

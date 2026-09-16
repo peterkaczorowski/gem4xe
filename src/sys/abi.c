@@ -218,6 +218,7 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
     /* Every op that takes a tree takes it in addr_in[0]. */
     switch (opcode) {
     case 30: case 31: case 32: case 33: case 34:
+    case 40: case 41:
     case 42: case 43: case 44: case 45: case 46: case 47:
     case 50: case 54: case 55: case 56:
     case 75:
@@ -331,7 +332,16 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
         break;
     }
 
-    /* Object manager */
+    /* Object manager.  objc_add and objc_delete are the tree surgery the
+     * window manager already does to its own tree (src/aes/objc.c): an
+     * application that builds or edits a tree at run time needs them, and
+     * the desktop wanted them badly enough to keep a private copy. */
+    case 40:                        /* objc_add: parent, child */
+        ob_add(tree, int_in[0], int_in[1]);
+        break;
+    case 41:                        /* objc_delete: obj */
+        ret = ob_delete(tree, int_in[0]);
+        break;
     case 42:                        /* objc_draw: start, depth, clip */
         clip.g_x = int_in[2]; clip.g_y = int_in[3];
         clip.g_w = int_in[4]; clip.g_h = int_in[5];

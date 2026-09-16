@@ -210,6 +210,8 @@ int main(void)
     menu_tnormal(tree, 1, 1);
     menu_text(tree, 1, "x");
     menu_register(0, "x");
+    objc_add(tree, 0, 1);
+    objc_delete(tree, 1);
     objc_draw(tree, 0, 8, 1, 2, 3, 4);
     r1.g_x = 1; r1.g_y = 2; r1.g_w = 3; r1.g_h = 4;
     objc_draw_grect(tree, 0, 8, &r1);

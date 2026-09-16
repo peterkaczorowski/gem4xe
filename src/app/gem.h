@@ -510,6 +510,13 @@ WORD menu_icheck(OBJECT *tree, WORD item, WORD check);
 WORD menu_ienable(OBJECT *tree, WORD item, WORD enable);
 WORD menu_tnormal(OBJECT *tree, WORD title, WORD normal);
 
+/* Tree surgery at run time: objc_add links child as parent's last child,
+ * objc_delete unlinks an object from its parent's chain and leaves the
+ * object itself alone.  Neither touches the screen -- redraw what you
+ * changed.  objc_delete answers 0 for the root, or for an object that is
+ * not in its parent's chain. */
+WORD objc_add(OBJECT *tree, WORD parent, WORD child);
+WORD objc_delete(OBJECT *tree, WORD obj);
 WORD objc_draw(OBJECT *tree, WORD start, WORD depth, WORD x, WORD y, WORD w, WORD h);
 WORD objc_find(OBJECT *tree, WORD start, WORD depth, WORD mx, WORD my);
 WORD objc_offset(OBJECT *tree, WORD obj, WORD *x, WORD *y);

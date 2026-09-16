@@ -62,7 +62,7 @@ full-screen repaints.
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
 | `make test-m3` | 86/86 | VDI conformance — pixels *and* return values |
-| `make test-m4` | 13/13 | AES object library: draw, find, change, edit, centre, icons |
+| `make test-m4` | 14/14 | AES object library: draw, find, change, edit, centre, icons, and the tree surgery an application does at run time — `objc_add` and `objc_delete` through every defined branch of the child chain (a middle child, the head, the tail, the last one left, a first child again, and the root refusing to go), checked in the tree's own memory as well as on the screen |
 | `make test-m5` | PASS | linear RAM probed: banks `$02-$EF`, 14.9 MB |
 | `make test-m6` | PASS | far code copied up and running from the banks the linker chose — bank `$01`, and `$01`+`$02` in a forced-spill link; bank `$00` on the fast bus |
 | `make test-m7` | 10/10 | `evnt_*`, `form_do`, `form_dial`, `graf_watchbox` under host-driven input |
