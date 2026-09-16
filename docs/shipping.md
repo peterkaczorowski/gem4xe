@@ -382,11 +382,19 @@ in its OWN directory, the one `GEM.COM` was started from, and never in
 allocators are bump allocators, and anything taken after a program has
 loaded is freed underneath it when that program exits.
 
-Every product disk carries the same `GEM4XE.CFG`, the documented one:
-1,922 bytes of which nearly all is prose, since every setting in it is
-commented out.  (For two phases the DOS 2 floppy had a generated short
-form of it instead, the keys without the prose, because the disk had
-3 KB free; the packed image gave the room back and the generator went.)
+Every product disk carries the same `GEM4XE.CFG`, with every setting in
+it commented out, so that finding the file is finding its documentation.
+How much documentation has gone up and down with the DOS 2 floppy's
+room: for two phases it was a generated short form, the keys without the
+prose, because the disk had 3 KB free; the packed image gave the room
+back and the file grew to 3,280 bytes of essay; and on 2026-09-16
+colour-icon support took seven sectors of the image and put the floppy
+under its 80-sector floor, so the essay went and the file is the keys
+again -- every key `src/sys/config.c` reads, each with its values and
+one line of why, about 1.3 KB.  The long form of the reasoning is
+section 4a below and `docs/printing.md`; the file now also names
+`PRINTER` and `PRINTTO`, which the parser had accepted all along and the
+shipped file had never mentioned.
 
 `CLOCK.ACC` is the first one shipped.  It is the same `src/apps/clock.c`
 as `\APPS\CLOCK.G4A`, with a different `main`: the program opens its
