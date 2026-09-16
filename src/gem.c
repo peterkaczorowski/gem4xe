@@ -210,6 +210,7 @@ TASK void main(void)
     mn_init();
     mn_start();     /* the registry: once, before any accessory */
     sh_init();                  /* far buffers: before any app_load */
+    sc_init();                  /* the scrap directory, the same way */
     MARK(13); lang_font();      /* SYSTEM.FNT, now there is a device for it */
     fs_start();
     MARK(14); sh_main();

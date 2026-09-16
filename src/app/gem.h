@@ -601,6 +601,12 @@ WORD fsel_input(char *path, char *sel, WORD *button);
 WORD fsel_exinput(char *path, char *sel, WORD *button, const char *label);
 WORD rsrc_saddr(WORD type, WORD index, void *addr);
 WORD rsrc_obfix(OBJECT *tree, WORD obj);
+/* The scrap manager keeps a DIRECTORY, not the scrap: the clipboard is
+ * files called SCRAP.* in it, so two programs agree on a place rather
+ * than on a format.  The path is your buffer and must be near, as
+ * shel_read's is -- a path can outrun the 63-byte far-string bounce. */
+WORD scrp_read(char *path);
+WORD scrp_write(const char *path);
 WORD shel_read(char *cmd, char *tail);
 WORD shel_find(char *path);
 WORD shel_envrn(char **value, const char *name);

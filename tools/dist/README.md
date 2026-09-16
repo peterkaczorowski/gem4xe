@@ -159,7 +159,10 @@ Besides those:
   `GEM4XE.CFG` turns it on.  What is missing is a *Print* item: no
   program opens the workstation yet, so there is nothing to click.  An
   application you write yourself can use it today.
-- **no clipboard.**  `scrp_read`/`scrp_write` are not implemented.
+- **a clipboard with nothing using it yet.**  `scrp_read` and
+  `scrp_write` are served, so two programs can agree on a scrap
+  directory and pass files through it, which is what the GEM clipboard
+  is; nothing in `\APPS\` cuts or pastes yet.
 
 ## Writing a program for it
 

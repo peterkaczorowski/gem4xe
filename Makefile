@@ -95,7 +95,7 @@ M30_OBJS   = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/
              build/wind.o build/ctrl.o build/menu.o build/form.o \
              build/alert.o build/gemdata.o build/lang.o build/lang_rsc.o \
              build/rsrc.o build/apppool.o
-M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/m3_vdi.o build/vdi.o build/dev_vbxe.o build/pointer.o build/dev_print.o build/emit.o build/objc.o build/graf.o build/event.o build/proc.o build/ctx.o build/ctxs.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/antic.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o build/con.o build/config.o
+M3_OBJS    = build/crt_atari.o build/farload.o build/div16.o build/clib.o build/m3_vdi.o build/vdi.o build/dev_vbxe.o build/pointer.o build/dev_print.o build/emit.o build/objc.o build/graf.o build/event.o build/proc.o build/ctx.o build/ctxs.o build/grlib.o build/form.o build/alert.o build/wind.o build/ctrl.o build/menu.o build/farmem.o build/rapidus.o build/irq.o build/irqs.o build/abi.o build/abis.o build/app.o build/apppool.o build/cio.o build/cios.o build/dos.o build/gemdos.o build/rsrc.o build/shel.o build/scrap.o build/app_blob.o build/font8x8.o build/fillpat.o build/sintbl.o build/vbxe.o build/antic.o build/fsel.o build/fsel_rsc.o build/gemdata.o build/lang.o build/lang_rsc.o build/font.o build/clock.o build/con.o build/config.o
 
 # GEM.COM, the product (src/gem.c): the runner's objects with the runner
 # itself and its compiled-in test application taken out, linked on the
@@ -423,6 +423,7 @@ build/fsel.o: src/aes/fsel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/d
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -I build -o $@ $<
 build/shel.o: src/aes/shel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/dos.h src/sys/farmem.h build/lang_rsc.h
+build/scrap.o: src/aes/scrap.c src/aes/aes.h src/sys/farmem.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -I build -o $@ $<
 

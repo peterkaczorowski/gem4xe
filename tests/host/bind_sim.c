@@ -237,6 +237,8 @@ int main(void)
     graf_handle(&a, &b, &c, &d);
     graf_mouse(0, 0);
     graf_mkstate(&a, &b, &c, &d);
+    scrp_read(path);
+    scrp_write("X:\\");
     fsel_input(path, name, &a);
     fsel_exinput(path, name, &a, "x");
     wind_create(0, 1, 2, 3, 4);

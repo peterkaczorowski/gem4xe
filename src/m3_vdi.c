@@ -479,6 +479,7 @@ static void run_script(void)
                 mn_init();
                 mn_start();                 /* the registry: once per AES start */
                 sh_init();                  /* far buffers: before any app_load */
+                sc_init();                  /* the scrap directory, the same way */
                 lang_init();                /* LANG.RSC, or the English in the image */
                 lang_font();                /* and SYSTEM.FNT, into the device */
                 fs_start();                 /* the selector's name slots, too */
@@ -705,6 +706,17 @@ static void run_script(void)
                 for (k = 0; k < 4; k++)
                     intout[1 + k] = out[k];
                 c4 = 5;
+                break;
+            /* The scrap manager: the path is the staged buffer, and the
+             * same buffer serves both ways -- scrp_read fills it, and
+             * scrp_write takes what is in it (src/aes/scrap.c). */
+            case 80:                        /* scrp_read: path out */
+                intout[0] = sc_read((char *)(uint16_t)contrl[7]);
+                c4 = 1;
+                break;
+            case 81:                        /* scrp_write: path in */
+                intout[0] = sc_write((const char *)(uint16_t)contrl[7]);
+                c4 = 1;
                 break;
             /* The window manager, in GEM int_in order.  Rectangles are
              * four words; wind_get returns 1 then its four words; wind_set

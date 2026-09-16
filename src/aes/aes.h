@@ -659,6 +659,15 @@ extern WORD gl_drvbits;             /* which drive buttons are live, A = bit 0 *
 void fs_start(void);                /* at AES start-up: the far name slots */
 WORD fs_input(char *pipath, char *pisel, WORD *pbutton, const char *pilabel);
 
+/* ---- the scrap manager: scrap.c (gemsclib.c) --------------------------
+ * The clipboard's DIRECTORY, not the clipboard: the scrap itself is files
+ * called SCRAP.* in it, so what the AES arbitrates is a place and not a
+ * format.  One far buffer, taken once by sc_init() before any application
+ * is loaded, for the shell library's reason below. */
+void sc_init(void);
+WORD sc_read(char *pscrap);
+WORD sc_write(const char *pscrap);
+
 /* ---- the shell library: shel.c (gemshlib.c) ----------------------------
  * Buffers in far memory, taken once by sh_init() before any application
  * is loaded; the environment a constant in bank $00. */

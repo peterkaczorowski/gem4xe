@@ -70,11 +70,11 @@ fifteen that are missing are not fifteen pieces of work:
 | cflib helpers, not AES | `menu_help`, `menu_key`, `v_slider` | comes with the cflib subset |
 | GRECT wrappers | `wind_create_grect`, `wind_open_grect` | trivial; the calls under them exist |
 | AV / MultiTOS | `appl_find`, `appl_search`, `appl_control`, `appl_xgetinfo` | trim, or stub as "no extensions" |
-| **the clipboard** | `scrp_read`, `scrp_write` | **the one real gap: gem4xe has no GEM scrap** |
+| the clipboard | `scrp_read`, `scrp_write` | **served now** — the AES keeps the scrap directory (`src/aes/scrap.c`), gated in `make test-m12` |
 | GDOS printing | `v_opnprn`, `vq_devinfo`, `vs_document_info`, `vqt_ext_name` | **already skipped**: qed gates these on `gl_gdos`, and our `vq_gdos()` answers 0 |
 
-So with AV and printing trimmed, **the substantive AES work is the scrap
-manager -- and, for qed as it is built today, three calls cflib drags in
+The scrap manager is built now (`src/aes/scrap.c`), so with AV and
+printing trimmed, **what is left is the three calls cflib drags in
 behind it.**  `menu_popup` (36) is what every popup in `find.c`,
 `options.c`, `makro.c`, `prn_cfg.c` and `dd.c` reaches through cflib's
 `handle_popup`; `objc_sysvar` (48) arrives twice over, through
@@ -128,8 +128,10 @@ titles are blank today.
 
 ## If it were done, roughly in this order
 
-1. **The scrap manager** (`scrp_read`/`scrp_write`) -- the one real gap,
-   and useful to gem4xe with or without qed.
+1. ~~The scrap manager~~ -- **built**: `scrp_read` and `scrp_write` keep
+   the scrap directory in far memory and round-trip it, gated in `make
+   test-m12` (`src/aes/scrap.c`).  It was useful to gem4xe with or
+   without qed, which is why it went first.
 2. **cflib** -- replace it, then trim to only the functions qed calls.
    It supplies qed's start-up, its alerts and its file selector, and
    what is on this machine is m68k binary that a 65816 program cannot

@@ -453,6 +453,22 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
         gr_mkstate(&int_out[1], &int_out[2], &int_out[3], &int_out[4]);
         break;
 
+    /* Scrap manager.  Both directions want the caller's own memory: one
+     * writes a path into it and the other reads a path out of it, and a
+     * path can be longer than near_str's 63-byte scratch, so the bounce
+     * that serves form_alert is no use here.  A far pointer is refused,
+     * as shel_find's and shel_read's are (src/app/gem.h). */
+    case 80: {                      /* scrp_read: the path, out */
+        char *p = near_of(addr_in[0]);
+        ret = p ? sc_read(p) : 0;
+        break;
+    }
+    case 81: {                      /* scrp_write: the path, in */
+        const char *p = near_of(addr_in[0]);
+        ret = p ? sc_write(p) : 0;
+        break;
+    }
+
     /* Window manager */
     case 100:                       /* wind_create: kind, rect */
         clip.g_x = int_in[1]; clip.g_y = int_in[2];

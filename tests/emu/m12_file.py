@@ -20,7 +20,10 @@ every TEDINFO length -- then asks rsrc_gaddr for every address the file
 holds, fixes a raw tree object by object through rsrc_obfix, and draws the
 loaded dialog against tools/aesref.py on the screen.  The shell library's
 buffers round-trip through far memory, its environment hands back a
-bank-$00 string, and shel_find asks the disk.
+bank-$00 string, and shel_find asks the disk.  The scrap manager's
+directory round-trips the same way: it is the other thing the AES keeps
+on the applications' behalf rather than its own, and the clipboard is
+files in the directory it names (src/aes/scrap.c).
 """
 import os
 import re
@@ -41,6 +44,7 @@ CIONAME, ALLOC = SYS + 10, SYS + 11
 # the runner's AES ops for the file layer (src/m3_vdi.c)
 RSRC_LOAD, RSRC_FREE, RSRC_GADDR, RSRC_SADDR, RSRC_OBFIX = 1110, 1111, 1112, 1113, 1114
 SHEL_READ, SHEL_WRITE, SHEL_GET, SHEL_PUT, SHEL_FIND, SHEL_ENVRN = 1120, 1121, 1122, 1123, 1124, 1125
+SCRP_READ, SCRP_WRITE = 1080, 1081
 # the AES's character cell and screen width, what the fixup scales by
 WCHAR, HCHAR, WIDTH = 8, 8, 640
 RSC_FILE = os.path.join(ROOT, "build", "test.rsc")
@@ -451,6 +455,37 @@ def shel_cases(r, check, b):
     for path, want in (("A:\\TEST.TXT", 1), ("TEST.RSC", 1), ("A:\\NOSUCH.FIL", 0)):
         rec = aes(SHEL_FIND, (), r.stage(0, path.encode("latin-1") + b"\0"))
         check(rec[0] == want, f"shel_find({path!r}) returned {rec[0]}, CIO status ${rec[1] & 0xFF:02X}")
+
+    # -- the scrap manager: the directory the AES keeps for everybody ------------------------
+    # Nothing has written one yet, and an answer is still owed: TOS stopped
+    # validating this and the donor follows it (aes/gemsclib.c), because a
+    # program that asks before anybody has written wants an empty path it can
+    # act on rather than a refusal.
+    r.stage(0, b"\xEE" * 128)
+    rec = aes(SCRP_READ, (), r.sc)
+    check(rec[0] == 1, f"scrp_read on a fresh AES returned {rec[0]}")
+    check(r.read(0, 1) == b"\0", f"scrp_read gave {r.read(0, 8)!r}, expected an empty path")
+
+    for path in (b"C:\\CLIPBRD\\", b"A:\\"):
+        rec = aes(SCRP_WRITE, (), r.stage(0, path + b"\0"))
+        check(rec[0] == 1, f"scrp_write({path!r}) returned {rec[0]}")
+        r.stage(64, b"\xEE" * 128)
+        rec = aes(SCRP_READ, (), r.sc + 64)
+        got = r.read(64, 128).split(b"\0", 1)[0]
+        check(rec[0] == 1 and got == path, f"scrp_read gave {got!r}, expected {path!r}")
+    print(f"  scrp_write/scrp_read: {path.decode()} round-tripped through far memory, "
+          f"and the second write replaced the first")
+
+    # And it is bounded: a path longer than the buffer is cut and still ends
+    # in a NUL, so the far allocation after it is not walked into.
+    long_path = b"D:\\" + b"X" * 200
+    aes(SCRP_WRITE, (), r.stage(0, long_path + b"\0"))
+    r.stage(256, b"\xEE" * 160)
+    aes(SCRP_READ, (), r.sc + 256)
+    got = r.read(256, 160).split(b"\0", 1)[0]
+    check(len(got) < 128, f"scrp_read gave {len(got)} bytes: the path was not bounded at 128")
+    check(got == long_path[:len(got)], "the truncated path is not a prefix of what was written")
+    print(f"  a {len(long_path)}-byte path came back cut to {len(got)} and NUL-terminated")
 
 
 # -- the file selector -----------------------------------------------------------

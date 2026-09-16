@@ -1248,6 +1248,18 @@ WORD rsrc_obfix(OBJECT *tree, WORD obj)
     return aes(114, 1, 1, 1, 0);
 }
 
+WORD scrp_read(char *path)
+{
+    addr_in[0] = (LONG)(uint32_t)(char FAR *)path;
+    return aes(80, 0, 1, 1, 0);
+}
+
+WORD scrp_write(const char *path)
+{
+    addr_in[0] = (LONG)(uint32_t)(const char FAR *)path;
+    return aes(81, 0, 1, 1, 0);
+}
+
 WORD shel_read(char *cmd, char *tail)
 {
     addr_in[0] = (LONG)(uint32_t)(char FAR *)cmd;
