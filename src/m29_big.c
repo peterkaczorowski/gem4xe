@@ -64,13 +64,21 @@ static const char s_alert[] =
     "|near scratch the shim keeps][ OK ]";
 
 /* A window title is the string the shim CANNOT bounce: the AES keeps it
- * and reads it again at every redraw, so a scratch that lasts the call is
- * no use.  Bouncing it where the DRAWING happens would work and was
- * measured -- 116 bytes against the 16 LoRAM has spare -- so until bank
- * $00 is rebalanced a far one is refused and a near one taken
- * (src/sys/abi.c, case 105). */
+ * and reads it again at every redraw, so a scratch that lasts the call
+ * is no use -- an application is entitled to edit its title in place.
+ * So the window manager keeps all 24 bits and brings a far title down
+ * where the DRAWING happens (w_ptext, src/aes/wind.c), into two buffers
+ * in the banked window that the bank-$00 rebalance made room for.
+ *
+ * THE SAME ELEVEN CHARACTERS TWICE, once far and once near, because a
+ * returned 1 proves nothing about what reached the screen.  The window
+ * is drawn with each and the gate requires the two title bars to be
+ * pixel-identical -- which is the whole claim, the near path being
+ * gated independently by m8 -- and both to differ from an empty title,
+ * so that two blank bars cannot pass. */
 static const char s_title[] = " far title ";
-NEAR char n_title[] = " near title ";
+NEAR char n_title[] = " far title ";
+NEAR char e_title[] = "";
 
 int main(void)
 {
@@ -114,8 +122,17 @@ int main(void)
         WORD h = wind_create(NAME, 0, 16, 320, 100);
         m29_wfar = m29_wnear = -2;          /* no window to ask with */
         if (h >= 0) {
+            wind_open(h, 0, 16, 320, 100);
+            /* Each title is drawn and then WAITED on, because the gate
+             * reads the screen, not a variable: m29_step says which of
+             * the three is on it, and a key moves to the next. */
             m29_wfar = wind_set_str(h, WF_NAME, s_title);
+            m29_step = 6;   evnt_keybd();           /* far */
             m29_wnear = wind_set_str(h, WF_NAME, n_title);
+            m29_step = 7;   evnt_keybd();           /* the same text, near */
+            wind_set_str(h, WF_NAME, e_title);
+            m29_step = 8;   evnt_keybd();           /* and empty */
+            wind_close(h);
             wind_delete(h);
         }
     }
@@ -123,6 +140,7 @@ int main(void)
     /* A far string to the AES, the peer's reported bug (GACS could not
      * form_alert about its missing .DAT tables): the button it returns,
      * not -1, says near_str bounced the far literal. */
+    m29_step = 9;               /* about to draw the alert */
     m29_alert = form_alert(1, s_alert);
 
     /* ...and WAIT, because a program that returns has its near region

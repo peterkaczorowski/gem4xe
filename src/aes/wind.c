@@ -120,6 +120,44 @@ static ORECT   gl_mkrect;           /* the rectangle newrect is breaking:
                                      * a value, near, passed by address */
 static TEDINFO gl_aname, gl_ainfo;
 
+/* WHERE A FAR TITLE IS BROUGHT DOWN.  A TEDINFO's te_ptext is near --
+ * the VDI reads the string through it at every redraw -- so a title a
+ * --data-model=large program handed to wind_set(WF_NAME) as a 24-bit
+ * address has to be copied into bank $00 before it can be drawn.  It is
+ * copied HERE, at draw time, and not in the shim: the ST's AES re-reads
+ * the application's string on every redraw and an application is
+ * entitled to edit it in place, so a bounce that happened once in
+ * wind_set would freeze the title at whatever it said that instant.
+ *
+ * FORTY CHARACTERS, not the eighty a 640-wide title bar could hold, and
+ * the eighty bytes that saves are the reason both sides of bank $00 have
+ * a margin worth the name.  It caps FAR titles only: a near one is used
+ * where it lies and may be any length.  Forty is wide enough for every
+ * title the donor's own desktop sets and for both programs this project
+ * exists for; a longer far one is truncated, not refused.
+ *
+ * Where the 114 bytes came from is written up in src/gem4xe.scm -- the
+ * LoRAM/Near boundary, the one boundary in bank $00 that fails at LINK
+ * time rather than run time.  Two nearer-looking homes were tried first
+ * and both were caught by gates: the application pool (test-m28) and the
+ * stack (test-m32). */
+#define W_TEXTMAX   40
+static char gl_nbuf[W_TEXTMAX + 1];
+static char gl_ibuf[W_TEXTMAX + 1];
+
+/* Point a frame TEDINFO at the string `addr` names.  A near address is
+ * used where it lies, so the application's own edits show; a far one is
+ * copied into `buf` first.  Either way te_ptext is bank $00. */
+static void w_ptext(TEDINFO *pt, char *buf, uint32_t addr)
+{
+    if (addr >> 16) {
+        far_strget(buf, addr, W_TEXTMAX + 1);
+        pt->te_ptext = (uint16_t)buf;
+    } else {
+        pt->te_ptext = (uint16_t)addr;
+    }
+}
+
 OBJECT *gl_wtree;
 OBJECT *gl_awind;
 WORD    gl_wtop;
@@ -339,8 +377,8 @@ static void w_setup(WORD w_handle, WORD kind)
 
     pwin->w_flags = VF_INUSE;
     pwin->w_kind = (UWORD)kind;
-    pwin->w_pname = "";
-    pwin->w_pinfo = "";
+    pwin->w_pname = (uint32_t)(uint16_t)"";     /* near, bank 0 */
+    pwin->w_pinfo = (uint32_t)(uint16_t)"";
     pwin->w_hslide = pwin->w_vslide = 0;
     pwin->w_hslsiz = pwin->w_vslsiz = -1;
 }
@@ -532,8 +570,8 @@ void w_bldactive(WORD w_handle)
     kind = (WORD)pw->w_kind;
     w_nilit(NUM_ELEM, W_ACTIVE);
 
-    gl_aname.te_ptext = (uint16_t)pw->w_pname;
-    gl_ainfo.te_ptext = (uint16_t)pw->w_pinfo;
+    w_ptext(&gl_aname, gl_nbuf, pw->w_pname);
+    w_ptext(&gl_ainfo, gl_ibuf, pw->w_pinfo);
     gl_aname.te_just = TE_CNTR;
 
     /* the outer box, at the window's position */
@@ -1122,18 +1160,19 @@ WORD wm_set(WORD w_handle, WORD w_field, WORD *pinwds)
 
     switch (w_field) {
     case WF_NAME:
-        /* the address is 32 bits in pinwds[0..1], high word first, as
-         * in the ROM's intin; only the low word can matter here */
-        pwin->w_pname = (const char *)(uint16_t)pinwds[1];
-        gl_aname.te_ptext = (uint16_t)pinwds[1];
+        /* the address is 32 bits in pinwds[0..1], high word first, as in
+         * the ROM's intin -- and ALL of it is kept, so a large-data
+         * program's far title survives (w_ptext brings it down to draw) */
+        pwin->w_pname = ((uint32_t)(UWORD)pinwds[0] << 16) | (UWORD)pinwds[1];
+        w_ptext(&gl_aname, gl_nbuf, pwin->w_pname);
         if (pwin->w_flags & VF_ISOPEN) {
             which = W_NAME;
             do_cpwalk = TRUE;
         }
         break;
     case WF_INFO:
-        pwin->w_pinfo = (const char *)(uint16_t)pinwds[1];
-        gl_ainfo.te_ptext = (uint16_t)pinwds[1];
+        pwin->w_pinfo = ((uint32_t)(UWORD)pinwds[0] << 16) | (UWORD)pinwds[1];
+        w_ptext(&gl_ainfo, gl_ibuf, pwin->w_pinfo);
         if (pwin->w_flags & VF_ISOPEN) {
             which = W_INFO;
             do_cpwalk = TRUE;

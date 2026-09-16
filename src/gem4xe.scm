@@ -6,8 +6,8 @@
 ;;;   $0200-$06FF  OS vars / page 6      -- not ours ($02E0/$02E2 are the .xex vectors)
 ;;;   $0700-$1FFF  DOS resident          -- not ours
 ;;;   $2000-$20FF  direct page           <- ours
-;;;   $2100-$357F  stack / data / zdata  <- ours (the stack is 2 KB; see below)
-;;;   $3580-$3FFD  near code and rodata  <- ours
+;;;   $2100-$373F  stack / data / zdata  <- ours (the stack is 2 KB; see below)
+;;;   $3740-$3FFD  near code and rodata  <- ours
 ;;;   $3FFE-$3FFF  the cstartup's reset word, inert
 ;;;   $4000-$47FF  zwin: bss no interrupt handler touches  <- ours; see BANKED
 ;;;   $4800-$67FF  the application pool             <- ours; see BANKED below
@@ -145,7 +145,17 @@
     ;; (docs/phase24.md).  Moving the fill patterns to `cfar` freed 608
     ;; bytes of near memory and the boundary shares what that bought:
     ;; each side has a few hundred bytes now rather than a few.
-    (memory LoRAM      (address (#x2100 . #x367f))
+    ;;
+    ;; It moved again on 2026-09-16, up 192 bytes to $3740, to pay for the
+    ;; far window title (src/aes/wind.c).  THIS IS THE ONLY BOUNDARY IN
+    ;; BANK $00 THAT CAN BE MOVED SAFELY, and the reason is that Near
+    ;; holds code and constants: what it needs is settled at LINK time, so
+    ;; taking too much fails the link and nothing else.  The other two
+    ;; candidates both fail at RUN time under conditions no link can see,
+    ;; and both were tried first and caught by gates -- the application
+    ;; pool by test-m28 (rs_load's peak; see the note below) and the stack
+    ;; by test-m32 (GD_PEXEC_STACK; see the block at the end).
+    (memory LoRAM      (address (#x2100 . #x373f))
             (section stack data zdata heap))
 
     ;; Near code: the entry stub, farload, the C startup, the CIO
@@ -153,7 +163,7 @@
     ;; it cannot be far) and every library routine that is not compiled
     ;; far -- plus all constant data.  There is no overflow memory: a link
     ;; that outgrows this memory fails rather than spilling somewhere slow.
-    (memory Near       (address (#x3680 . #x3ffd))
+    (memory Near       (address (#x3740 . #x3ffd))
             (section code libcode cdata idata data_init_table))
 
     ;; The library cstartup always emits a `reset` section -- a word pointing
@@ -179,6 +189,18 @@
   ;; the only one a Rapidus runs at full speed both ways (src/sys/rapidus.c),
   ;; and the stack wants that more than any of these do: what moved here
   ;; is read far more than written, and a write costs one bus cycle.
+  ;;
+  ;; THE POOL IS NOT A PLACE TO BORROW FROM, and this is measured.  Growing
+  ;; zwin by 512 bytes at the pool's expense was tried, for the two buffers
+  ;; a far window title needs, and it turned test-m28 red: the desktop
+  ;; alerted "DESKTOP.RSC is not on the boot disk" because rs_load could
+  ;; not allocate.  What binds is not GEM.COM's pool but the CONFORMANCE
+  ;; RUNNER's, which ends at $78FF and must hold an accessory and the
+  ;; desktop at once, and rs_load takes the WHOLE resource file --
+  ;; rsh_rssize, 6,308 bytes for the desktop's -- before rs_fixit moves
+  ;; the icons far (src/aes/rsrc.c).  That transient peak is 1,536 bytes
+  ;; above the resident cost, and it left 348 bytes of headroom, not 860.
+  ;; The stack gave the 194 bytes instead (see the block below).
   '((memory Window     (address (#x4000 . #x47ff))
             (section zwin)))
   (list (list 'memory 'AppPool (list 'address (cons #x4800 pool-end))
@@ -222,6 +244,17 @@
     ;; object library, the VDI.  At 1 KB that chain ran out inside
     ;; wind_open's first redraw and the pushes went on down into zdata
     ;; (phase 14, milestone 3: vec_curv became a return address).
+    ;;
+    ;; AND IT CANNOT BE SHRUNK, although the gates' low-water marks make
+    ;; it look as though it could.  The deepest the engine has ever gone
+    ;; is 1,390 bytes of the 2,048, but 1,024 of the rest are not spare:
+    ;; GEMDOS refuses a Pexec with less than GD_PEXEC_STACK left
+    ;; (src/sys/gemdos.c), because the child's own calls are served
+    ;; BELOW the parent's on this one stack.  1.75 KB was tried and
+    ;; test-m32 answered ENSMEM to every Pexec, including one for a file
+    ;; that does not exist -- which is the guard firing before it even
+    ;; looks.  A low-water mark measures what has happened, not what is
+    ;; reserved.
     (block stack   (size #x0800))
     (block heap    (size #x0000))   ;; nothing here calls malloc
     (base-address _DirectPageStart DirectPage 0))

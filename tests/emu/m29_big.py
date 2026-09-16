@@ -47,7 +47,7 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from a8test.launcher import launch          # noqa: E402
-import aesref, symfile                      # noqa: E402
+import aesref, symfile, vbxeref             # noqa: E402
 from m7_form import (poke16, NOT_STARTED, STATUS, ST_GO,  # noqa: E402
                      SYMS)   # build/m3.sym: this disk's runner
 from m4_aes import PRELUDE                  # noqa: E402
@@ -62,6 +62,19 @@ BIG_SYM = os.path.join(ROOT, "build", "m29_big.sym")
 
 N = 3000
 SEED = [11, 22, 33, 44, 55, 66, 77, 88]
+
+# The window M29.G4A opens, and the strip of it the title lives in.  The
+# gate reads the SCREEN for the title rather than a returned word,
+# because wind_set answering 1 says only that the AES took the address.
+TITLE_X, TITLE_Y, TITLE_W, TITLE_H = 0, 16, 320, 20
+
+
+def titlebar(path):
+    """The window's title strip out of an Altirra screenshot, as pixels."""
+    from PIL import Image
+    px = Image.open(path).convert("RGB").load()
+    return [px[vbxeref.SHOT_X0 + TITLE_X + x, vbxeref.SHOT_Y0 + TITLE_Y + y]
+            for y in range(TITLE_H) for x in range(TITLE_W)]
 
 
 def main(argv):
@@ -121,9 +134,11 @@ def main(argv):
 
         step = b.peek16(big["m29_step"])
         check(b.peek16(big["m29_ran"]) == 1,
-              f"M29.G4A did not reach its end -- it got to step {step} of 5 "
+              f"M29.G4A did not reach its end -- it got to step {step} of 9 "
               f"(1 entered main, 2 past appl_init, 3 read the far bss, "
-              f"4 read the initialised far array, 5 wrote and summed them)")
+              f"4 read the initialised far array, 5 wrote and summed them, "
+              f"6-8 drew the window with a far, a near and an empty title, "
+              f"9 drew the alert)")
         check(b.peek16(big["m29_zeroed"]) == 1,
               "its far bss did not arrive zeroed -- the bank it was given "
               "held somebody else's bytes")
@@ -131,12 +146,6 @@ def main(argv):
               "its initialised far array did not arrive initialised -- the "
               "crt's data_init_table walk did not reach it")
 
-        wfar, wnear = b.peek16(big["m29_wfar"]), b.peek16(big["m29_wnear"])
-        check(wfar == 0, f"wind_set(WF_NAME) with a FAR title answered {wfar}, not 0 -- "
-                         "the ABI cut a far address to 16 bits instead of refusing it")
-        check(wnear == 1, f"wind_set(WF_NAME) with a NEAR title answered {wnear}, not 1")
-        print(f"  WF_NAME: a far title refused ({wfar}), a near one taken ({wnear}) "
-              f"-- taking one needs a bank $00 rebalance (src/sys/abi.c, case 105)")
         want = [(SEED[i & 7] + i) & 0xFFFF for i in range(N)]
         want = [w - 0x10000 if w >= 0x8000 else w for w in want]
         check(b.peek16(big["m29_first"]) == (want[0] & 0xFFFF),
@@ -152,12 +161,55 @@ def main(argv):
         print(f"  {N} far entries: big[0]={want[0]}, big[{N - 1}]="
               f"{want[-1]}, sum ${exp:04X} -- all as the model has them")
 
+        # THE WINDOW TITLE.  The program is blocked with its window open
+        # and a FAR title on it; a key moves it to the same eleven
+        # characters NEAR, and another to an empty title.  What is
+        # asserted is the SCREEN: far and near must draw identically --
+        # the near path is m8's to prove -- and both must differ from
+        # empty, so two blank title bars cannot pass the first test.
+        bars = {}
+        for stage, which in ((6, "far"), (7, "near"), (8, "empty")):
+            if not check(poll(b, big["m29_step"], stage) >= 0,
+                         f"M29.G4A never reached step {stage} (the {which} "
+                         f"title); it is at {b.peek16(big['m29_step'])}"):
+                return 1
+            b.frames(10)
+            p = os.path.join(ROOT, "build", f"m29-title-{which}.png")
+            b.screenshot(p)
+            bars[which] = titlebar(p)
+            b.key("RETURN")
+
+        wfar, wnear = b.peek16(big["m29_wfar"]), b.peek16(big["m29_wnear"])
+        check(wfar == 1, f"wind_set(WF_NAME) with a FAR title answered "
+                         f"{wfar}, not 1")
+        check(wnear == 1, f"wind_set(WF_NAME) with a NEAR title answered "
+                          f"{wnear}, not 1")
+        diff = sum(1 for a, c in zip(bars["far"], bars["near"]) if a != c)
+        check(diff == 0,
+              f"the title bar drawn from a FAR address differs from the same "
+              f"eleven characters drawn from a NEAR one in {diff} of "
+              f"{len(bars['far'])} pixels -- the far title was not brought "
+              f"down at draw time (w_ptext, src/aes/wind.c)")
+        blank = sum(1 for a, c in zip(bars["far"], bars["empty"]) if a != c)
+        check(blank > 0,
+              "the FAR title bar is pixel-identical to the EMPTY one -- "
+              "nothing was drawn, and the comparison above passed only "
+              "because both titles were blank")
+        print(f"  WF_NAME: a far title drawn exactly as the same near one "
+              f"({diff} px differ), and {blank} px of it that an empty "
+              f"title does not have")
+
         # The app is now blocked in form_alert with a FAR string literal --
         # in --data-model=large that literal is far, and near_of would have
         # nulled it (the peer's GACS bug).  RETURN picks the default button.
+        check(poll(b, big["m29_step"], 9) >= 0,
+              "M29.G4A never reached its form_alert")
+        b.frames(60)            # the modal is drawn and waiting by now
         b.screenshot(os.path.join(ROOT, "build", "m29-alert.png"))
         b.key("RETURN")
-        b.frames(30)
+        # poll for the button rather than reading at a fixed frame: an
+        # alert still being drawn reads the same as one that failed
+        poll(b, big["m29_alert"], 1)
         al = b.peek16(big["m29_alert"])
         check(al == 1, f"form_alert with a far string returned {al}, not the "
               f"button -- the shim did not bounce the far literal, which at "

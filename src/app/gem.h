@@ -36,12 +36,24 @@
  * gem4xe (the small data model), so they must be in bank $00 -- which is
  * where an application's data is, its near region being a slice of bank $00
  * (src/app/gemapp.scm).  STRINGS may be FAR: a --data-model=large program
- * keeps its literals in far memory, and the shim copies a SHORT one into a
- * near scratch first (src/sys/abi.c, near_str), so form_alert, rsrc_load,
- * menu_text, menu_register and the fsel dialog title take a far string of
- * up to 63 bytes.  A longer string -- or a second one in the same call,
- * which fsel's path/selection, shel_write and shel_find are -- still wants
- * bank $00.
+ * keeps its literals in far memory, and the shim brings one down before
+ * the call (src/sys/abi.c).  Three sizes, in the order a string grows:
+ *
+ *   rsrc_load, menu_text, menu_register and the fsel dialog title copy
+ *   into a 64-byte near scratch (near_str), so 63 bytes;
+ *
+ *   form_alert takes the AES's pool instead (pool_str), so 511 -- an
+ *   alert a screen can hold does not fit in the scratch;
+ *
+ *   wind_set(WF_NAME) and WF_INFO copy nothing here.  The AES keeps all
+ *   24 bits of the address and reads the string again at every redraw,
+ *   as the ST's does, bringing a far one down where the DRAWING happens
+ *   (src/aes/wind.c, w_ptext).  A far title of any length is accepted
+ *   and an application may still edit it in place, but 40 characters of
+ *   it are drawn; a NEAR title is used where it lies and has no cap.
+ *
+ * A second far string in one call -- which fsel's path/selection,
+ * shel_write and shel_find are -- still wants bank $00.
  */
 #ifndef GEM4XE_APP_GEM_H
 #define GEM4XE_APP_GEM_H
@@ -539,7 +551,7 @@ WORD objc_order(OBJECT *tree, WORD obj, WORD newpos);
 WORD form_do(OBJECT *tree, WORD start);
 WORD form_dial(WORD type, WORD x1, WORD y1, WORD w1, WORD h1,
                WORD x2, WORD y2, WORD w2, WORD h2);
-WORD form_alert(WORD defbut, const char *s);   /* s: near, or far up to 63 bytes */
+WORD form_alert(WORD defbut, const char *s);  /* s: near, or far up to 511 bytes */
 WORD form_error(WORD n);
 WORD form_center(OBJECT *tree, WORD *x, WORD *y, WORD *w, WORD *h);
 

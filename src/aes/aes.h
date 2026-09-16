@@ -383,12 +383,20 @@ typedef struct orect {
 
 /* One window (gemlib.h's WINDOW), less the multitasking owner and the
  * per-window colours.  w_pname/w_pinfo are the application's strings, by
- * address, exactly as wind_set(WF_NAME) received them. */
+ * address, exactly as wind_set(WF_NAME) received them -- ALL 24 BITS of
+ * it, which is why they are uint32_t and not pointers.  The ST's AES
+ * keeps a pointer and re-reads the string at every redraw, so the shim
+ * cannot bounce a far title into a scratch that lasts the call the way
+ * it does form_alert's text; a --data-model=large program's title is far
+ * and would be cut to 16 bits.  Keeping the whole address and bringing a
+ * far one down at DRAW time (w_ptext, src/aes/wind.c) preserves the
+ * contract in both directions: the application may still edit its title
+ * in place and see it at the next redraw. */
 typedef struct {
     UWORD       w_flags;    /* VF_* */
     UWORD       w_kind;     /* the gadgets */
-    const char *w_pname;
-    const char *w_pinfo;
+    uint32_t    w_pname;
+    uint32_t    w_pinfo;
     GRECT       w_full;
     GRECT       w_work;
     GRECT       w_prev;

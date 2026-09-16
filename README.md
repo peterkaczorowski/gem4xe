@@ -267,8 +267,26 @@ to break it.
 **And then the room** (same notebook). Bank `$00` had four bytes free
 and seven; the 608 bytes of fill patterns — 23% of all the near memory
 there is — went to `cfar` with the far code, and the boundary moved to
-share what that bought: **272 bytes free in LoRAM and 371 in Near**
-today, which `make memcheck` prints. The workstation holds the pattern
+share what that bought. It moved again on 2026-09-16, 192 bytes, to buy
+the far window title what it needs: **346 bytes free in LoRAM and 179 in
+Near** today, which `make memcheck` prints.
+
+**Which boundary, though, took two red gates to learn.** Growing `zwin`
+at the application pool's expense went first, and `test-m28` answered
+*DESKTOP.RSC is not on the boot disk*: `rs_load` holds the **whole**
+resource file before the icons go far, so the conformance runner's pool
+had 348 bytes of headroom, not the 1,884 its resident figures showed.
+Shrinking the 2 KB stack went second, on the evidence that the deepest
+the engine has ever gone is 1,390 bytes — and `test-m32` answered
+`ENSMEM` to every `Pexec`, including one for a file that does not exist,
+because GEMDOS reserves 1 KB of that stack for a child's calls
+(`GD_PEXEC_STACK`). **A low-water mark measures what has happened, not
+what is reserved.** What made the third attempt the right one is that
+`Near` holds code and constants, so what it needs is settled at link
+time: taking too much fails the link, where the other two failed on a
+running machine under conditions no link could see.
+`tools/memreport.py` models both pools and `rs_load`'s peak now. The
+workstation holds the pattern
 as a *source and a first row* rather than a pointer,
 because a pointer that could name either a far table or the user's own
 near array has to be far, and then "is this the user's?" is a near-to-far

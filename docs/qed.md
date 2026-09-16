@@ -112,19 +112,31 @@ preference: every string literal in such a program is far, and the COP
 shim nulled a far string, so `form_alert` drew nothing and `rsrc_load`
 opened no file.  That is fixed (`src/sys/abi.c`, `near_str`), and `fsel`'s
 dialog title bounces too, so the file dialog works.  The limit that
-remains is written down in `src/app/gem.h`: a far string is capped at 63
-bytes, so a longer alert -- or a second string in one call -- still wants
-`__near`.
+remains is written down in `src/app/gem.h`: a far string bounced through
+the near scratch is capped at 63 bytes, so a second string in one call
+still wants `__near`.  `form_alert` is no longer one of them -- an alert
+is copied into the AES's pool instead, up to 511 bytes.
 
-**And one that no bounce can clear.**  `wind_set(WF_NAME)` and `WF_INFO`
-pass a string the window manager *keeps*: it stores the low word and
-reads the title again at every redraw, so there is nothing to copy into a
-scratch that would still be alive.  A far address would be cut to 16 bits
-and draw whatever sits at that offset in bank $00, so `src/sys/abi.c`
-refuses it and the call answers 0 -- a blank title rather than a wrong
-one.  A window title in a `--data-model=large` program must therefore be
-`__near`, and must outlive its window.  RetroWP met exactly this, and its
-titles are blank today.
+**And the one that looked as though no bounce could clear it.**
+`wind_set(WF_NAME)` and `WF_INFO` pass a string the window manager
+*keeps*: it reads the title again at every redraw, so there is nothing to
+copy into a scratch that would still be alive when the drawing happened.
+The answer was to copy it where the drawing happens instead.  The WINDOW
+record holds all 24 bits of the address and `w_bldactive` brings a far
+title down into a near buffer each time it lays the frame out
+(`src/aes/wind.c`, `w_ptext`), which keeps the ST's contract in both
+directions: the address is re-read every redraw, so an application may
+still edit its title in place.  It cost 114 bytes of bank $00 that bank
+$00 did not have, and the LoRAM/Near boundary moved 192 bytes to find
+them (`src/gem4xe.scm`, which records the two places that were tried
+first and the gates that refused them).  A far title is capped at forty
+characters, which is what buying that margin cost; a near title is used
+where it lies and has no cap.  `make test-m29` draws the same eleven
+characters from a far address and from a near one and requires the two
+title bars to be the same pixels.
+
+RetroWP's titles are still blank, but that is now RetroWP's own doing
+rather than a limit of the system.
 
 ## If it were done, roughly in this order
 

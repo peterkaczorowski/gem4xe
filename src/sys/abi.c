@@ -537,23 +537,17 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
         WORD w[4];
         for (k = 0; k < 4; k++)
             w[k] = int_in[2 + k];
-        /* WF_NAME and WF_INFO pass a string's address, and the window
-         * manager keeps only its low word (src/aes/wind.c) -- it reads the
-         * title again at every redraw, so it cannot be bounced into a
-         * scratch the way form_alert's text is.  A far address would be
-         * cut to 16 bits and draw whatever is in bank $00 there: a blank
-         * title, silently.  Refused instead, and the call answers 0.
-         *
-         * Keeping all 24 bits and bringing a far title down at DRAW time
-         * is the fix, and it was built and measured: two 40-byte near
-         * scratches and 32 bytes of wider WINDOW records, 116 in all,
-         * against the 16 bytes LoRAM has above its floor.  There is
-         * nowhere else for it -- Near holds const data, zwin has 12 bytes
-         * left -- so it waits on a bank-$00 rebalance. */
-        if ((int_in[1] == WF_NAME || int_in[1] == WF_INFO) && w[0] != 0)
-            ret = 0;
-        else
-            ret = wm_set(int_in[0], int_in[1], w);
+        /* WF_NAME and WF_INFO pass a string's address, and it goes
+         * through UNTOUCHED -- no near_of, no near_str.  The window
+         * manager keeps all 24 bits of it and brings a far title down
+         * into bank $00 at DRAW time (w_ptext, src/aes/wind.c), which is
+         * the only place it can be done without breaking the ST's
+         * contract: the AES re-reads the application's string at every
+         * redraw, so a bounce that happened once here would freeze the
+         * title at whatever it said during the call.  Until 2026-09-16
+         * there was nowhere in bank $00 to put the two buffers that
+         * needs; the LoRAM/Near boundary found them (src/gem4xe.scm). */
+        ret = wm_set(int_in[0], int_in[1], w);
         break;
     }
     case 106:                       /* wind_find: x, y */

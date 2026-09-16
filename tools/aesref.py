@@ -2804,12 +2804,16 @@ class AES:
             if not (field in (WF_HSLSIZ, WF_VSLSIZ) and pinwds[0] == -1):
                 pinwds[0] = min(max(pinwds[0], 1), 1000)
         if field == WF_NAME:
-            pwin.w_pname = pinwds[1] & 0xFFFF
+            # all 24 bits, high word first: a --data-model=large program's
+            # title is far, and the AES re-reads it at every redraw, so
+            # the address is kept whole and brought down at DRAW time
+            # (w_ptext, src/aes/wind.c) rather than bounced in the shim
+            pwin.w_pname = ((pinwds[0] & 0xFFFF) << 16) | (pinwds[1] & 0xFFFF)
             self.gl_aname.ptext = pwin.w_pname
             if pwin.w_flags & VF_ISOPEN:
                 which, do_cpwalk = W_NAME, True
         elif field == WF_INFO:
-            pwin.w_pinfo = pinwds[1] & 0xFFFF
+            pwin.w_pinfo = ((pinwds[0] & 0xFFFF) << 16) | (pinwds[1] & 0xFFFF)
             self.gl_ainfo.ptext = pwin.w_pinfo
             if pwin.w_flags & VF_ISOPEN:
                 which, do_cpwalk = W_INFO, True
