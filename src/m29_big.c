@@ -54,12 +54,21 @@ NEAR WORD m29_wfar;           /* wind_set WF_NAME with a FAR title: 0, refused *
 NEAR WORD m29_wnear;          /* ...and with a NEAR one: 1, taken */
 
 /* In --data-model=large this literal is FAR (Calypsi cfar); the AES reads
- * a string near, so the shim must bounce it (src/sys/abi.c, near_str) or
- * form_alert draws nothing.  Short, to fit the small near scratch. */
-static const char s_alert[] = "[1][far string ok][ OK ]";
+ * a string near, so the shim must bounce it or form_alert draws nothing.
+ * LONGER THAN THE 64-BYTE NEAR SCRATCH ON PURPOSE -- 102 bytes: an alert
+ * that a screen can hold does not fit there, and the shim takes the AES's
+ * pool for it instead (src/sys/abi.c, pool_str). */
+static const char s_alert[] =
+    "[1][a far alert string that is much"
+    "|longer than the sixty-four byte"
+    "|near scratch the shim keeps][ OK ]";
 
-/* A window title is the string the shim CANNOT bounce: the AES keeps it.
- * So a far one must be refused, and a near one taken. */
+/* A window title is the string the shim CANNOT bounce: the AES keeps it
+ * and reads it again at every redraw, so a scratch that lasts the call is
+ * no use.  Bouncing it where the DRAWING happens would work and was
+ * measured -- 116 bytes against the 16 LoRAM has spare -- so until bank
+ * $00 is rebalanced a far one is refused and a near one taken
+ * (src/sys/abi.c, case 105). */
 static const char s_title[] = " far title ";
 NEAR char n_title[] = " near title ";
 

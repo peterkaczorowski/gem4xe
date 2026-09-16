@@ -50,6 +50,7 @@
 #include "sys/cio.h"
 #include "sys/gemdos.h"
 #include "sys/farmem.h"
+#include "sys/app.h"
 
 uint32_t gem_pb;
 uint8_t  gem_which;
@@ -199,6 +200,35 @@ static char *near_str(int32_t a)
     }
     str_scratch[STR_SCRATCH - 1] = 0;        /* truncate, keep a terminator */
     return &str_scratch[start < STR_SCRATCH - 1 ? start : STR_SCRATCH - 1];
+}
+
+/* THE SAME BOUNCE FOR A STRING THAT WILL NOT FIT IN SIXTY-FOUR BYTES.
+ * An alert is five lines and three buttons -- a couple of hundred bytes,
+ * and RetroWP alone calls form_alert from fifty-one places.  The scratch
+ * above cannot grow to meet that: it is permanently resident in bank $00,
+ * which has hundreds of bytes free in total.  It does not have to.
+ * fm_alert already takes the AES's POOL for its icon and its BITBLK, and
+ * the pool is exactly the right home for a copy this size: near, because
+ * fm_strbrk points the tree's ob_spec INTO the string; lasting the whole
+ * call, because the tree is drawn from those pointers; and gone at the
+ * end of it, because the caller winds the pool back to its mark.  512
+ * bytes is the ceiling, which is longer than an alert a screen can hold. */
+#define POOL_STR_MAX 512
+
+static const char *pool_str(int32_t a)
+{
+    uint32_t p = (uint32_t)a;
+    uint16_t n = 0;
+    char *dst;
+
+    if (!(p >> 16))
+        return (const char *)(uint16_t)p;       /* near, or NULL */
+    while (n < POOL_STR_MAX - 1 && far_read8(p + n))
+        n++;
+    dst = pool_alloc((uint16_t)(n + 1), 1);
+    if (dst)
+        far_get((uint8_t *)dst, p, (uint16_t)(n + 1));
+    return dst;
 }
 
 /* rsrc_gaddr's answer, for aes_entry to copy to addr_out[0] -- the one
@@ -383,10 +413,14 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
         break;
     }
     case 52: {                      /* form_alert: defbut, string */
-        const char *s = (const char *)near_str(addr_in[0]);
-        if (!s)
+        uint16_t mark = pool_mark();
+        const char *s = pool_str(addr_in[0]);
+        if (!s) {
+            pool_release(mark);
             return -1;
+        }
         ret = fm_alert(int_in[0], s);
+        pool_release(mark);
         break;
     }
     case 53:                        /* form_error: number */
@@ -508,7 +542,14 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
          * title again at every redraw, so it cannot be bounced into a
          * scratch the way form_alert's text is.  A far address would be
          * cut to 16 bits and draw whatever is in bank $00 there: a blank
-         * title, silently.  Refused instead, and the call answers 0. */
+         * title, silently.  Refused instead, and the call answers 0.
+         *
+         * Keeping all 24 bits and bringing a far title down at DRAW time
+         * is the fix, and it was built and measured: two 40-byte near
+         * scratches and 32 bytes of wider WINDOW records, 116 in all,
+         * against the 16 bytes LoRAM has above its floor.  There is
+         * nowhere else for it -- Near holds const data, zwin has 12 bytes
+         * left -- so it waits on a bank-$00 rebalance. */
         if ((int_in[1] == WF_NAME || int_in[1] == WF_INFO) && w[0] != 0)
             ret = 0;
         else

@@ -135,7 +135,8 @@ def main(argv):
         check(wfar == 0, f"wind_set(WF_NAME) with a FAR title answered {wfar}, not 0 -- "
                          "the ABI cut a far address to 16 bits instead of refusing it")
         check(wnear == 1, f"wind_set(WF_NAME) with a NEAR title answered {wnear}, not 1")
-        print(f"  WF_NAME: a far title refused ({wfar}), a near one taken ({wnear})")
+        print(f"  WF_NAME: a far title refused ({wfar}), a near one taken ({wnear}) "
+              f"-- taking one needs a bank $00 rebalance (src/sys/abi.c, case 105)")
         want = [(SEED[i & 7] + i) & 0xFFFF for i in range(N)]
         want = [w - 0x10000 if w >= 0x8000 else w for w in want]
         check(b.peek16(big["m29_first"]) == (want[0] & 0xFFFF),
@@ -159,8 +160,11 @@ def main(argv):
         b.frames(30)
         al = b.peek16(big["m29_alert"])
         check(al == 1, f"form_alert with a far string returned {al}, not the "
-              f"button -- the shim did not bounce the far literal (near_str, "
-              f"src/sys/abi.c)")
+              f"button -- the shim did not bounce the far literal, which at "
+              f"102 bytes is past the 64-byte near scratch and goes through "
+              f"the AES's pool instead (pool_str, src/sys/abi.c)")
+        print(f"  form_alert: a 102-byte FAR string answered with button {al} "
+              f"-- bounced through the pool, not the near scratch")
 
         # Let it go, and see the shell put the desktop back over it.
         b.key("RETURN")
