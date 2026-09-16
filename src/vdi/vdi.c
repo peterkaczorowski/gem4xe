@@ -2149,7 +2149,10 @@ static void vdi_vex_curv(void) { vex(&vec_curv); }
 static void vdi_vex_timv(void)
 {
     vex(&vec_timv);
-    intout[0] = 20;                 /* tick length in ms: 50 Hz PAL frame */
+    intout[0] = irq.pal ? 20 : 17;  /* tick length in ms: the frame, 50 Hz
+                                     * on PAL and 60 on NTSC (16.7), which
+                                     * is what evnt_timer and the double-
+                                     * click window are measured in */
     contrl[4] = 1;
 }
 

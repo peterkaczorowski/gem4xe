@@ -1428,6 +1428,43 @@ WORD Tgettime(void)
     return (WORD)dos(0x2C);
 }
 
+LONG Tgettimeofday(struct timeval FAR *tv, struct timezone FAR *tz)
+{
+    dl(6, (LONG)(uint32_t)tv);
+    dl(10, (LONG)(uint32_t)tz);
+    return dos(0x155);
+}
+
+/* clock(): elapsed time since the program first asked, in CLOCKS_PER_SEC
+ * units as the compiler's <time.h> defines them, over Tgettimeofday.  It
+ * lives here and not in clib.c because it is a binding -- and because
+ * clib.c is also gem4xe's own, where there is no call gate to make.  A
+ * program written against mintlib's clock() -- the ST's 200 Hz tick --
+ * that scales by CLOCKS_PER_SEC runs unchanged. */
+#include <time.h>
+clock_t clock(void)
+{
+    static LONG  s0;
+    static WORD  started;
+    struct timeval tv;
+
+    uint32_t ms;
+
+    Tgettimeofday(&tv, 0);
+    if (!started) {
+        s0 = tv.tv_sec;
+        started = 1;
+    }
+    /* In 32 bits throughout: milliseconds since the first call (good for
+     * 49 days), scaled to the header's rate a second at a time so nothing
+     * overflows.  clock_t is 64 bits on this compiler, and a 64-bit
+     * quotient did not come out right here (it answered the dividend), so
+     * the wide type carries the result and takes no part in the sum. */
+    ms = (uint32_t)(tv.tv_sec - s0) * 1000UL + (uint32_t)tv.tv_usec / 1000UL;
+    return (clock_t)((ms / 1000UL) * (uint32_t)CLOCKS_PER_SEC
+                     + (ms % 1000UL) * (uint32_t)CLOCKS_PER_SEC / 1000UL);
+}
+
 /* The C functions, the rest of memory, setting the clock and the end:
  * the calls phase 42 filled in (src/sys/gemdos.c). */
 void Pterm0(void)                       { dos(0x00); }

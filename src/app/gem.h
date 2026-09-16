@@ -742,6 +742,17 @@ LONG Fdatime(WORD *timeptr, WORD handle, WORD wflag);   /* two words: time, date
 WORD Tgetdate(void);
 WORD Tgettime(void);
 
+/* MiNT's clock, and the one to pace anything by: seconds since 1970 and
+ * microseconds, from a ~4 kHz timer the system keeps, monotonic and exact
+ * to a quarter of a millisecond.  On an ST this exists under MiNT and
+ * answers EINVFN under plain TOS, where mintlib falls back to the 200 Hz
+ * system variable; that variable is not reachable here, so this is the
+ * one door.  `tz` may be 0 and answers zeros if not.  clock() in this
+ * kit is built on it (gemlib.c). */
+struct timeval  { LONG tv_sec, tv_usec; };
+struct timezone { WORD tz_minuteswest, tz_dsttime; };
+LONG Tgettimeofday(struct timeval FAR *tv, struct timezone FAR *tz);
+
 /* The C functions, through the ST's standard handles: 0 and 1 the
  * console, a VT-52 on GEM's screen; 2 aux:, with nothing behind it here;
  * 3 prn:, the printer GEM4XE.CFG names.  Fforce points one at a file or

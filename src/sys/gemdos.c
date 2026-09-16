@@ -1712,6 +1712,28 @@ static LONG gd_outstat(WORD std)
     return GD_DEV_READY;
 }
 
+/* Where the timer's zero falls on the calendar, for Tgettimeofday: Unix
+ * seconds of the RTC's reading less the timer's seconds at that moment.
+ * Taken once, and again after the clock is set. */
+static uint32_t gd_wall;
+static uint8_t  gd_wall_ok;
+
+/* Seconds since 1970 for a CLOCK reading (days from the civil date by the
+ * usual era arithmetic; 1980..2079 is well inside 32 bits). */
+static uint32_t gd_unix(const CLOCK *c)
+{
+    uint32_t y = c->year, m = c->month, d = c->day, era, yoe, doy, doe, days;
+    if (m <= 2)
+        y--;
+    era = y / 400;
+    yoe = y - era * 400;
+    doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    days = era * 146097 + doe - 719468;
+    return days * 86400UL + (uint32_t)c->hour * 3600 + (uint32_t)c->minute * 60
+         + c->second;
+}
+
 /* Tsetdate and Tsettime: the half given, checked, and the other half as
  * the clock has it now.  GD_ERROR for a date or a time that cannot be
  * one, and for a machine with no clock to set. */
@@ -1720,6 +1742,7 @@ static LONG gd_settime(UWORD v, WORD date)
     CLOCK c;
     UWORD lo = v & 0x1F, mid = (v >> 5) & 0x3F, hi = v >> 11;
 
+    gd_wall_ok = 0;                     /* Tgettimeofday re-reads the RTC */
     if (date) {
         mid &= 0x0F;
         hi = (UWORD)((v >> 9) & 0x7F);  /* years since 1980 */
@@ -2236,6 +2259,35 @@ void gemdos_call(uint32_t pb)
         CLOCK now;
         clock_read(&now);
         r = (LONG)(UWORD)((now.hour << 11) | (now.minute << 5) | (now.second >> 1));
+        break;
+    }
+    case GD_TGETTIMEOFDAY: {
+        /* MiNT's Tgettimeofday(tv, tz): tv_sec since 1970 UTC and tv_usec,
+         * both LONGs; tz two WORDs of zero when asked for (this machine
+         * keeps no zone).  The seconds come from the timer, not the RTC
+         * (src/sys/irq.c): the RTC is read ONCE, the first time or after
+         * Tsettime/Tsetdate, to fix where the timer's zero falls on the
+         * calendar, because a bit-banged DS1305 read costs milliseconds
+         * and a clock that jumps is no clock for pacing.  Without an RTC
+         * the epoch is the ST's, 1 January 1980, as Tgettime says. */
+        uint32_t tvp = (uint32_t)arg_l(6), tzp = (uint32_t)arg_l(10);
+        uint32_t sec, usec;
+        irq_clock(&sec, &usec);
+        if (!gd_wall_ok) {
+            CLOCK c;
+            clock_read(&c);
+            gd_wall = gd_unix(&c) - sec;
+            gd_wall_ok = 1;
+        }
+        if (tvp) {
+            wr32(tvp, (LONG)(gd_wall + sec));
+            wr32(tvp + 4, (LONG)usec);
+        }
+        if (tzp) {
+            wr16(tzp, 0);
+            wr16(tzp + 2, 0);
+        }
+        r = 0;
         break;
     }
     case GD_FDATIME:

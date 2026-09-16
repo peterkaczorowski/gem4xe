@@ -232,6 +232,30 @@ def main(argv):
 
         res = struct.unpack("<64h", b.memdump(at("m32_res"), 128))
         mem = struct.unpack("<6i", b.memdump(at("m32_mem"), 24))
+
+        # -- the clock: Tgettimeofday and clock() across evnt_timer(500) ----
+        # Seconds since 1970 from the RTC read once, microseconds from the
+        # ~4 kHz timer (src/sys/irq.c, irq_clock).  The wait is measured in
+        # frames -- 25 of 20 ms on this PAL machine -- so the span is 500 ms
+        # give or take a frame each side and the poll's own slack; the
+        # microseconds must be a real fraction of a second, and time must
+        # not run backwards.  clock() reports the same span in the units
+        # its header names, which the program hands back beside it.
+        a_s, a_us, b_s, b_us, cspan, cps = struct.unpack("<6i", b.memdump(at("m32_time"), 24))
+        check(res[59] == 0 and res[60] == 0,
+              f"Tgettimeofday answered {res[59]} and {res[60]}, not 0")
+        check(0 <= a_us < 1000000 and 0 <= b_us < 1000000,
+              f"tv_usec is not a fraction of a second: {a_us}, {b_us}")
+        check(a_s >= 315532800,
+              f"tv_sec {a_s} is before 1 January 1980, the epoch with no RTC")
+        span = (b_s - a_s) * 1000 + (b_us - a_us) // 1000
+        check(440 <= span <= 600,
+              f"Tgettimeofday saw {span} ms across evnt_timer(500), expected ~500")
+        cms = cspan * 1000 // cps if cps else -1
+        check(cps > 0 and abs(cms - span) <= 40,
+              f"clock() saw {cspan} ticks at {cps}/s = {cms} ms, Tgettimeofday {span} ms")
+        print(f"  Tgettimeofday: {a_s}.{a_us:06d} -> {b_s}.{b_us:06d}, {span} ms across "
+              f"evnt_timer(500); clock() {cspan} ticks at {cps}/s ({cms} ms)")
         line = b.memdump(at("m32_line"), 5)
         text = b.memdump(at("m32_text"), 5)
 

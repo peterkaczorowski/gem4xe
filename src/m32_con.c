@@ -17,11 +17,13 @@
  */
 #include "portab.h"
 #include "gem.h"
+#include <time.h>               /* clock_t and CLOCKS_PER_SEC, for clock() */
 
 #define ESC "\033"
 
 WORD m32_res[64];
 LONG m32_mem[6];
+LONG m32_time[6];               /* Tgettimeofday twice, clock()'s span, its rate */
 WORD m32_step;
 char m32_line[24];
 char m32_text[24];
@@ -184,6 +186,26 @@ int main(void)
             m32_res[56] = 0;
     m32_res[57] = (WORD)Pexec(PE_LOADGO, "NOPE.G4A", "\0", 0);
     m32_res[58] = (WORD)Pexec(3, "M32KID.G4A", "\0", 0);
+
+    /* -- the clock: Tgettimeofday and clock() across an evnt_timer ------
+     * The gate wants the pair before and after a 500 ms wait, so it can
+     * see the seconds and microseconds monotonic and the span right, and
+     * clock()'s span in the same units its header names. */
+    {
+        struct timeval a, b;
+        clock_t c0, c1;
+        m32_res[59] = (WORD)Tgettimeofday(&a, 0);
+        c0 = clock();
+        evnt_timer(500, 0);
+        m32_res[60] = (WORD)Tgettimeofday(&b, 0);
+        c1 = clock();
+        m32_time[0] = a.tv_sec;
+        m32_time[1] = a.tv_usec;
+        m32_time[2] = b.tv_sec;
+        m32_time[3] = b.tv_usec;
+        m32_time[4] = (LONG)(c1 - c0);
+        m32_time[5] = (LONG)CLOCKS_PER_SEC;
+    }
 
     Cconws("\r\ndone");
     m32_step = 8;

@@ -286,7 +286,7 @@ typedef struct {
 } FARBLK;
 static uint32_t rs_imbase;      /* where they went, 0 if they stayed */
 static uint16_t rs_imsize;
-static FARBLK   rs_im[3];       /* [1] and [2]: the slot that took it */
+static FARBLK   rs_im[2];       /* by slot: [0] the resident, [1] the nested */
 
 void rs_imaddr(uint32_t *base, uint16_t *len)
 {
@@ -334,7 +334,7 @@ static void rs_imfar(uint8_t *mem, uint16_t im_off, uint16_t size)
     if (!base)
         return;                         /* no far memory: leave them be */
     {
-        FARBLK *f = &rs_im[rs_2 ? 2 : 1];
+        FARBLK *f = &rs_im[rs_2 ? 1 : 0];
         f->base = base;
         f->mark = mark;
         f->top = farmem.brk;
@@ -383,20 +383,21 @@ typedef struct {
 
 uint32_t rs_cibase;                     /* where the extension went, 0 if none */
 uint16_t rs_cisize;
-static FARBLK   rs_ci[3];               /* [1] and [2]: the slot that took it */
+static FARBLK   rs_ci[2];               /* by slot, as rs_im */
 
 /* Give a slot's far blocks back, each while it is still the top of the
- * heap -- the extension was taken after the images, so it is asked first. */
+ * heap -- the extension was taken after the images, so it is asked first.
+ * `slot` is 1 or 2, as rs_1/rs_2 are named. */
 static void rs_farback(WORD slot)
 {
-    FARBLK *f = &rs_ci[slot];
+    FARBLK *f = &rs_ci[slot - 1];
     if (f->base && farmem.brk == f->top) {
         far_release(f->mark);
         if (rs_cibase == f->base)
             rs_cibase = rs_cisize = 0;
         f->base = 0;
     }
-    f = &rs_im[slot];
+    f = &rs_im[slot - 1];
     if (f->base && farmem.brk == f->top) {
         far_release(f->mark);
         f->base = 0;
@@ -434,7 +435,7 @@ static WORD rs_cicons(int16_t fd, RSHDR *h, uint16_t size)
     rs_cibase = 0;
     rs_cisize = 0;
     {
-        FARBLK *f = &rs_ci[rs_2 ? 2 : 1];
+        FARBLK *f = &rs_ci[rs_2 ? 1 : 0];
         f->mark = farmem.brk;
         base = far_alloc(ext_len);
         if (!base)

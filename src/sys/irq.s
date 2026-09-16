@@ -101,8 +101,10 @@ irq_pokey:    sta     abs:irq_pend
               lsr     a
               bcc     irq_key
               rep     #0x20
-              inc     abs:irq_timer
-              sep     #0x20
+              inc     abs:irq_timer           ; 32 bits: the low word, and
+              bne     irq_t1_ctd              ; the high one when it wraps
+              inc     abs:irq_timer+2
+irq_t1_ctd:   sep     #0x20
               lda     abs:irq_ptr_on
               beq     irq_key
               lda     PORTA

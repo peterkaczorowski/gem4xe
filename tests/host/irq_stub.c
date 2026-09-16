@@ -10,7 +10,8 @@
 
 IRQ_INFO irq;
 
-volatile uint16_t irq_frames, irq_timer, irq_qlo, irq_qhi;
+volatile uint16_t irq_frames, irq_qlo, irq_qhi;
+volatile uint32_t irq_timer;
 volatile uint8_t  irq_kb[8], irq_kb_head, irq_kb_tail, irq_kb_count;
 volatile uint8_t  irq_fault;
 

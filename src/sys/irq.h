@@ -109,6 +109,8 @@ typedef struct {
     uint8_t  bad_byte;      /* after a failure: the first byte that read
                                back wrong, as it read                      */
     uint8_t  timer_div;     /* AUDF1: the pointer sampler's divisor        */
+    uint8_t  pal;           /* 1: a PAL machine (GTIA), which sets the
+                               sampler's rate and the frame's length      */
     uint16_t rom_sum;       /* 16-bit sum of $C000-$CFFF,$D800-$FFFF read
                                from the ROM, and ... */
     uint16_t ram_sum;       /* ... read back from the RAM copy, before the
@@ -128,7 +130,15 @@ extern uint8_t irq_cio_swap;
 
 /* --- the handlers' state, written at interrupt time (src/sys/irq.s) ----- */
 extern volatile uint16_t irq_frames;       /* vertical blanks             */
-extern volatile uint16_t irq_timer;        /* timer-1 interrupts taken    */
+extern volatile uint32_t irq_timer;        /* timer-1 interrupts taken:
+                                              32 bits, ~4 kHz, so it is a
+                                              clock (irq_clock below)     */
+
+/* The machine's clock, from the timer: seconds and microseconds since
+ * irq_install(), exact to one sampler tick (250 us NTSC, 253 PAL) and
+ * monotonic for the twelve days the count takes to wrap.  What
+ * Tgettimeofday is built on. */
+void irq_clock(uint32_t *sec, uint32_t *usec);
 extern volatile uint16_t irq_qlo, irq_qhi; /* the two axes' counters      */
 extern volatile uint8_t  irq_kb[8];        /* raw KBCODEs, a ring          */
 extern volatile uint8_t  irq_kb_head, irq_kb_tail, irq_kb_count;

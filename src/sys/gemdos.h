@@ -89,6 +89,11 @@
 #define GD_TSETDATE  0x2B
 #define GD_TGETTIME  0x2C
 #define GD_TSETTIME  0x2D
+/* MiNT's: seconds and microseconds, the call a program that wants a real
+ * clock makes -- mintlib's gettimeofday tries it first and falls back to
+ * _hz_200, which this machine cannot offer (no supervisor mode, no system
+ * variable an application may read). */
+#define GD_TGETTIMEOFDAY 0x155
 #define GD_FGETDTA   0x2F
 #define GD_SVERSION  0x30
 #define GD_PTERMRES  0x31

@@ -127,6 +127,18 @@ The near part comes out of gem4xe's **2 KB application pool** in bank
 15 MB.  A `char buf[1024]` on the stack is how a first program runs
 out.
 
+**There is a real clock.**  `Tgettimeofday` -- MiNT's call, GEMDOS
+`0x155` -- answers seconds and microseconds from a ~4 kHz timer the
+system keeps, monotonic and exact to a quarter of a millisecond, and
+`clock()` in this kit is built on it in `CLOCKS_PER_SEC` units, so a
+program written against mintlib's `clock()` runs unchanged.  Pace by
+that, not by counting `vex_timv` ticks; and sleep with `evnt_timer`,
+which yields to the accessories, rather than spinning on the clock --
+a spin that never calls the AES starves everything else on the machine.
+The ST's 200 Hz system variable is not reachable here (no supervisor
+mode, no address an application may read), so a port that reads
+`_hz_200` directly changes that line to `Tgettimeofday`.
+
 **There is no C heap.** Your heap block is zero bytes, because memory
 above bank `$00` is `Malloc`'s to give out. `malloc` and `free` are
 refused at link time -- a call to either fails with an undefined symbol

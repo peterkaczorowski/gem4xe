@@ -191,26 +191,13 @@ void free(void *p)
     gem4xe_has_no_heap__use_GEMDOS_Malloc();
 }
 
-/* AND SO DOES CLOCK, for both reasons at once.  `clock.o` is in the
- * library this links against, so a program that asks for elapsed time
- * gets it satisfied QUIETLY -- Apache-2.0 object code in a GPLv2 binary
- * -- and then answers a number with no meaning, because nothing on this
- * machine drives the library's tick.  That is the malloc failure again:
- * it links, it runs, and it is wrong with nothing to say so.  Worse than
- * malloc, in fact, since `clock.o` does not carry NuttX's lib_ prefix,
- * so the prefix heuristic in tests/host/test_licence.py would not name
- * it -- only that file's stronger "nothing unlisted" assertion would,
- * and only over gem4xe's own maps, never an application's.
- *
- * A GEM program has two real answers, and the symbol names them:
- * evnt_timer to wait for a span, and vex_timv to be handed the tick --
- * with its length in milliseconds -- on every one of them, which is what
- * counting elapsed time is built out of.  Tgettime is the time of day,
- * to two seconds. */
-extern void gem4xe_has_no_clock__use_evnt_timer_or_vex_timv(void);
-
-clock_t clock(void)
-{
-    gem4xe_has_no_clock__use_evnt_timer_or_vex_timv();
-    return 0;
-}
+/* clock() is NOT here, and that is deliberate.  `clock.o` is in the
+ * library this links against, and for a while this file refused it by
+ * name, because nothing on the machine drove the library's tick and a
+ * program asking for elapsed time got a number with no meaning -- the
+ * malloc failure again.  There is a tick now: Tgettimeofday, from the
+ * system's ~4 kHz timer, and clock() is built on it in the kit's
+ * gemlib.c, beside the binding it calls.  It cannot be here, because
+ * this file is gem4xe's own too, and gem4xe has no call gate to make
+ * a call through.  An application links gemlib.c and gets the real one;
+ * the engine references neither and the library's is never pulled. */

@@ -303,6 +303,9 @@ int main(void)
     Tgetdate();
     Tsetdate(0x0021);
     Tgettime();
+    struct timeval tv;                  /* declared here: the test reads
+                                         * a call by its four-space indent */
+    Tgettimeofday(&tv, 0);
     Tsettime(0);
     Fgetdta();
     Sversion();
