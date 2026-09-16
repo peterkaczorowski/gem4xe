@@ -7,9 +7,9 @@ in principle Antonia), and **Ultimate 1MB**.
 The target surface is **640 × 240, 16 colours** — VBXE's HR overlay, 4bpp chunky.
 That is a better GEM surface than the Atari ST's medium resolution.
 
-Current version **0.1** — `VERSION` at the top of the tree is where it
+Current version **0.2** — `VERSION` at the top of the tree is where it
 lives; `make dist` stamps a build with it and the commit, and `make
-release` is the same for the public, without the floppies (their DOS is
+release` is the same for the public, without the DOS 2 floppy (its DOS is
 not gem4xe's to give away) and named by the version alone.
 
 **A 65C816 with linear RAM is required.** VBXE is not: one `GEM.COM` carries
@@ -57,7 +57,7 @@ full-screen repaints.
 
 | Gate | | |
 |---|---|---|
-| `make test-host` | 170/170 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; the application kit, assembled and built out of a copy of itself in a directory of its own; the far allocator, asked for the blocks that used to straddle a bank; and the distribution, built both ways, with the release checked for the floppies it must not carry and for what its page says instead |
+| `make test-host` | 192/192 | pointer device layer — the ST, Amiga and CX80 models walked through the target's C in the compiler's simulator — .xex far-code staging, and the application bindings: every one of them called in the simulator with the three call gates replaced by recorders, and the parameter block each builds compared with the VDI and AES contracts; the application kit, assembled and built out of a copy of itself in a directory of its own; the far allocator, asked for the blocks that used to straddle a bank; and the distribution, built both ways, with the release checked for the floppies it must not carry and for what its page says instead |
 | `make test-emu` | 5/5 | VBXE FX 1.26 / Rapidus / MEMAC A / CPU switch |
 | `make test-m1` | 5/5 | Calypsi C on the 65C816 |
 | `make test-m2` | PASS | 640×240×4bpp HR overlay, 153,600/153,600 pixels |
@@ -68,7 +68,7 @@ full-screen repaints.
 | `make test-m7` | 10/10 | `evnt_*`, `form_do`, `form_dial`, `graf_watchbox` under host-driven input |
 | `make test-m8` | 12/12 | the window manager and the control manager: rectangle lists, moves, gadgets, `WM_*` |
 | `make test-m9` | 4/4 | menus: the bar, drop-downs, `MN_SELECTED`, screenshotted inside the wait |
-| `make test-m10` | 27/27 | native-mode interrupts: the OS shadowed into SRAM byte for byte, the VBI, a ~4 kHz timer, the keyboard, a trak-ball counted under interrupt, and a clean return to DOS |
+| `make test-m10` | 28/28 | native-mode interrupts: the OS shadowed into SRAM byte for byte, the VBI, a ~4 kHz timer, the keyboard, a trak-ball counted under interrupt, and a clean return to DOS |
 | `make test-m11` | PASS | the application ABI: a separately linked program loaded, relocated and run, calling the VDI and the AES through `COP` — its records, the loader's, and the screen against the reference |
 | `make test-m12` | PASS | the file layer: CIO through the OS in emulation mode, `rsrc_load`/`rsrc_obfix`, `shel_*`, and the file selector driven over two disks — its listings, its scrolling and its returned strings against the reference, pixel for pixel |
 | `make test-m13` | 19/19 | alerts, icons and the pointer: `form_alert` parsed, laid out and drawn against the reference; every mouse form `graf_mouse` owns, and the caller's own |
@@ -90,19 +90,31 @@ full-screen repaints.
 | `make test-m28` | PASS | **a desk accessory resident beside the desktop** — loaded before it, registered in the Desk menu, and its own timer still advancing while the desktop owns the mouse. The drop-down is checked against the object tree rather than a screenshot; the menu is then pulled down with the mouse and the `AC_OPEN` read word for word out of the accessory, and `File → Quit` delivers the `AC_CLOSE` — after which the accessory is still there, which is the whole difference between an accessory and a program |
 | `make test-m29` | PASS | **an application with more data than bank `$00` has** — linked `--data-model=large`, its variables in a far bank of their own, loaded by the shell and run: the far bss zeroed, the far initialisers copied up by the crt's own table, and a 40 KB array walked end to end. The `.G4A` header's far-bank count comes from the linker's map, because a far bss carries no bytes and sizing it from the image would ask for one bank too few |
 | `make test-m30` | PASS | **the VDI on a printer** — the third device through the seam and the first that is not a screen: 640×800 dots in one far bank, drawn by the same `vdi.c`, written out by `v_updwk` as PCL 5 and as PostScript, both files read back out of the disk image. The PCL is decoded back to a page and compared with `vdiref` on `devref.Printer` — all 512,000 dots — and the Atari's own **PostScript is rendered by Ghostscript** and compared with the same page, which is what checks the y-flip and the DeviceGray inversion |
+| `make test-m31` | PASS | **an application whose far image is bigger than a bank** — GACS's GEM shell, 100 KB of far code and another 11 KB of constants, loaded, relocated across banks and run. Two limits had been sitting behind that and neither would have announced itself: the far fixup offsets were 16-bit, so an address past `$FFFF` of the image could not be named at all, and `tools/mkg4a.py` refused a multi-bank image up front — a refusal guarding an invariant the packer does not own |
 | `make test-m32` | PASS | **the rest of GEMDOS, from a program that never calls the AES**: a page of VT-52 using every escape in the Compendium's table and the echoes of typed keys, both held **pixel for pixel against `tools/conref.py`**; `Cconin`, `Cconrs`, `Cnecin`, `Crawcin` and `Cconis` at the keyboard; handle 1 forced onto a file with `Fforce` and put back through `Fdup`'s handle, the file read back through handle 0; `Mxalloc`/`Mshrink`/`Mfree` moving the far heap by exactly the block; a child run with `Pexec` that reads its command tail, writes through the handle it inherited and ends with `Pterm(5)`; and `Pterm(42)` from inside a function, the shell's record saying 42 and not the 7 `main()` returns after the call |
 | `make test-boot` | PASS | the product disks booting into the desktop with **nothing typed and nothing poked** — the loader finds the Rapidus behind the 6502 the machine came up as and switches it itself: `build/gem-boot.atr` (a double-density DOS 2 with `DUP.SYS`, the system named `AUTORUN.SYS`, at least 80 sectors free) and `build/gem-sdx.atr` (a double-sided SDFS disk with **no DOS on it**, the one the release carries, booted under the SpartaDOS X cartridge fixture), each the system and nothing else, with `build/gem-apps.atr`, the applications, read file by file; the 6502 boot runs GEM by itself and ends in the loader's refusal; `COLDST` and the Rapidus switch bring the machine up cold as a 65C816, the DOS starts GEM again, **the boot screen** is read back off E: while it is held and every line checked against the machine that wrote it, and the far image is spot-checked against the linker's output before the desk is compared pixel for pixel with the desktop model at its first wait |
 | `make test-install` | PASS | **the installer**: the SpartaDOS X cartridge with a blank drive and both floppies beside it, `-INSTALL D1:` from the system floppy and from the applications floppy, the drive listed and holding exactly `tools/mkcf.py`'s two tables and an `AUTOEXEC.BAT`, the system installed again over itself keeping that `AUTOEXEC.BAT`, and a cold start from the drive reaching the desktop with the clock accessory loaded beside it |
 | `make test-cf` | PASS | the product **CF card** booting into the desktop: `build/gem-cf.img`, an APT table and two SDFS partitions, on a SIDE 2's IDE bus, with SpartaDOS X *and* the PBI BIOS that mounts those partitions coming from a real Ultimate 1MB flash image. The gate walks the U1MB BIOS setup itself (PBI BIOS on, hard disk on, an ID that is not the Rapidus's) from a fresh profile of its own, keeps the SIDE's SDX bank unmapped so the PBI BIOS will touch the disk, and then runs the same boot as `test-boot` -- refusal, switch, desk against the model. Needs the U1MB fixture and the patched emulator, so not in `make test`. `make test-cf-dosclock` boots the same card with `CLOCK=DOS` in its `GEM4XE.CFG`, so that the SpartaDOS X kernel -- `kd_gettd`, the clock of a machine with no U1MB and no SIDE, an Antonia with an IDE Plus 2 say -- answers instead of the chip, and its answer is compared with the host's clock |
 | `make test-m14u` `test-m15u` | PASS | the same two on SpartaDOS X 4.49b booted from a real Ultimate 1MB flash image, U1MB switched on -- needs the patched emulator in `tools/altirra/`, so not in `make test` |
-| `make check-cc` | PASS | the ten compiler bugs worked around, in the vendor's simulator |
+| `make test-m11-os` | PASS | the application ABI again, this time under **drac030's 65C816 XL OS** instead of the Atari's: gem4xe's three `COP`s answered as before, and a COP that is not ours passed to Rapidus OS through its own vector. Needs `[rapidus].os`, so not in `make test` |
+| `make test-sdx816` | PASS | the desktop under **Rapidus OS with SpartaDOS X's `65816.SYS` loaded** — the driver that stopped both 0.1.2 and 0.2 at the desktop's first `rsrc_load`, saying `DESKTOP.RSC` was not on the boot disk. It was not the DOS: `proc_init()` cleared a process record field by field and not the two resource slots the record gained later, so the desktop started out holding resources it had never loaded and `rs_load` refused a third. Needs the Rapidus OS, SDX and `65816.SYS` fixtures |
+| `make test-sd` | PASS | the same card in the shape a **SubCart / AVGCART** wants — a FAT32 partition first, the APT after it — booted the same way as `test-cf`. Needs `[u1mb].flash` |
+| `make test-cf-firmware` | PASS | the same card booted on **every Ultimate 1MB firmware in `[u1mb.firmware]`** — 1.25, 2, 3.02, 3.10, 4.0 and 4.20 — because the BIOS setup screens differ between them, so the gate walks each one by what its screen actually says rather than by a fixed key sequence. Needs the firmware list, so not in `make test` |
+| `make check-cc` | PASS | the sixteen compiler bugs worked around, in the vendor's simulator |
 | `make movie` | PASS | a session with the AES itself, filmed frame by frame and checked as a gate: `build/movie/gem4xe.mp4` |
 | `make bench` | — | GEMBench's tests on this machine, in milliseconds, not a gate (`docs/bench.md`) |
 
-`make test` runs them all. Per-phase notes, including the bugs and what caught
-them, are in [`docs/`](docs/README.md) — one document per phase, with an index.
+`make test` runs all of them but the ones whose row says they need a fixture
+this tree cannot carry — the Ultimate 1MB flash and the Rapidus OS — and
+`make movie` and `make bench`, which are run by hand. Per-phase notes,
+including the bugs and what caught them, are in [`docs/`](docs/README.md) —
+one document per phase, with an index.
 
-The 37 VDI opcodes the AES and the GEM Desktop actually use are complete. The
+The VDI is complete across the classic opcode space — 1–39 and 100–131,
+which is all of it before Speedo/FSM — with four deliberate no-ops
+(`v_clswk`, the cell-array pair, valuator input), as DRI's own screen
+driver shipped them. The 37 the AES and the GEM Desktop use came first;
+phase 17 added the rest an application wants, the ten GDPs included. The
 AES object library draws, hit-tests and edits; `form_do` runs a dialog under
 keyboard and pointer input; the window manager keeps dirty-rectangle lists
 and blits a window across the screen (x snapped to even: the blitter has no
@@ -142,8 +154,9 @@ above `$FFFF`; the far image therefore travels as chunks aimed at a staging
 buffer and DOS copies it up through `INITAD` as it reads the file. That took
 the code ceiling from ~28 KB to a bank at a time, and freed the `$4000-$7FFF`
 scaffold the test runner had been borrowing from U1MB. Since phase 38 the
-chunks are **LZ-packed** -- 131 KB of far image in 88 KB of file, unpacked
-by `src/farload.s` as each chunk arrives -- which is what gave the floppy
+chunks are **LZ-packed** -- 143 KB of far image, and the whole of
+`GEM.COM` 100 KB with its near half, unpacked by `src/farload.s` as each
+chunk arrives -- which is what gave the floppy
 its `DUP.SYS` back (`docs/phase38.md`).
 
 Bank `$01` was 90% full by the time the benchmark landed, so the far code is
@@ -254,8 +267,9 @@ to break it.
 **And then the room** (same notebook). Bank `$00` had four bytes free
 and seven; the 608 bytes of fill patterns — 23% of all the near memory
 there is — went to `cfar` with the far code, and the boundary moved to
-share what that bought: **360 and 259 bytes free** now. The workstation
-holds the pattern as a *source and a first row* rather than a pointer,
+share what that bought: **272 bytes free in LoRAM and 371 in Near**
+today, which `make memcheck` prints. The workstation holds the pattern
+as a *source and a first row* rather than a pointer,
 because a pointer that could name either a far table or the user's own
 near array has to be far, and then "is this the user's?" is a near-to-far
 comparison on the workstation switch. That version passed `test-m3`
@@ -274,7 +288,7 @@ now only the test harness could make the switch. Fourteen bytes set
 SpartaDOS prompt rather than poking those registers, so what the page
 says to do is what the gate does.
 
-**There is a kit** (`docs/phase21.md`). `make sdk` packs eleven files —
+**There is a kit** (`docs/phase21.md`). `make sdk` packs thirteen files —
 the header, the bindings and the start-up as source, the linker's rules,
 the packer and a commented example — with no part of gem4xe itself in
 them, because an application links against none of it. `make` in the
@@ -375,18 +389,20 @@ delete had counted, the CPU's last thirty-two instructions -- is how
 that was read back.
 
 **What is not built yet, and is written down so it shapes what is**
-(`docs/shipping.md`). The system is 121 KB — more than a single-density
-floppy holds, and an enhanced-density one leaves it three sectors of
-room. **Double density** is where the DOS 2 product disk lives now, and
+(`docs/shipping.md`). The system is 145 KB of files — 168 KB once it is
+on a floppy's 253-byte sectors — which is more than a single-density
+disk holds and more than an enhanced-density one holds either.
+**Double density** is where the DOS 2 product disk lives now, and
 `tools/atr.py` writes it: 253-byte sectors take the DOS, its shell, GEM
-and the desktop with **6 KB to spare** — enough for a `DESKTOP.INF` and
-not for a program.  Since GEM.COM carries both display drivers
-(`docs/phase34.md`) that floppy is the system and nothing else; an
-application goes on the SpartaDOS install disk, which has 123 KB free,
-or on the card. The volume gem4xe belongs on is a CF card or a hard disk with APT
-partitions, and `make` writes one: `build/gem-cf.img` is a 16 MB image
-with an APT table, two 8 MB SDFS partitions and the install layout on
-the first — the system in `\GEM\`, an application in `\APPS\`, an
+and the desktop with **87 sectors to spare** — enough for a
+`DESKTOP.INF` and not for a program.  Since GEM.COM carries both display
+drivers (`docs/phase34.md`) that floppy is the system and nothing else;
+an application goes on the applications floppy, `gem-apps.atr`, or on
+the card (`docs/media.md`). The volume gem4xe belongs on is a CF card or
+a hard disk with APT partitions, and `make` writes one:
+`build/gem-cf.img` is a 16 MB image with an APT table, two 8 MB SDFS
+partitions and the install layout on the first — the system in `\GEM\`,
+an application in `\APPS\`, an
 `AUTOEXEC.BAT` that runs it. **`make test-cf` boots that card into the
 desktop**, on the machine the project is for: an Ultimate 1MB whose
 flash holds SpartaDOS X *and* the PBI BIOS, a SIDE 2 with the card on
@@ -401,12 +417,12 @@ boots that one. The floppy is now the bootstrap, not the ceiling.
 The product floppies come up in the desktop rather than at a prompt: the
 SpartaDOS X one from its `AUTOEXEC.BAT`, the DOS 2 one from
 `AUTORUN.SYS` — which DOS II+/D, the disk's old DOS, turns out not to
-have at all. Nothing is
-typed on the way in: a Rapidus always cold-boots as a 6502, and the
-loader switches it (`docs/phase23.md`). **No string a person
-reads belongs in the C**, and none does now: the desktop's eleven alerts are nine free strings of DESKTOP.RSC,
-asked for by index (`fun_alert`, the donor's shape), and the gate puts
-one on the screen and compares it. The one exception is the alert that
+have at all. Nothing is typed on the way in: a Rapidus always cold-boots
+as a 6502, and the loader switches it (`docs/phase23.md`). **No string a
+person reads belongs in the C**, and none does now: the desktop's fifteen
+alerts are free strings of DESKTOP.RSC, asked for by index (`fun_alert`,
+the donor's shape), and the gate puts one on the screen and compares it.
+The one exception is the alert that
 says the resource is missing, which cannot come from the resource.
 
 **A translation is two files** (`docs/phase15.md`). `LANG.RSC` is what
@@ -450,9 +466,9 @@ screen and only a pixel diff caught them — and one went the other way: the fil
 selector listed a file the reference did not, every returned value agreed, and
 only the screenshots disagreed (`docs/phase11.md`).
 
-Calypsi cc65816 5.18 has ten defects this tree has met — eight in code
-generation, one crash and one in the front end's constant arithmetic — each
-reproduced in the vendor's own simulator (the crash, in the compiler itself)
+Calypsi cc65816 5.18 has sixteen defects this tree has met — thirteen in code
+generation, two crashes and one in the front end's constant arithmetic — each
+reproduced in the vendor's own simulator (the crashes, in the compiler itself)
 and worked around at the source (or, for the divide flags, with a linker
 override). `tools/ccbug/README.md` lists
 them and the rules the sources follow; `make check-cc` reports when one is
@@ -468,7 +484,7 @@ to the language — `__far`, `__attribute__((tiny))`, `__simple_call`, the
 interrupt intrinsics — is mapped once in `src/portab.h` (`FAR`, `TINY`,
 `SIMPLE_CALL`, `cpu_sei()`…) and appears nowhere else, which
 `tests/host/test_portab.py` enforces; a second 65816 compiler needs a second
-block in that header and its own assembly sources, not a sweep through 26,000
+block in that header and its own assembly sources, not a sweep through 36,000
 lines. The GEM system font is extracted from an
 [EmuTOS](https://emutos.sourceforge.io/) checkout at build time rather than
 committed here, so point `EMUTOS=` at one; `CALYPSI=` finds the tool chain.
@@ -477,13 +493,17 @@ Both default to `~/dev/…`.
     make            # build
     make sdk        # the application kit, for writing a program that runs on it
     make dist       # what a tester is handed: the disks, the kit, and how to try it
-    make release    # the same for the public, named by VERSION: tarball, zip, the DOS-less floppy, checksums
+    make release    # the same for the public, named by VERSION: tarball, zip, the two DOS-less floppies, checksums
     make test-host  # the host tests: no emulator, no fixtures
 
 The emulated gates need [AltirraSDL](https://github.com/ilmenit/AltirraSDL),
 and the ones that put an Ultimate 1MB in the machine need the patches in
-`tools/altirra/` as well — two are open pull requests upstream, so run those
-with `ALTIRRASDL=/path/to/patched/AltirraSDL`.
+`tools/altirra/` as well. The CPU core, the U1MB switches and the bridge's
+65C816 debugging went up as pull requests #88 and #90 and **were merged on
+2026-09-06**, so a current upstream build has them; one patch is still
+outstanding — the H: device joins native paths with a backslash, which
+Linux takes as a character in the file name — so until that lands, run
+those gates with `ALTIRRASDL=/path/to/patched/AltirraSDL`.
 
 They also need Atari disk images, and **none is distributed here**: a DOS 2
 disk, a double-density DOS 2 disk, a SpartaDOS 3.2 disk, an SDX cartridge
@@ -511,7 +531,7 @@ any version ever published by the Free Software Foundation". Silence is the
 recipient's choice, not a v2-only grant.
 
 No Apache-2.0 object is linked — `src/sys/clib.c` supplies the eight ISO C
-functions Calypsi took from NuttX — and the **815 bytes of GEM.COM, 0.6% of it,
+functions Calypsi took from NuttX — and the **826 bytes of GEM.COM, 0.8% of it,
 that is the compiler's own runtime** falls under the GPL's System Library
 carve-out for "a compiler used to produce the work" (GPLv3 §1; GPLv2 §3 more
 loosely), so the binaries are wholly distributable as they stand. Calypsi's own
