@@ -1427,7 +1427,7 @@ test-m30: build/m30-boot.atr
 # Where bank $00 has gone, and whether there is enough of it left.  Run it
 # after a change that adds a table or a program; tests/host/test_memory.py
 # runs it too, so make test says so without being asked.
-memcheck: build/gem.xex build/desktop.g4a build/desktop.rsc build/clockacc.g4a build/clock.rsc
+memcheck: build/gem.xex build/m3desk.xex build/desktop.g4a build/desktop.rsc build/clockacc.g4a build/clock.rsc
 	python3 tools/memreport.py
 
 # ...and the VDI itself on it: the same vdi.c, the other side of the seam.

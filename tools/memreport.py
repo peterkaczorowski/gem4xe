@@ -75,14 +75,23 @@ def g4a_near(path):
 
 
 def rsc_pool(path):
-    """What a .RSC costs the pool -- the file, less the icon bitmaps when
-    rs_load can move them to far memory (src/aes/rsrc.c)."""
+    """What a .RSC costs the pool: (resident, far, PEAK).
+
+    The peak is not the resident cost and the difference is not small.
+    rs_load reads rsh_rssize -- the WHOLE file -- into one pool_alloc and
+    only then does rs_fixit move the icon bitmaps to far memory
+    (src/aes/rsrc.c).  So while it is loading, the pool is carrying the
+    file entire; the desktop's is 6,308 bytes against 4,772 resident.
+    Reporting only the resident figure is how this tool once said
+    "memory: ok" for a pool that could not load the desktop at all --
+    test-m28 went red and said "DESKTOP.RSC is not on the boot disk".
+    """
     d = open(path, "rb").read(36)
     h = struct.unpack(">18H", d)
     imdata, nbb, nimages, rssize = h[7], h[14], h[16], h[17]
     if nbb or nimages:
-        return rssize, 0
-    return imdata, rssize - imdata
+        return rssize, 0, rssize
+    return imdata, rssize - imdata, rssize
 
 
 def main(argv):
@@ -106,54 +115,111 @@ def main(argv):
             bad.append(f"{name} has {free} bytes free, wanted {floor[0]} -- "
                        f"{floor[1]}")
 
-    pool = r["AppPool"][1]
     desk = g4a_near(os.path.join(BUILD, "desktop.g4a"))
-    desk_rsc, desk_far = rsc_pool(os.path.join(BUILD, "desktop.rsc"))
-    accs = []
-    for name, rsc in (("clockacc", "clock"),):
-        p = os.path.join(BUILD, name + ".g4a")
-        if os.path.exists(p):
-            near = g4a_near(p)
-            pr, _ = rsc_pool(os.path.join(BUILD, rsc + ".rsc"))
-            accs.append((name.upper(), near, pr))
+    desk_rsc, desk_far, desk_peak = rsc_pool(os.path.join(BUILD,
+                                                          "desktop.rsc"))
+    def accessories(*want):
+        """(name, near, resident, peak) for each accessory that loads."""
+        out = []
+        for name, rsc in want:
+            p = os.path.join(BUILD, name + ".g4a")
+            if not os.path.exists(p):
+                continue
+            if rsc:
+                pr, _, pk = rsc_pool(os.path.join(BUILD, rsc + ".rsc"))
+            else:
+                pr = pk = 0
+            out.append((name.upper(), g4a_near(p), pr, pk))
+        return out
 
-    # The bump allocator, in the order the machine runs it: proc_init,
-    # then each accessory (queue, near region, resource), then the
-    # desktop.  A PROGRAM's near region is page-aligned (app.c:
-    # pool_alloc(near_size, 0x100)) and everything else is word-aligned,
-    # so the arithmetic is a simulation of pool_alloc rather than a sum --
-    # which is what makes it agree with the figure test-boot reads off the
-    # live machine instead of being close to it.
-    base = r["AppPool"][0]
-    brk = base
+    def walk(base, pool, accs, title, loud):
+        """The bump allocator, in the order the machine runs it: proc_init,
+        then each accessory (queue, near region, resource), then the
+        desktop.  A PROGRAM's near region is page-aligned (app.c:
+        pool_alloc(near_size, 0x100)) and everything else is word-aligned,
+        so this is a simulation of pool_alloc rather than a sum -- which is
+        what makes it agree with the figure test-boot reads off the live
+        machine instead of being close to it.
 
-    def take(n, align, what):
-        nonlocal brk
-        at = (brk + align - 1) & ~(align - 1)
-        brk = at + n
-        say(f"  {what:<34} {-(n + at - (brk - n)):6d}"
-            if False else f"  {what:<34} {-n:6d}   ${at:04X}")
+        Returns (free, worst) where `worst` is the smallest the pool ever
+        gets, counting each resource's TRANSIENT peak: rs_load holds the
+        whole file before rs_fixit moves the icons far, so the moment of
+        loading is tighter than anything the resident figures show.
+        """
+        brk, top, worst = base, base + pool, pool
 
-    say("")
-    say("the application pool, with everything the product ships resident")
-    say(f"  {'pool':<34} {pool:6d}   ${base:04X}")
-    take(PROC_STORE, 2, "process records")
-    for nm, near, pr in accs:
-        take(ACC_QUEUE, 2, nm + " message queue")
-        take(near, 0x100, nm + " near region")
-        take(pr, 2, nm + " resource")
-    # Where the shell marks the floor: everything permanent is below it
-    # and no program's exit may wind back past it (src/sys/app.c).  The
-    # desktop and its resource are above it, and come and go with it.
-    say(f"  {'-- permanent below here':<34} {'':6}   ${brk:04X}")
-    take(desk, 0x100, "the desktop")
-    take(desk_rsc, 2, "its resource")
-    free = base + pool - brk
-    say(f"  {'= free':<34} {free:6d}   "
-        f"({desk_far} bytes of icons are far, not here)")
-    if free < POOL_FLOOR[0]:
-        bad.append(f"the pool would have {free} bytes free, wanted "
-                   f"{POOL_FLOOR[0]} -- {POOL_FLOOR[1]}")
+        def take(n, align, what, peak=None):
+            nonlocal brk, worst
+            at = (brk + align - 1) & ~(align - 1)
+            brk = at + n
+            worst = min(worst, top - (at + (peak if peak else n)))
+            if loud:
+                note = f"   (peaks at {peak})" if peak and peak != n else ""
+                say(f"  {what:<34} {-n:6d}   ${at:04X}{note}")
+
+        if loud:
+            say("")
+            say(title)
+            say(f"  {'pool':<34} {pool:6d}   ${base:04X}")
+        take(PROC_STORE, 2, "process records")
+        for nm, near, pr, pk in accs:
+            take(ACC_QUEUE, 2, nm + " message queue")
+            take(near, 0x100, nm + " near region")
+            if pr:
+                take(pr, 2, nm + " resource", pk)
+        # Where the shell marks the floor: everything permanent is below it
+        # and no program's exit may wind back past it (src/sys/app.c).  The
+        # desktop and its resource are above it, and come and go with it.
+        if loud:
+            say(f"  {'-- permanent below here':<34} {'':6}   ${brk:04X}")
+        take(desk, 0x100, "the desktop")
+        take(desk_rsc, 2, "its resource", desk_peak)
+        free = top - brk
+        if loud:
+            say(f"  {'= free':<34} {free:6d}   "
+                f"({desk_far} bytes of icons are far, not here)")
+            say(f"  {'= free while it was loading':<34} {worst:6d}   "
+                f"(rs_load holds the whole file: src/aes/rsrc.c)")
+        return free, worst
+
+    # BOTH LAYOUTS, because the one that binds is not the product's.
+    # GEM.COM gives the pool the whole banked window; the conformance
+    # runner keeps $7900-$7FFF for its host-poked buffers, so its pool is
+    # 1.5 KB smaller -- and m17/m18/m23/m28 load the desktop AND an
+    # accessory into it.  Checking only gem.map is how this tool reported
+    # "memory: ok" for a pool that could not load the desktop.
+    #
+    # Each layout is charged what IT loads, not a shared guess: the
+    # product's resident accessory is the clock, with a resource; the
+    # runner's is m28's gate accessory, which has none.
+    # The 2 KB floor is the PRODUCT's budget -- how big a slice GEMDOS gets
+    # to read through afterwards, which is a speed question.  The runner's
+    # pool is deliberately smaller and has always been under it; what the
+    # runner must satisfy is the hard one, that the peak fits at all.
+    for mapname, accs, floor, title in (
+            ("gem.map", accessories(("clockacc", "clock")), POOL_FLOOR[0],
+             "the application pool, with everything the product "
+             "ships resident"),
+            ("m3desk.map", accessories(("m28_acc", None)), 0,
+             "...and the conformance runner's pool, which is smaller and "
+             "carries the desktop beside an accessory (test-m28)")):
+        path = os.path.join(BUILD, mapname)
+        if not os.path.exists(path):
+            continue
+        rr = regions(path)
+        if "AppPool" not in rr:
+            continue
+        base, pool = rr["AppPool"][0], rr["AppPool"][1]
+        free, worst = walk(base, pool, accs, title, not quiet)
+        if worst < 0:
+            bad.append(f"{mapname}: the pool runs out by {-worst} bytes "
+                       f"while a resource is loading -- rs_load takes the "
+                       f"whole file (src/aes/rsrc.c) and this is what "
+                       f"test-m28's 'DESKTOP.RSC is not on the boot disk' "
+                       f"looks like before the machine says it")
+        elif free < floor:
+            bad.append(f"{mapname}: the pool would have {free} bytes free, "
+                       f"wanted {floor} -- {POOL_FLOOR[1]}")
 
     say("")
     if bad:
