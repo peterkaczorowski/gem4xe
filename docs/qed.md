@@ -37,14 +37,33 @@ clipboard and multiple windows.
 
 It binds through `cflib.h`, gemlib and `mintbind.h`, with its MiNT-only
 code behind `#ifdef __MINT__` and the inter-application AV protocol in a
-module of its own (`av.c`).  Both are separable, which matters: gem4xe is
-one application under SpartaDOS X, not a multitasking desktop.
+module of its own (`av.c`).  Those two are separable, which matters:
+gem4xe is one application under SpartaDOS X, not a multitasking desktop.
+
+**cflib is not separable, and it is the part to plan around.**  qed links
+`-lcflib -lgem -liio` (`src/Makefile.objs`), and cflib is where
+`init_app`, `exit_app`, `open_vwork`, `do_alert`, `select_file` and
+`getcookie` live -- which is why `appl_init`, `appl_exit`, `graf_handle`,
+`v_opnvwk`, `form_alert`, `form_do` and `fsel_exinput` **do not appear in
+qed's own sources at all**.  They happen inside the library, and its own
+symbol table proves it rather than inferring it: `libcflib.a`'s
+undefined `mt_*` set is most of the AES.
+
+What is on this machine is the MiNT cross-root's **prebuilt m68k
+archives** -- `libcflib.a` and `libgem.a` in
+`/home/root-cp/usr/m68k-atari-mint/lib/`, `cflib.h` beside them, all
+dated 2017 -- and **no cflib source anywhere**.  m68k object code cannot
+link into a 65816 program, so those archives settle what cflib calls
+without helping to build it: they are a specification.  The first
+question a port has to answer is still where cflib comes from.
 
 ## What gem4xe already answers
 
 Counted rather than guessed, by matching every AES/VDI call in `src/*.c`
-against `src/app/gem.h`: **qed makes 74 distinct GEM calls and gem4xe has
-59 of them.**  The fifteen that are missing are not fifteen pieces of work:
+against `src/app/gem.h`: **qed's own sources make 74 distinct GEM calls
+and gem4xe has 59 of them.**  That is a count of qed, not of a running
+qed -- what cflib calls on its behalf is not in it, as above.  The
+fifteen that are missing are not fifteen pieces of work:
 
 | | calls | what it is |
 |---|---|---|
@@ -52,15 +71,40 @@ against `src/app/gem.h`: **qed makes 74 distinct GEM calls and gem4xe has
 | GRECT wrappers | `wind_create_grect`, `wind_open_grect` | trivial; the calls under them exist |
 | AV / MultiTOS | `appl_find`, `appl_search`, `appl_control`, `appl_xgetinfo` | trim, or stub as "no extensions" |
 | **the clipboard** | `scrp_read`, `scrp_write` | **the one real gap: gem4xe has no GEM scrap** |
-| GDOS printing | `v_opnprn`, `vq_devinfo`, `vs_document_info`, `vqt_ext_name` | trim, or map onto our own printer VDI (test-m30) |
+| GDOS printing | `v_opnprn`, `vq_devinfo`, `vs_document_info`, `vqt_ext_name` | **already skipped**: qed gates these on `gl_gdos`, and our `vq_gdos()` answers 0 |
 
-So with AV and printing trimmed, **the only substantive AES work is the
-scrap manager.**  The editor-critical surface is already there and gated:
+So with AV and printing trimmed, **the substantive AES work is the scrap
+manager -- and, for qed as it is built today, three calls cflib drags in
+behind it.**  `menu_popup` (36) is what every popup in `find.c`,
+`options.c`, `makro.c`, `prn_cfg.c` and `dd.c` reaches through cflib's
+`handle_popup`; `objc_sysvar` (48) arrives twice over, through
+`get_objframe` and through cflib's own `init_userdef`; and
+`vqt_real_extent` is a real VDI call at **opcode 240**, in the FSM/GDOS
+range and so outside our 1-39 and 100-131 entirely -- though it sits
+behind the same `gl_gdos` gate as the rest of the printing path.
+
+**Those three are qed-as-built, not qed-as-ported.**  They enter its
+surface only because it links cflib, and a port has to replace cflib
+rather than link it, so they become the replacement layer's choice.  The
+scrap manager is the one that survives either path, because qed calls it
+directly -- and cflib reaches `scrp_read` as well, through
+`get_scrapdir`, which makes that verdict firmer rather than looser.
+
+The editor-critical surface is already there and gated:
 `objc_edit` for editable dialog fields, `form_center`/`form_keybd`,
 `menu_icheck`/`tnormal`/`ienable`, `wind_calc`, the scroll messages
 (`WM_VSLID`, `WM_ARROWED`), styled text, and the file selector.
 
-## The prerequisite that is already cleared
+**And three things qed asks for that gem4xe answers correctly by having
+nothing.**  Its MiNT calls -- `Psignal`, `Pdomain`, `Pgetuid`, `Pgetgid`,
+`Fchmod`, `Fchown` -- get `EINVFN` here, which is what plain TOS returns
+and what qed already tests for: `uid = Pgetuid(); if (uid == -32) uid = 0;`
+(`src/global.c`).  Its cookie lookup defaults when the jar is absent --
+`if (!getcookie("_IDT", &_idt)) _idt = 0x0000112E;` -- and gem4xe has no
+jar, which is that same answer.  And its only BIOS use is the bell:
+28 calls, every one of them `Bconout(2, 7)`, which is one `#define`.
+
+## The prerequisite that is mostly cleared
 
 A text editor holds its buffers in far memory, so qed would be compiled
 `--data-model=large` -- and until 2026-09-14 that was a wall rather than a
@@ -72,15 +116,29 @@ remains is written down in `src/app/gem.h`: a far string is capped at 63
 bytes, so a longer alert -- or a second string in one call -- still wants
 `__near`.
 
+**And one that no bounce can clear.**  `wind_set(WF_NAME)` and `WF_INFO`
+pass a string the window manager *keeps*: it stores the low word and
+reads the title again at every redraw, so there is nothing to copy into a
+scratch that would still be alive.  A far address would be cut to 16 bits
+and draw whatever sits at that offset in bank $00, so `src/sys/abi.c`
+refuses it and the call answers 0 -- a blank title rather than a wrong
+one.  A window title in a `--data-model=large` program must therefore be
+`__near`, and must outlive its window.  RetroWP met exactly this, and its
+titles are blank today.
+
 ## If it were done, roughly in this order
 
 1. **The scrap manager** (`scrp_read`/`scrp_write`) -- the one real gap,
    and useful to gem4xe with or without qed.
-2. **A cflib subset** -- only the functions qed calls, not the library.
+2. **cflib** -- replace it, then trim to only the functions qed calls.
+   It supplies qed's start-up, its alerts and its file selector, and
+   what is on this machine is m68k binary that a 65816 program cannot
+   link, so this is a prerequisite rather than a trim.
 3. **Trim** `av.c`, the `__MINT__` paths and the GDOS printing, so what is
    left is the editor.
 4. **Build it far** -- ~800 KB of C is several far banks; the loader
-   already carries multi-bank images (test-m6, test-m31).
+   already carries multi-bank images (test-m6, test-m31), and RetroWP is
+   the standing precedent at 202 KB over four banks.
 5. **Then the long tail**: the ST character set, key codes, and whatever
    the editor assumes about a screen that is 640x240 rather than 640x400.
 

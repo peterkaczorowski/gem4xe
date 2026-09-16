@@ -7,8 +7,12 @@ engine in strict C89 with no I/O beside a shell per platform, both
 aimed first at the Atari ST.  An Atari 8-bit with GEM on it is another
 shell.
 
-So the honest question is not "does gem4xe work" but "would GACS run on
-it".  `make gacs-check` asks, and keeps asking.
+So the honest question was not "does gem4xe work" but "would GACS run on
+it".  It does: the engine has compiled and run in the simulator since
+this page was first written (`make gacs-check`, which keeps asking), and
+since 2026-09-15 the GEM shell has come up on the emulated machine and
+drawn a vehicle (`make g4a-check` in the GACS tree).  What follows is
+what that took.
 
     engine, --data-model=small 7/7 files
     engine, --data-model=large 7/7 files
@@ -35,17 +39,25 @@ discipline that makes it portable to a 68000 makes it portable to a
 65816, which is the whole argument for writing an engine that way.
 
 **The memory model is the decision.**  `ad_tables` is 22 KB and
-`ad_sheet` is another 33; gem4xe gives an application 2 KB of bank $00
-and 14 MB above it, reached through GEMDOS's `Malloc`.  So an
+`ad_sheet` is another 33; gem4xe's application pool is 14,336 bytes of
+bank $00 -- `$4800-$7FFF`, shared with the process records, an accessory
+and the desktop -- and 14 MB above it, reached through GEMDOS's
+`Malloc`.  How much of the pool a program takes is set when it links:
+GACS asks for 2 KB and RetroWP for 8.  So an
 application compiles `--data-model=large`, where a pointer is 24 bits,
 and works out of far memory -- which is exactly the shape GACS already
 has, because its first prime directive is that a shell hands the engine
 a buffer.  Compiled that way the engine wants **84 bytes of bank $00**.
 
-**What is missing is a shell, and rather more than one linker line.**
-That estimate stood here until somebody tried it, which is the honest
-argument for trying things.  What a `--data-model=large` program actually
-needs, found by building one (`src/m29_big.c`, `make test-m29`):
+**A shell was what was missing, and it is not missing now.**  GACS's GEM
+shell was built for gem4xe on 2026-09-15 and has run, gated by `make
+g4a-check` in the GACS tree: `GACS.G4A`, two code banks and three
+far-variable banks, and 137,722 bytes rebuilt against 0.2 as a format 4
+image -- the wide-fixup format, which it wants at 7,001 bank fixups.  An
+estimate of one linker line stood here until somebody tried it, which is
+the honest argument for trying things.  What a `--data-model=large`
+program actually needs, found by building one (`src/m29_big.c`, `make
+test-m29`):
 
   * **Six sections, not three.**  `src/app/gemapp.scm` mapped `farcode`,
     `switch`, `cfar`, `libcode` and `code`.  A large-data program also
@@ -106,9 +118,15 @@ Measured against `shells/gem/main.c`, not assumed:
   `rsrc_load`/`rsrc_free`/`rsrc_gaddr`.  The `_grect` and `_str`
   spellings are gemlib's wrappers over those; `menu_sync` and
   `menu_action` are GACS's own functions, not AES calls.
-- **Its VDI use is three calls** -- `v_opnvwk`, `v_clsvwk`, `vs_clip` --
-  all of them in the 37.
-- **From GEMDOS it calls exactly one thing**: `Dgetpath`.
+- **Its VDI use in `main.c` is three calls** -- `v_opnvwk`, `v_clsvwk`,
+  `vs_clip` -- but the linked shell pulls more through retroplat's
+  drawing and metrics backends: `v_bar`, `vro_cpyfm`, `vs_color`,
+  `vsf_color`, `vsf_interior`, `vst_color`, `vq_gdos`, `vqt_extent`,
+  `vqt_fontinfo`, `vst_effects`, `vst_load_fonts`, `vst_point`.  Forty-one
+  distinct AES and VDI calls in all, and gem4xe serves every one of them.
+- **From GEMDOS** `main.c` calls `Dgetdrv` and `Dgetpath`, and the file
+  seam under it adds `Fopen`, `Fcreate`, `Fclose`, `Fread`, `Fwrite`,
+  `Fseek`, `Fdelete` and `Malloc`.
 - **`GACS.RSC` is the format we read**: version 0, 2,792 bytes, 73
   objects, two trees, no colour icons.  It fits the application pool
   with room to spare.
@@ -118,14 +136,19 @@ Measured against `shells/gem/main.c`, not assumed:
   is what the format is for -- the ST's own high resolution is 640x400
   with an 8x16 cell and the same 80x25.
 
-## The one thing neither of them can do yet
+## Printing, which is built now
 
 GACS prints a record sheet; RetroWP prints documents.  GACS's GEM shell
-writes **PostScript to a file** (`ad_render_ps`), so it needs no printer
-to reach parity with the ST -- but "print" is what both programs are
-for, and gem4xe has no printer workstation.  The VDI's device
-independence is in `v_opnwk`'s device id, not in GDOS, so a printer is a
-second driver rasterising the same 37 opcodes to `P:` rather than to
-VBXE; GDOS proper is what would buy *loadable* drivers and metafiles.
-That is the next thing worth building for these two, and neither is
-blocked on it today.
+writes **PostScript to a file** (`ad_render_ps`), so it never needed a
+printer to reach parity with the ST -- and gem4xe has one regardless:
+phase 37 put a third device behind the VDI's seam, 640x800 dots in one
+far bank, emitted as PCL 5 or PostScript by `v_updwk`, gated by `make
+test-m30` against a Ghostscript oracle (`docs/phase37.md`).  The VDI's
+device independence is in `v_opnwk`'s device id, not in GDOS, which is
+why that cost a second driver rather than a loader.
+
+What is still absent is **GDOS proper** -- loadable drivers and
+metafiles -- and the four calls that come with it (`v_opnprn`,
+`vq_devinfo`, `vs_document_info`, `vqt_ext_name`).  qed's printer path
+asks for those; neither of these two programs does, and both gate their
+GDOS path on `vq_gdos`, which answers 0 here.
