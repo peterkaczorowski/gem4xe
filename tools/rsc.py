@@ -25,7 +25,17 @@ the other reading of them.
 import struct
 
 import aesref
-from aesref import Obj, Text, Ted, Bitblk, Iconblk, Rect, G_BOX, G_IBOX, G_BOXCHAR
+from aesref import (Obj, Text, Ted, Bitblk, Iconblk, Rect, G_BOX, G_IBOX,
+                    G_BOXCHAR, G_CICON)
+
+# The colour-icon extension a new-format resource carries past rsh_rssize
+# (EmuTOS aes/gemrslib.c), and what rs_load brings NEAR of it: one
+# CICON_NEAR record per icon -- the ICONBLK, twelve bytes of text and a far
+# address for the colour forms (src/aes/rsrc.c).
+CICON_HDR = 38          # on disk: an ICONBLK and a LONG count of forms
+CICON_FORM = 22         # on disk: one CICON header
+CICON_TEXT = 12
+CICON_NEAR = 50
 
 HDR_SIZE = 36
 OBJ_SIZE, TED_SIZE, BITBLK_SIZE, ICONBLK_SIZE = 24, 28, 14, 34
@@ -92,6 +102,29 @@ class RIconblk(_Item):
             xtext, ytext, wtext, htext)
 
 
+class RCicon(_Item):
+    """A CICONBLK: an ICONBLK's worth of geometry, the mono mask and bits
+    (raw rows, not image items -- they live in the extension), a text of
+    up to eleven characters, and colour forms as (planes, data, mask)."""
+    def __init__(self, mask, data, text, char, xchar, ychar, xicon, yicon,
+                 wicon, hicon, xtext, ytext, wtext, htext, forms):
+        (self.mask, self.data, self.text, self.char, self.xchar, self.ychar,
+         self.xicon, self.yicon, self.wicon, self.hicon, self.xtext,
+         self.ytext, self.wtext, self.htext, self.forms) = (
+            mask, data, text, char, xchar, ychar, xicon, yicon, wicon, hicon,
+            xtext, ytext, wtext, htext, list(forms))
+
+    @property
+    def mono(self):                     # bytes of one plane
+        return (self.wicon // 8) * self.hicon
+
+    @property
+    def size(self):                     # the whole CICONBLK on disk
+        return (CICON_HDR + 2 * self.mono + CICON_TEXT
+                + sum(CICON_FORM + self.mono * planes + self.mono
+                      for planes, _, _ in self.forms))
+
+
 class RTed(_Item):
     def __init__(self, text, tmplt, valid, font, just, color, thickness,
                  txtlen, tmplen):
@@ -113,7 +146,9 @@ class Rsc:
         self.teds, self.objects = [], []
         self.trees = []                 # (first object index, count)
         self.frstr, self.frimg = [], [] # String / RBitblk items
-        self.size = None
+        self.cicons = []                # RCicon items, in the extension
+        self.size = None                # rsh_rssize: the classic part
+        self.file_len = None            # ...and the file, extension included
 
     # -- the pieces ----------------------------------------------------------
     def string(self, s):
@@ -140,6 +175,23 @@ class Rsc:
                       wicon, hicon, xtext, ytext, wtext, htext)
         self.iconblks.append(it)
         return it
+
+    def cicon(self, mask, data, text, wicon, hicon, forms=(), char=0,
+              xchar=0, ychar=0, xicon=0, yicon=0, xtext=0, ytext=0,
+              wtext=0, htext=0):
+        """A colour icon.  Its index is what a G_CICON object's spec holds
+        in the file; the loader makes that the address of the near record.
+        `forms`: (planes, data, mask) triples, data being planes * mono
+        bytes, mask one plane's worth."""
+        mono = (wicon // 8) * hicon
+        assert len(mask) == len(data) == mono, (len(mask), len(data), mono)
+        assert len(text) < CICON_TEXT, text
+        for planes, d, m in forms:
+            assert len(d) == planes * mono and len(m) == mono, (planes, len(d), len(m))
+        it = RCicon(mask, data, text, char, xchar, ychar, xicon, yicon,
+                    wicon, hicon, xtext, ytext, wtext, htext, forms)
+        self.cicons.append(it)
+        return len(self.cicons) - 1
 
     def ted(self, text, tmplt, valid, font=aesref.IBM, just=aesref.TE_LEFT,
             color=0x1180, thickness=0):
@@ -232,13 +284,27 @@ class Rsc:
             it.off = off
             off += len(it.blob)
         self.size = off
+        # THE COLOUR-ICON EXTENSION, past rsh_rssize: an array of longs --
+        # the true length, the table's offset, a 0 -- the table of one long
+        # per icon ending in -1, then the CICONBLKs.  rs_load streams all
+        # of it to far memory and never has it in the pool.
+        if self.cicons:
+            self.o_extarray = off
+            off += 12
+            self.o_citable = off
+            off += 4 * (len(self.cicons) + 1)
+            for it in self.cicons:
+                it.off = off
+                off += it.size
+        self.file_len = off
         return off
 
     def _spec(self, o):
         return o.spec if isinstance(o.spec, int) else o.spec.off
 
     def header(self, e):
-        return struct.pack(e + "18H", 0, self.o_object, self.o_tedinfo,
+        vrsn = 0x0004 if self.cicons else 0     # NEW_FORMAT_RSC
+        return struct.pack(e + "18H", vrsn, self.o_object, self.o_tedinfo,
                            self.o_iconblk, self.o_bitblk, self.o_frstr,
                            self.o_string, self.o_imdata, self.o_frimg,
                            self.o_trindex, len(self.objects), len(self.trees),
@@ -282,10 +348,44 @@ class Rsc:
         for first, n in self.trees:
             out[p:p + 4] = struct.pack(e + "I", self.objects[first].off)
             p += 4
+        if self.cicons:
+            out += bytes(self.file_len - self.size)
+            out[self.o_extarray:self.o_extarray + 12] = struct.pack(
+                e + "III", self.file_len, self.o_citable, 0)
+            p = self.o_citable
+            for it in self.cicons:          # placeholders: the loader fills them
+                out[p:p + 4] = struct.pack(e + "I", 0)
+                p += 4
+            out[p:p + 4] = struct.pack(e + "i", -1)
+            for it in self.cicons:
+                p = it.off
+                out[p:p + ICONBLK_SIZE] = struct.pack(
+                    e + "IIIhhhhhhhhhhh", 0, 0, 0, it.char, it.xchar, it.ychar,
+                    it.xicon, it.yicon, it.wicon, it.hicon, it.xtext, it.ytext,
+                    it.wtext, it.htext)
+                p += ICONBLK_SIZE
+                out[p:p + 4] = struct.pack(e + "I", len(it.forms))
+                p += 4
+                out[p:p + it.mono] = it.data
+                p += it.mono
+                out[p:p + it.mono] = it.mask
+                p += it.mono
+                out[p:p + CICON_TEXT] = it.text.encode("latin-1").ljust(CICON_TEXT, b"\0")
+                p += CICON_TEXT
+                for k, (planes, d, m) in enumerate(it.forms):
+                    more = 1 if k + 1 < len(it.forms) else 0
+                    out[p:p + CICON_FORM] = struct.pack(
+                        e + "hIIIII", planes, 0, 0, 0, 0, more)
+                    p += CICON_FORM
+                    out[p:p + len(d)] = d
+                    p += len(d)
+                    out[p:p + len(m)] = m
+                    p += len(m)
+                assert p == it.off + it.size, (p, it.off, it.size)
         return bytes(out)
 
     # -- what the AES makes of it ----------------------------------------------
-    def expect(self, base, wchar, hchar, width, imbase=None):
+    def expect(self, base, wchar, hchar, width, imbase=None, cibase=None):
         """(image, trees, mem): the file as rsrc_load leaves it at `base`,
         the trees as aesref Obj lists, and the address map for aesref.
 
@@ -295,12 +395,23 @@ class Rsc:
         an ICONBLK names its mask and its image in 32-bit fields
         (src/aes/rsrc.c).  Pass it and the ICONBLKs carry far addresses,
         as the target's do; leave it and they are near, which is what a
-        resource whose bits stayed in the pool has."""
+        resource whose bits stayed in the pool has.
+
+        `cibase` is where the COLOUR-ICON EXTENSION went, for a resource
+        that has one (rs_ciaddr on the target).  The near records rs_load
+        makes of it are placed where the loader places them -- where the
+        images were if they moved, else after the file, word-aligned --
+        and `self.ci_near` is (address, bytes) so a gate can compare them.
+        """
         self.layout()
+        moved = imbase is not None
         if imbase is None:
             imbase = base
         else:
             imbase -= self.o_imdata        # so + it.off lands on the bytes
+        if self.cicons and cibase is None:
+            raise ValueError("a resource with colour icons needs cibase")
+        hb = base + self.o_imdata if moved else (base + self.size + 1) & ~1
         e = "<"
         out = bytearray(self.size)
         out[0:HDR_SIZE] = self.header(e)
@@ -331,10 +442,31 @@ class Rsc:
                     tmplen=len(it.tmplt.s) + 1)
             out[it.off:it.off + TED_SIZE] = t.pack()
             mem[base + it.off] = t
+        # the near records of the colour icons, as rs_cicons lays them out
+        near = bytearray()
+        for i, it in enumerate(self.cicons):
+            a = hb + CICON_NEAR * i
+            data = cibase + (it.off + CICON_HDR - self.size)
+            mask = data + it.mono
+            forms = (cibase + (it.off + CICON_HDR + 2 * it.mono + CICON_TEXT - self.size)
+                     if it.forms else 0)
+            ib = Iconblk(mask, data, a + ICONBLK_SIZE, it.char, it.xchar, it.ychar,
+                         Rect(it.xicon, it.yicon, it.wicon, it.hicon),
+                         Rect(it.xtext, it.ytext, it.wtext, it.htext))
+            mem[a] = ib
+            mem[a + ICONBLK_SIZE] = Text(it.text, CICON_TEXT)
+            mem[data] = it.data
+            mem[mask] = it.mask
+            near += ib.pack()
+            near += it.text.encode("latin-1").ljust(CICON_TEXT, b"\0")
+            near += struct.pack("<I", forms)
+        self.ci_near = (hb, bytes(near))
         objs = []
         for o in self.objects:
             spec = self._spec(o)
-            if (o.typ & 0xFF) not in (G_BOX, G_IBOX, G_BOXCHAR):
+            if (o.typ & 0xFF) == G_CICON:
+                spec = hb + CICON_NEAR * spec       # an index, made an address
+            elif (o.typ & 0xFF) not in (G_BOX, G_IBOX, G_BOXCHAR):
                 spec += base
             ob = Obj(o.nxt, o.head, o.tail, o.typ, o.flags, o.state, spec,
                      fix_chpos(o.x, 0, wchar, hchar, width),

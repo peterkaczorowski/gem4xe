@@ -134,6 +134,8 @@ typedef struct {
 #define G_FBOXTEXT 30
 #define G_ICON     31
 #define G_TITLE    32
+#define G_CICON    33   /* a colour icon; drawn as the mono ICONBLK every
+                         * CICONBLK begins with, for now */
 
 /* The VDI's standard colour indices. Object types and colour indices
  * share the G_ prefix and nothing else; these are what vsf_color(),

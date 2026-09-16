@@ -482,10 +482,20 @@ static void just_draw(OBJECT *tree, WORD obj, WORD sx, WORD sy)
                     bi->bi_color, WHITE);
             break;
         }
-        case G_ICON: {
+        case G_ICON:
+        case G_CICON: {
             /* The donor's gr_gicon (gemgraf.c): the mask under the image,
              * both transparent, then the character and the label.  Every
-             * rectangle in the ICONBLK is relative to the object. */
+             * rectangle in the ICONBLK is relative to the object.
+             *
+             * A COLOUR ICON DRAWS ITS MONO FORM.  A CICONBLK begins with a
+             * plain ICONBLK -- the donor relies on that too (gemoblib.c
+             * falls G_CICON through to gr_gicon) -- and rsrc_load leaves a
+             * G_CICON's ob_spec pointing at a near copy of that ICONBLK
+             * whose bits are in far memory (src/aes/rsrc.c, rs_cicons).
+             * The colour planes are kept far beside it for the day this
+             * case selects them: on a 16-colour surface that is the
+             * natural thing to draw, and it is not drawn yet. */
             ICONBLK ib = *(const ICONBLK *)SPEC_PTR(spec);
             GRECT pi, pl;
             WORD fg = (ib.ib_char >> 12) & 0x0F;
@@ -697,7 +707,7 @@ void ob_change(OBJECT *tree, WORD obj, UWORD new_state, WORD redraw)
     /* A change of SELECTED alone is an XOR of the inside -- cheap, and it
      * is what makes a button flash.  Anything else redraws the object.
      * (Icons never XOR: they would redraw here once they are drawn.) */
-    if (type != G_ICON && type != G_USERDEF &&
+    if (type != G_ICON && type != G_CICON && type != G_USERDEF &&
         ((new_state ^ (UWORD)curr_state) & SELECTED)) {
         bb_fill(MD_XOR, FIS_SOLID, IP_SOLID, (WORD)(t.g_x + th), (WORD)(t.g_y + th),
                 (WORD)(t.g_w - 2 * th), (WORD)(t.g_h - 2 * th));

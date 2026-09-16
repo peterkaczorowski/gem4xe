@@ -39,6 +39,7 @@ M_OFF, M_ON, M_SAVE, M_RESTORE, M_PREVIOUS = 256, 257, 258, 259, 260
 G_BOX, G_TEXT, G_BOXTEXT, G_IMAGE = 20, 21, 22, 23
 G_USERDEF, G_IBOX, G_BUTTON, G_BOXCHAR = 24, 25, 26, 27
 G_STRING, G_FTEXT, G_FBOXTEXT, G_ICON, G_TITLE = 28, 29, 30, 31, 32
+G_CICON = 33            # a colour icon: drawn as the ICONBLK its CICONBLK starts with
 # ob_flags
 NONE, SELECTABLE, DEFAULT, EXIT, EDITABLE = 0, 1, 2, 4, 8
 RBUTTON, LASTOB, TOUCHEXIT, HIDETREE, INDIRECT = 0x10, 0x20, 0x40, 0x80, 0x100
@@ -1047,9 +1048,11 @@ class AES:
             bi = self.mem[spec]
             self.gsx_blt(self.mem[bi.pdata], bi.x, bi.y, t.x, t.y,
                          bi.wb * 8, bi.hl, MD_TRANS, bi.color, WHITE)
-        elif typ == G_ICON:
+        elif typ in (G_ICON, G_CICON):
             # the donor's gr_gicon (gemgraf.c): the mask under the image,
-            # both transparent, then the character and the label
+            # both transparent, then the character and the label.  A
+            # G_CICON draws its mono form: its spec is the ICONBLK a
+            # CICONBLK begins with (src/aes/rsrc.c, rs_cicons)
             ib = self.mem[spec]
             fg, bg, ch = (ib.char >> 12) & 15, (ib.char >> 8) & 15, ib.char & 0xFF
             if state & SELECTED:
@@ -1398,7 +1401,7 @@ class AES:
         x, y = self.ob_offset(obj)
         self.gsx_moff()
         th = th if th > 0 else 0
-        if typ not in (G_ICON, G_USERDEF) and ((newstate ^ state) & SELECTED):
+        if typ not in (G_ICON, G_CICON, G_USERDEF) and ((newstate ^ state) & SELECTED):
             self.bb_fill(MD_XOR, FIS_SOLID, IP_SOLID, x + th, y + th,
                          o.ob_width - 2 * th, o.ob_height - 2 * th)
             redraw = False

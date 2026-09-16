@@ -273,6 +273,7 @@ def rsrc_cases(r, check, b, keep):
     # the fixup's; the PRELUDE puts both sides in the same state.
     r.run(PRELUDE)
     R = mkrsc.build()
+    R.layout()                      # sizes and offsets, before anything asks
     rsc_bytes = open(RSC_FILE, "rb").read()
     before = sysop(ALLOC)
     print(f"  pool: mark ${before[6] & 0xFFFF:04X}, {before[7]} bytes free; "
@@ -296,9 +297,22 @@ def rsrc_cases(r, check, b, keep):
         return
     print(f"  rsrc_load: {size} bytes at ${hdr:04X}, trindex at ${trindex:04X}, "
           f"{room} bytes of pool left")
-    check(size == len(rsc_bytes), f"rsh_rssize {size} != the file's {len(rsc_bytes)}")
-    check(before[7] - room == size, f"the load took {before[7] - room} bytes of pool for {size}")
-    image, trees, mem = R.expect(hdr, WCHAR, HCHAR, WIDTH)
+    # rsh_rssize is the classic part; a new-format file runs on past it with
+    # the colour-icon extension, which rs_load streams to far memory.  What
+    # the pool keeps of that is one 50-byte record per icon, after the file,
+    # word-aligned (src/aes/rsrc.c, CICON_NEAR).
+    check(size == R.size, f"rsh_rssize {size} != tools/rsc.py's {R.size}")
+    check(len(rsc_bytes) == R.file_len,
+          f"the file is {len(rsc_bytes)} bytes, tools/rsc.py says {R.file_len}")
+    want_take = ((size + 1) & ~1) + rsc.CICON_NEAR * len(R.cicons) if R.cicons else size
+    check(before[7] - room == want_take,
+          f"the load took {before[7] - room} bytes of pool, expected {want_take} "
+          f"({size} of file, {len(R.cicons)} colour-icon record(s) near)")
+    # where the loader put the colour-icon extension: the model needs it to
+    # predict the far addresses in the near records (rs_ciaddr's answer)
+    ci = r.syms["rs_cibase"]
+    cibase = b.peek16(ci) | (b.peek16(ci + 2) << 16)
+    image, trees, mem = R.expect(hdr, WCHAR, HCHAR, WIDTH, cibase=cibase)
     check(trindex == hdr + R.o_trindex, f"trindex at ${trindex:04X}, expected ${hdr + R.o_trindex:04X}")
     got = bytes(b.memdump(hdr, size))
     if got != image:
@@ -307,6 +321,21 @@ def rsrc_cases(r, check, b, keep):
                      f"target {got[bad:bad + 8].hex()} != {image[bad:bad + 8].hex()}")
     else:
         print(f"  the fixed-up image matches tools/rsc.py, all {size} bytes")
+    if R.cicons:
+        # The near records of the colour icons: the ICONBLK with its bits
+        # and mask FAR (in the extension at cibase), its text beside it,
+        # and where its colour forms are.  Byte for byte, as the model
+        # lays them out (tools/rsc.py, expect).
+        hb, want = R.ci_near
+        got = bytes(b.memdump(hb, len(want)))
+        check(cibase != 0, "rs_cibase is 0: the extension was not placed in far memory")
+        if got != want:
+            bad = next(i for i in range(len(want)) if got[i] != want[i])
+            check(False, f"colour-icon record differs at byte {bad} of {len(want)}: "
+                         f"target {got[bad:bad + 8].hex()} != {want[bad:bad + 8].hex()}")
+        else:
+            print(f"  {len(R.cicons)} colour-icon record(s) at ${hb:04X} match, "
+                  f"extension at ${cibase:06X}")
 
     # -- rsrc_gaddr, every address the file holds ------------------------------------
     counts = {rsc.R_TREE: len(R.trees), rsc.R_OBJECT: len(R.objects),

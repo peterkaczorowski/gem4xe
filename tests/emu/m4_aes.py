@@ -27,7 +27,7 @@ import vbxeref, vdiref, aesref, symfile     # noqa: E402
 from vdiref import V_OPNWK, V_CLRWK, WORK_IN    # noqa: E402
 from aesref import (Obj, Layout, Text, NIL, G_BOX, G_IBOX, G_BUTTON,   # noqa: E402
                     G_STRING, G_TEXT, G_BOXTEXT, G_FTEXT, G_FBOXTEXT, G_IMAGE,
-                    G_BOXCHAR, G_TITLE, G_ICON, Rect, LASTOB, DEFAULT,
+                    G_BOXCHAR, G_TITLE, G_ICON, G_CICON, Rect, LASTOB, DEFAULT,
                     SELECTABLE, EXIT, NORMAL,
                     EDITABLE, INDIRECT, SELECTED, DISABLED, SHADOWED, OUTLINED,
                     CHECKED, CROSSED, HIDETREE, TE_LEFT, TE_RIGHT, TE_CNTR,
@@ -175,6 +175,25 @@ def icons(L):
     ]
 
 
+def cicons(L):
+    """G_CICON: a colour icon draws its mono form.  All objc_draw reads of
+    a CICONBLK is the ICONBLK it begins with (rsrc_load points the spec at
+    a near copy of exactly that), so here the spec IS an ICONBLK.  One
+    SELECTED, and objc_change on it swaps the icon's colours rather than
+    XORing, as for G_ICON (gr_gicon)."""
+    ib1 = L.iconblk(ICON_MASK, ICON_ROWS, "COLOUR", char=ord('C'), xchar=12,
+                    ychar=2, icon=Rect(0, 0, 32, 12), text=Rect(0, 14, 64, 8),
+                    wb=4, hl=12)
+    ib2 = L.iconblk(ICON_MASK, ICON_ROWS, "MONO", char=0, xchar=0, ychar=0,
+                    icon=Rect(0, 0, 32, 12), text=Rect(0, 14, 64, 8),
+                    wb=4, hl=12)
+    return [
+        Obj(NIL,  1,   2, G_BOX,   0,      0, 0x00021100,  80, 40, 400, 120),
+        Obj(2,  NIL, NIL, G_CICON, 0,      0,        ib1,  40, 20,  64,  24),
+        Obj(0,  NIL, NIL, G_CICON, LASTOB, SELECTED, ib2, 200, 20,  64,  24),
+    ]
+
+
 def draw(start=0, depth=8, clip=FULL):
     return (OBJC_DRAW, clip, (start, depth))
 
@@ -211,6 +230,9 @@ CASES = [
      [draw(2, 0), find(60, 82)]),
     ("icons: mask, image, character and label; one selected", icons,
      [draw()] + [find(x, y) for x, y in [(140, 70), (300, 70), (90, 45)]]
+     + [change(1, SELECTED), change(2, NORMAL)]),
+    ("colour icons draw their mono form; one selected", cicons,
+     [draw()] + [find(x, y) for x, y in [(140, 70), (300, 70)]]
      + [change(1, SELECTED), change(2, NORMAL)]),
     ("form: templates, justification, image", form,
      [draw()] + [find(x, y) for x, y in [(150, 60), (200, 88), (430, 65), (310, 25)]]),

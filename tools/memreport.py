@@ -86,12 +86,32 @@ def rsc_pool(path):
     "memory: ok" for a pool that could not load the desktop at all --
     test-m28 went red and said "DESKTOP.RSC is not on the boot disk".
     """
-    d = open(path, "rb").read(36)
-    h = struct.unpack(">18H", d)
-    imdata, nbb, nimages, rssize = h[7], h[14], h[16], h[17]
-    if nbb or nimages:
-        return rssize, 0, rssize
-    return imdata, rssize - imdata, rssize
+    d = open(path, "rb").read()
+    h = struct.unpack(">18H", d[:36])
+    vrsn, imdata, nbb, nimages, rssize = h[0], h[7], h[14], h[16], h[17]
+    # A new-format resource keeps its colour icons past rssize; rs_load
+    # streams that to far memory and brings ONE 50-byte mono header per
+    # icon back into the pool, after rs_imfar's wind-back (src/aes/rsrc.c,
+    # CICON_NEAR).  Count the icons the way the loader does: the table at
+    # the offset the extension array names, up to its -1.
+    near_icons = 0
+    if (vrsn & 0x0004) and len(d) > rssize + 8:
+        tab = struct.unpack(">I", d[rssize + 4:rssize + 8])[0]
+        if tab not in (0, 0xFFFFFFFF) and tab < len(d):
+            while struct.unpack(">i", d[tab + 4 * near_icons:tab + 4 * near_icons + 4])[0] != -1:
+                near_icons += 1
+    hdrs = 50 * near_icons
+    # rs_imfar moves the image block only when it is the TAIL of the file:
+    # nothing the header places may end above rsh_imdata, or winding the
+    # pool back over the bits would take it too (HypView's does that).
+    (o_obj, o_ted, o_ib, o_bb, o_frstr, o_str, _, o_frimg, o_tri) = h[1:10]
+    nobs, ntree, nted, nib = h[10], h[11], h[12], h[13]
+    tail = max(o_obj + 24 * nobs, o_ted + 28 * nted, o_ib + 34 * nib,
+               o_bb + 14 * nbb, o_frstr + 4 * h[15], o_frimg + 4 * nimages,
+               o_tri + 4 * ntree, o_str) <= imdata
+    if nbb or nimages or not tail:
+        return rssize + hdrs, len(d) - rssize, rssize + hdrs
+    return imdata + hdrs, rssize - imdata + len(d) - rssize, max(rssize, imdata + hdrs)
 
 
 def main(argv):

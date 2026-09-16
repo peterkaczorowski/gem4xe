@@ -53,6 +53,8 @@ typedef struct {
 #define G_FBOXTEXT  30
 #define G_ICON      31
 #define G_TITLE     32
+#define G_CICON     33      /* a colour icon: its CICONBLK starts with an
+                             * ICONBLK, and that is what is drawn (below) */
 
 /* ob_flags */
 #define NONE        0x0000
@@ -323,7 +325,10 @@ typedef struct {
 } BITBLK;
 
 /* ICONBLK, for G_ICON: a mask, an image and a text, 34 bytes as in a
- * .RSC.  Carried through rsrc_load's fixups; not drawn yet. */
+ * .RSC.  The mask and image fields are 32 bits and hold FAR addresses
+ * once rsrc_load has moved the bits up (src/aes/rsrc.c, rs_imfar) -- and
+ * for a G_CICON the same record, since a CICONBLK begins with an ICONBLK
+ * and that is what objc_draw draws of it (rs_cicons). */
 typedef struct {
     uint32_t ib_pmask;
     uint32_t ib_pdata;
@@ -645,6 +650,9 @@ RSHDR *rs_loaded(void);
 /* Where the loaded resource's icon bitmaps went, and how many bytes:
  * base 0 when they stayed in the pool.  See src/aes/rsrc.c. */
 void rs_imaddr(uint32_t *base, uint16_t *len);
+/* ...and where a new-format resource's colour-icon extension went: base 0
+ * when the file had none.  The mono headers are near (rs_cicons). */
+void rs_ciaddr(uint32_t *base, uint16_t *len);
 WORD rs_load(const char *name);
 WORD rs_free(void);
 WORD rs_gaddr(UWORD rtype, UWORD rindex, uint32_t *paddr);

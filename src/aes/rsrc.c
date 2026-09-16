@@ -236,6 +236,10 @@ void rs_fixit(RSHDR *h)
         case G_IBOX:
         case G_BOXCHAR:
             break;
+        case G_CICON:
+            /* an INDEX into the colour-icon table, not an offset: it is
+             * made an address by rs_cicons once the table is placed */
+            break;
         default:
             fix_long(h, &obj->ob_spec);
             break;
@@ -265,12 +269,24 @@ void rs_fixit(RSHDR *h)
  * ICONBLK's cannot be asked for that way -- the application is given the
  * ICONBLK and reads the wide field itself.
  *
- * The far bytes are released by app_free with the rest of the program's
- * far memory, not by rs_free: a program that loaded and freed resources
- * in a loop would grow the far heap, and with 14 MB of it that is a note
- * rather than a leak. */
+ * THE FAR BYTES COME BACK AT rs_free WHEN THEY ARE THE TOP OF THE HEAP.
+ * The far heap is a bump allocator (src/sys/farmem.h), so a block can be
+ * given back only while nothing has been taken above it -- which is the
+ * common case, a resource loaded, used and freed with no Malloc between.
+ * Then rs_free winds the heap back to where it stood before the load
+ * (the mark BEFORE far_alloc, since far_alloc may have skipped to a bank
+ * boundary), and a dialog resource loaded and freed per use costs
+ * nothing that lasts.  When something IS above it the block stays, and
+ * app_free reclaims it with the rest of the program's far memory: with
+ * 14 MB that is a note rather than a leak.  The reclaim records are PER
+ * SLOT -- a nested resource freed first must not take the outer one's
+ * with it -- while rs_imbase/rs_cibase answer for the last load placed. */
+typedef struct {
+    uint32_t base, mark, top;   /* the block; the heap before and after it */
+} FARBLK;
 static uint32_t rs_imbase;      /* where they went, 0 if they stayed */
 static uint16_t rs_imsize;
+static FARBLK   rs_im[3];       /* [1] and [2]: the slot that took it */
 
 void rs_imaddr(uint32_t *base, uint16_t *len)
 {
@@ -282,7 +298,7 @@ static void rs_imfar(uint8_t *mem, uint16_t im_off, uint16_t size)
 {
     uint16_t im_len = (uint16_t)(size - im_off);
     uint16_t im_near;
-    uint32_t base;
+    uint32_t base, mark;
     WORD i;
 
     if (!im_len || rs_hdr->rsh_nbb || rs_hdr->rsh_nimages)
@@ -290,11 +306,39 @@ static void rs_imfar(uint8_t *mem, uint16_t im_off, uint16_t size)
                                          * and nothing moved, so a resource
                                          * NESTED over another leaves the
                                          * outer's record of its own alone */
+    /* ...AND ONLY WHEN THE IMAGE BLOCK IS THE TAIL OF THE FILE.  The pool
+     * is wound back over it, so anything the header places at or above
+     * rsh_imdata would go with it.  tools/rsc.py and the desktop's
+     * resource put the bits last; a resource written by another tool
+     * need not -- HypView's has no images at all and 2,632 bytes of its
+     * tables above the offset, and moving those "images" put its objects
+     * in far memory and the colour-icon records on top of them.  A file
+     * laid out that way keeps its bits in the pool. */
+    {
+        /* the header as eighteen words: (offset word, count word, size)
+         * for each table, and the strings' offset with no count */
+        static const uint8_t lay[8][3] = {
+            {1, 10, sizeof(OBJECT)}, {2, 12, sizeof(TEDINFO)},
+            {3, 13, sizeof(ICONBLK)}, {4, 14, sizeof(BITBLK)},
+            {5, 15, 4}, {8, 16, 4}, {9, 11, 4}, {6, 10, 0}
+        };
+        const UWORD *hw = (const UWORD *)rs_hdr;
+        for (i = 0; i < 8; i++)
+            if ((uint16_t)(hw[lay[i][0]] + hw[lay[i][1]] * lay[i][2]) > im_off)
+                return;
+    }
     rs_imbase = 0;
     rs_imsize = 0;
+    mark = farmem.brk;
     base = far_alloc(im_len);
     if (!base)
         return;                         /* no far memory: leave them be */
+    {
+        FARBLK *f = &rs_im[rs_2 ? 2 : 1];
+        f->base = base;
+        f->mark = mark;
+        f->top = farmem.brk;
+    }
     im_near = (uint16_t)((uint16_t)mem + im_off);
     far_put(base, (const uint8_t *)im_near, im_len);
     for (i = 0; i < rs_hdr->rsh_nib; i++) {
@@ -307,13 +351,193 @@ static void rs_imfar(uint8_t *mem, uint16_t im_off, uint16_t size)
     rs_imsize = im_len;
 }
 
+/* COLOUR ICONS: THE EXTENSION GOES FAR, AND ITS MONO HEADERS COME NEAR.
+ *
+ * A new-format resource (rsh_vrsn bit 2) carries, after its rsh_rssize
+ * bytes, an array of 68000 LONGs -- the file's true length, the offset of
+ * the colour-icon table or 0/-1 for none, further extensions, a 0 -- and
+ * at that offset one LONG per CICONBLK ending in -1, then the CICONBLKs:
+ * each an ICONBLK, a LONG count of colour forms, the mono bits, the mono
+ * mask, twelve bytes of text, and the colour forms (EmuTOS
+ * aes/gemrslib.c, get_ciconblkptr and fixup_all_ciconblks).  A G_CICON
+ * object's ob_spec is an INDEX into that table.
+ *
+ * MControl's extension is 34,752 bytes and HypView's 21,176, against a
+ * pool of 14,336: it has no business there.  So it is streamed to far
+ * memory through a slice of the pool, and only what the object library
+ * reads through a near pointer comes back down -- one CICON_NEAR per
+ * icon: the ICONBLK, its mask and bits named by far address exactly as a
+ * mono icon's are once rs_imfar has moved them, its text beside it, and
+ * where its colour forms are for the day objc_draw selects one.  They are
+ * taken AFTER rs_imfar has wound the pool back, so they sit where the
+ * mono images were and cost nothing extra when there were images to
+ * move.  Like the image bits, the far block is app_free's to reclaim. */
+#define CICON_TEXT  12
+typedef struct {
+    ICONBLK  ib;
+    char     text[CICON_TEXT];
+    uint32_t cicons;                    /* far: the first CICON, or 0 */
+} CICON_NEAR;                           /* 50 bytes, and even */
+
+#define CICON_MAX   256                 /* a table longer than this is not one */
+
+uint32_t rs_cibase;                     /* where the extension went, 0 if none */
+uint16_t rs_cisize;
+static FARBLK   rs_ci[3];               /* [1] and [2]: the slot that took it */
+
+/* Give a slot's far blocks back, each while it is still the top of the
+ * heap -- the extension was taken after the images, so it is asked first. */
+static void rs_farback(WORD slot)
+{
+    FARBLK *f = &rs_ci[slot];
+    if (f->base && farmem.brk == f->top) {
+        far_release(f->mark);
+        if (rs_cibase == f->base)
+            rs_cibase = rs_cisize = 0;
+        f->base = 0;
+    }
+    f = &rs_im[slot];
+    if (f->base && farmem.brk == f->top) {
+        far_release(f->mark);
+        f->base = 0;
+    }
+}
+
+static uint32_t rd_long(uint32_t far)   /* a 68000 LONG, from far memory */
+{
+    uint8_t b[4];
+    far_get(b, far, 4);
+    return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16)
+         | ((uint32_t)b[2] << 8) | b[3];
+}
+
+/* `fd` is positioned just past the rsh_rssize bytes already in `h`.
+ * 1 on success; 0 and nothing of the pool kept on any failure. */
+static WORD rs_cicons(int16_t fd, RSHDR *h, uint16_t size)
+{
+    uint8_t ext[8], st;
+    uint16_t got, n, i, mark, slice, k, bytes;
+    uint32_t true_len, tab, ext_len, base, p, remaining, at;
+    CICON_NEAR *near;
+    uint8_t *buf;
+
+    if (cio_read(fd, ext, sizeof ext, &got) != CIO_OK || got != sizeof ext)
+        return 0;
+    true_len = ((uint32_t)ext[0] << 24) | ((uint32_t)ext[1] << 16) | ((uint32_t)ext[2] << 8) | ext[3];
+    tab      = ((uint32_t)ext[4] << 24) | ((uint32_t)ext[5] << 16) | ((uint32_t)ext[6] << 8) | ext[7];
+    if (tab == 0 || tab == 0xFFFFFFFFUL)
+        return 1;                       /* new format, no colour icons: an
+                                         * outer resource's record stands */
+    if (true_len <= (uint32_t)size + sizeof ext || tab < size)
+        return 0;
+    ext_len = true_len - size;
+    rs_cibase = 0;
+    rs_cisize = 0;
+    {
+        FARBLK *f = &rs_ci[rs_2 ? 2 : 1];
+        f->mark = farmem.brk;
+        base = far_alloc(ext_len);
+        if (!base)
+            return 0;
+        f->base = base;
+        f->top = farmem.brk;
+    }
+    far_put(base, ext, sizeof ext);
+
+    /* the rest of it, through a slice of what the pool has spare */
+    mark = pool_mark();
+    slice = pool_room();
+    slice = slice > 2048 ? 2048 : (uint16_t)(slice & ~1);
+    if (slice < 64)
+        return 0;
+    buf = pool_alloc(slice, 2);
+    if (!buf)
+        return 0;
+    p = base + sizeof ext;
+    remaining = ext_len - sizeof ext;
+    while (remaining) {
+        k = remaining > slice ? slice : (uint16_t)remaining;
+        st = cio_read(fd, buf, k, &got);
+        if ((st != CIO_OK && st != CIO_OK_EOF) || got == 0) {
+            pool_release(mark);
+            return 0;
+        }
+        far_put(p, buf, got);
+        p += got;
+        remaining -= got;
+    }
+    pool_release(mark);
+
+    /* One running far address walks the whole extension: the table up to
+     * its -1, then each CICONBLK's header, bits, mask, text and forms in
+     * the order the file has them.  (A file offset is `at - base + size`;
+     * nothing below needs one.) */
+    at = base + (tab - size);
+    for (n = 0; n < CICON_MAX && rd_long(at) != 0xFFFFFFFFUL; n++)
+        at += 4;
+    if (n == 0 || n == CICON_MAX)
+        return 0;
+    at += 4;                            /* past the -1: the first CICONBLK */
+    near = pool_alloc((uint16_t)(n * sizeof(CICON_NEAR)), 2);
+    if (!near)
+        return 0;
+
+    for (i = 0; i < n; i++) {
+        CICON_NEAR *c = &near[i];
+        uint32_t num;
+        far_get((uint8_t *)&c->ib, at, sizeof(ICONBLK));
+        swap_words((uint8_t *)&c->ib + 12, 11); /* the WORDs after the
+                                                 * three (junk) LONGs */
+        num = rd_long(at + sizeof(ICONBLK));
+        bytes = (uint16_t)((c->ib.ib_wicon / 16) * c->ib.ib_hicon * 2);
+        at += sizeof(ICONBLK) + 4;      /* the mono bits... */
+        c->ib.ib_pdata = at;
+        at += bytes;                    /* ...the mono mask... */
+        c->ib.ib_pmask = at;
+        at += bytes;                    /* ...the text, copied near... */
+        far_get((uint8_t *)c->text, at, CICON_TEXT);
+        c->text[CICON_TEXT - 1] = 0;
+        c->ib.ib_ptext = (uint16_t)c->text;
+        at += CICON_TEXT;               /* ...and the colour forms */
+        c->cicons = num ? at : 0;
+        for (k = 0; k < num; k++) {     /* step over each: planes is the
+                                         * high word of the first LONG */
+            uint16_t planes = (uint16_t)(rd_long(at) >> 16);
+            uint32_t sel = rd_long(at + 10);
+            at += 22 + (uint32_t)bytes * planes + bytes;
+            if (sel)
+                at += (uint32_t)bytes * planes + bytes;
+        }
+    }
+
+    /* the objects: an index becomes the near record's address */
+    for (i = 0; i < h->rsh_nobs; i++) {
+        OBJECT *obj = addr_of(h, R_OBJECT, i);
+        if ((obj->ob_type & 0xFF) == G_CICON) {
+            if (obj->ob_spec >= n)
+                return 0;
+            obj->ob_spec = (uint16_t)&near[obj->ob_spec];
+        }
+    }
+    rs_cibase = base;
+    rs_cisize = (uint16_t)ext_len;
+    return 1;
+}
+
+void rs_ciaddr(uint32_t *base, uint16_t *len)
+{
+    *base = rs_cibase;
+    *len = rs_cisize;
+}
+
 WORD rs_load(const char *name)
 {
     RSHDR hdr, raw;
     char cio[CIO_NAME_MAX + 1];
-    uint16_t got, size;
+    uint16_t got, size, mark;
     int16_t fd;
     uint8_t *mem;
+    WORD ok;
 
     if (rs_1 && rs_2)               /* one resident and one nested is all */
         return 0;
@@ -328,14 +552,15 @@ WORD rs_load(const char *name)
     hdr = raw;                      /* the file's header, read for its size */
     swap_words(&hdr, sizeof hdr / 2);
     size = hdr.rsh_rssize;
-    if ((hdr.rsh_vrsn & NEW_FORMAT_RSC) || size < sizeof hdr) {
+    if (size < sizeof hdr) {
         cio_close(fd);
         return 0;
     }
+    mark = pool_mark();
     if (rs_1)
-        rs_2mark = pool_mark();
+        rs_2mark = mark;
     else
-        rs_1mark = pool_mark();
+        rs_1mark = mark;
     mem = pool_alloc(size, 2);
     if (!mem) {
         cio_close(fd);
@@ -344,9 +569,9 @@ WORD rs_load(const char *name)
     memcpy(mem, &raw, sizeof raw);  /* rs_fixit takes the file as it is */
     {
         uint8_t st = cio_read(fd, mem + sizeof raw, (uint16_t)(size - sizeof raw), &got);
-        cio_close(fd);
         if ((st != CIO_OK && st != CIO_OK_EOF) || got != size - sizeof raw) {
-            pool_release(rs_1 ? rs_2mark : rs_1mark);
+            cio_close(fd);
+            pool_release(mark);
             return 0;
         }
     }
@@ -356,6 +581,20 @@ WORD rs_load(const char *name)
         rs_1 = (RSHDR *)mem;
     rs_fixit(rs_hdr);
     rs_imfar(mem, hdr.rsh_imdata, size);
+    /* the colour icons, if the file has the extension for them: the fd
+     * is still positioned just past the rsh_rssize bytes */
+    ok = (hdr.rsh_vrsn & NEW_FORMAT_RSC) ? rs_cicons(fd, rs_hdr, size) : 1;
+    cio_close(fd);
+    if (!ok) {                      /* refused whole: nothing half-loaded */
+        WORD slot = rs_2 ? 2 : 1;
+        if (rs_2)
+            rs_2 = 0;
+        else
+            rs_1 = 0;
+        rs_farback(slot);
+        pool_release(mark);
+        return 0;
+    }
     return 1;
 }
 
@@ -369,12 +608,14 @@ WORD rs_free(void)
     if (rs_2) {                     /* the nested one first: LIFO */
         pool_release(rs_2mark);
         rs_2 = 0;
+        rs_farback(2);
         return 1;
     }
     if (!rs_1)
         return 0;
     pool_release(rs_1mark);
     rs_1 = 0;
+    rs_farback(1);
     return 1;
 }
 

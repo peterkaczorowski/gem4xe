@@ -88,6 +88,27 @@ declared: `v_string` answers **one** GEM key code per call rather than
 a line, and a `vex_*` vector is a `LONG` rather than a function
 pointer, because a handler is 24 bits under the large code model.
 
+## Your resource
+
+`rsrc_load` reads the whole `.RSC` into the application pool in one
+piece -- `rsh_rssize` bytes -- fixes it up in place, then moves any icon
+bitmaps to far memory and hands the pool back what they took -- when the
+image block is the last thing in the file, which is how RCS lays one out
+and not how every tool does; a file with tables above `rsh_imdata` keeps
+its bits in the pool and costs its whole `rsh_rssize`.  So a
+resource has to fit the pool beside everything else resident, and the
+`OBJECT` trees in it cannot go far: the AES reads them in place.  That is
+the limit a large ST program meets first; measure a resource's
+`rsh_rssize` against the pool before anything else.
+
+**New-format resources -- the ones with colour icons -- load.**  The
+extension past `rsh_rssize` is streamed to far memory and never sits in
+the pool; what comes back near is one 50-byte record per icon, the mono
+`ICONBLK` every `CICONBLK` begins with.  A `G_CICON` draws that mono
+form for now.  Its colour planes are kept far beside it, for the day the
+object library draws them: on this 16-colour surface that is the natural
+thing to do, and it is not done yet.
+
 ## Your memory
 
 The three numbers at the top of the `Makefile` are the budget, and the

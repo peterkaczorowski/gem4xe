@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rsc                                              # noqa: E402
 from rsc import ch, NIL                                 # noqa: E402
 from aesref import (G_BOX, G_IBOX, G_STRING, G_BUTTON, G_FTEXT, G_BOXTEXT,
-                    G_IMAGE, G_ICON, SELECTABLE, EXIT, DEFAULT, EDITABLE,
+                    G_IMAGE, G_ICON, G_CICON, SELECTABLE, EXIT, DEFAULT, EDITABLE,
                     LASTOB, HIDETREE, SHADOWED, TE_LEFT, TE_RIGHT)  # noqa: E402
 
 ICON_ROWS = bytes([
@@ -73,9 +73,18 @@ def build():
     icon = r.iconblk(ICON_MASK, ICON_ROWS, "LOGO", 32, 12,
                      char=0x1041, xchar=1, ychar=2, xicon=3, yicon=4,
                      xtext=5, ytext=6, wtext=7, htext=8)
+    # A COLOUR ICON, which makes this a new-format file: its CICONBLK goes
+    # in the extension past rsh_rssize, with one 4-plane colour form so the
+    # loader has a form to step over.  The object's spec is its INDEX; the
+    # loader makes that the address of the near record it builds.
+    cicon = r.cicon(ICON_MASK, ICON_ROWS, "COLOUR", 32, 12,
+                    forms=[(4, bytes(ICON_ROWS) * 4, bytes(ICON_MASK))],
+                    char=0x2043, xchar=2, ychar=3, xicon=4, yicon=5,
+                    xtext=6, ytext=7, wtext=8, htext=9)
     r.tree([
-        (NIL, 1, 1, G_BOX, 0, 0, 0x00FF1100, ch(0), ch(0), ch(10), ch(5)),
-        (0, NIL, NIL, G_ICON, LASTOB, 0, icon, ch(1), ch(1), ch(4), ch(3)),
+        (NIL, 1, 2, G_BOX, 0, 0, 0x00FF1100, ch(0), ch(0), ch(10), ch(5)),
+        (2, NIL, NIL, G_ICON, 0, 0, icon, ch(1), ch(1), ch(4), ch(3)),
+        (0, NIL, NIL, G_CICON, LASTOB, 0, cicon, ch(5), ch(1), ch(4), ch(3)),
     ])
     r.free_string("Free string one")
     r.free_string("Second free string, longer")
