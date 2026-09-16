@@ -16,6 +16,16 @@
  * numbers do not fit this machine: $00 and $01 are Rapidus OS's own COPs
  * and $80-$FF are reserved by WDC (src/sys/abi.h).  A program built with
  * the old ones ($73, $C8, $01) is refused by the loader: rebuild it.
+ * Those three are the whole set, and a COP with any other signature is
+ * not a gem4xe call at all: under Rapidus OS it is handed to that OS
+ * through its own vector, and without one it is refused, counted, and
+ * RETURNS WITH THE BLOCK UNTOUCHED -- so a hand-rolled gate does nothing
+ * and says nothing.  There is no safe way to report it either: the
+ * block's address came from X:C by this convention, and a call that does
+ * not follow the convention may not have put a block there at all, so
+ * writing an error into it could scribble on the caller.  $42 'B' and
+ * $58 'X' are held for a BIOS and an XBIOS if they are ever built
+ * (docs/phase41.md); until then nothing answers them.
  * gem4xe copies the caller's arrays in before the call
  * and out after it -- the DRI entry discipline -- so an application's
  * arrays may be exactly as large as its own calls need, and nothing of the
@@ -634,6 +644,8 @@ WORD shel_envrn(char **value, const char *name);
 WORD rc_intersect(const GRECT *src, GRECT *dst);
 void rc_union(const GRECT *src, GRECT *dst);
 
+WORD wind_create_grect(WORD kind, const GRECT *r);
+WORD wind_open_grect(WORD handle, const GRECT *r);
 WORD wind_get_grect(WORD handle, WORD field, GRECT *r);
 WORD wind_set_grect(WORD handle, WORD field, const GRECT *r);
 WORD wind_calc_grect(WORD type, WORD kind, const GRECT *in, GRECT *out);

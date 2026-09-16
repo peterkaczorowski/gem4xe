@@ -1525,6 +1525,16 @@ void rc_union(const GRECT *src, GRECT *dst)
     dst->g_h = (WORD)(h - y);
 }
 
+WORD wind_create_grect(WORD kind, const GRECT *r)
+{
+    return wind_create(kind, r->g_x, r->g_y, r->g_w, r->g_h);
+}
+
+WORD wind_open_grect(WORD handle, const GRECT *r)
+{
+    return wind_open(handle, r->g_x, r->g_y, r->g_w, r->g_h);
+}
+
 WORD wind_get_grect(WORD handle, WORD field, GRECT *r)
 {
     return wind_get(handle, field, &r->g_x, &r->g_y, &r->g_w, &r->g_h);

@@ -44,7 +44,16 @@ On the stock XL OS the same twelve bytes are not vectors at all (the COP
 **The signatures are letters in `$02-$7F`:** `COP #$56` 'V' the VDI,
 `COP #$41` 'A' the AES, `COP #$44` 'D' GEMDOS (`src/sys/abi.h`,
 `src/app/gemabi.s`).  `$42` 'B' and `$58` 'X' stay free for a BIOS and an
-XBIOS if they ever come.  The handler checks the byte against the same
+XBIOS if they ever come -- and until they do, a COP carrying one of them
+is refused, counted in `gem_bad`, and returns with the parameter block
+untouched, so a hand-rolled gate does nothing and says nothing.  That is
+deliberate rather than an oversight: the block's address arrives in X:C
+by this convention, and a caller that does not follow the convention may
+not have put a block there at all, so there is nowhere safe to write an
+error.  A program built with the kit cannot reach that path -- `gemabi.s`
+emits exactly three signatures and `tests/host/test_bind.py` fails if the
+three files disagree -- so what is left is hand-written assembly, which
+is a deliberate act.  The handler checks the byte against the same
 three, from its own equates, and `tests/host/test_bind.py` now fails if
 `abi.h`, `abi.s` and `gemabi.s` disagree or if any of them leaves
 `$02-$7F`.

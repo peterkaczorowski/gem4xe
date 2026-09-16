@@ -1,5 +1,7 @@
-/* clib.c -- the eight C library functions gem4xe uses, so that it uses
- * nobody else's; and malloc and free, which it refuses (at the end).
+/* clib.c -- the C library functions gem4xe uses, so that it uses nobody
+ * else's -- plus two it does NOT use itself, memcmp and memchr, which are
+ * here for the same reason on an application's behalf; and malloc and
+ * free, which it refuses (at the end).
  *
  * WHY THIS EXISTS, AND IT IS NOT ABOUT CODE.
  *
@@ -33,6 +35,7 @@
  */
 #include "portab.h"
 #include <stddef.h>
+#include <time.h>              /* for clock_t: the refusal at the end */
 
 void *memcpy(void *dst, const void *src, size_t n)
 {
@@ -124,6 +127,45 @@ char *strchr(const char *s, int c)
     }
 }
 
+/* THESE TWO HAVE NO CALLER IN THE ENGINE, and are here anyway.  An
+ * application built with the kit links this same file (tools/mksdk.py),
+ * and a program that reaches for memcmp or memchr -- both of which a
+ * ported ST program does by reflex -- would otherwise have them
+ * satisfied QUIETLY from the vendor's clib-lc-ld.a, putting Apache-2.0
+ * object code in a GPLv2 binary with nothing to show for it in a link
+ * map anybody reads.  RetroWP's platform layer writes its own pair for
+ * exactly this reason (retroplat backends/atari/clib_gem4xe.c); it
+ * should not have to.  The linker leaves out what nothing references,
+ * so the engine pays nothing for them. */
+int memcmp(const void *a, const void *b, size_t n)
+{
+    const unsigned char *p = (const unsigned char *)a;
+    const unsigned char *q = (const unsigned char *)b;
+
+    while (n--) {
+        if (*p != *q)
+            return (int)*p - (int)*q;
+        p++;
+        q++;
+    }
+    return 0;
+}
+
+/* Unlike strchr, the terminator is nothing special here: memchr searches
+ * n bytes whatever they are, and answers NULL if the byte is not there. */
+void *memchr(const void *s, int c, size_t n)
+{
+    const unsigned char *p = (const unsigned char *)s;
+    unsigned char want = (unsigned char)c;
+
+    while (n--) {
+        if (*p == want)
+            return (void *)p;
+        p++;
+    }
+    return 0;
+}
+
 /* MALLOC AND FREE REFUSE, AT LINK TIME.  An application's heap block is zero
  * bytes (src/app/gemapp.scm) because memory above bank $00 is GEMDOS's to hand
  * out -- Malloc -- so the library's malloc, which a program ported from the ST
@@ -147,4 +189,28 @@ void free(void *p)
 {
     (void)p;
     gem4xe_has_no_heap__use_GEMDOS_Malloc();
+}
+
+/* AND SO DOES CLOCK, for both reasons at once.  `clock.o` is in the
+ * library this links against, so a program that asks for elapsed time
+ * gets it satisfied QUIETLY -- Apache-2.0 object code in a GPLv2 binary
+ * -- and then answers a number with no meaning, because nothing on this
+ * machine drives the library's tick.  That is the malloc failure again:
+ * it links, it runs, and it is wrong with nothing to say so.  Worse than
+ * malloc, in fact, since `clock.o` does not carry NuttX's lib_ prefix,
+ * so the prefix heuristic in tests/host/test_licence.py would not name
+ * it -- only that file's stronger "nothing unlisted" assertion would,
+ * and only over gem4xe's own maps, never an application's.
+ *
+ * A GEM program has two real answers, and the symbol names them:
+ * evnt_timer to wait for a span, and vex_timv to be handed the tick --
+ * with its length in milliseconds -- on every one of them, which is what
+ * counting elapsed time is built out of.  Tgettime is the time of day,
+ * to two seconds. */
+extern void gem4xe_has_no_clock__use_evnt_timer_or_vex_timv(void);
+
+clock_t clock(void)
+{
+    gem4xe_has_no_clock__use_evnt_timer_or_vex_timv();
+    return 0;
 }

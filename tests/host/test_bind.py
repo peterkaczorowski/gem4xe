@@ -174,7 +174,9 @@ EXPECT = [
     ("fsel_input",       AES, 90, 0, 2, 2, 0),
     ("fsel_exinput",     AES, 91, 0, 2, 3, 0),
     ("wind_create",      AES, 100, 5, 1, 0, 0),
+    ("wind_create_grect", AES, 100, 5, 1, 0, 0),  # gemlib spelling: same call
     ("wind_open",        AES, 101, 5, 1, 0, 0),
+    ("wind_open_grect",  AES, 101, 5, 1, 0, 0),   # gemlib spelling: same call
     ("wind_close",       AES, 102, 1, 1, 0, 0),
     ("wind_delete",      AES, 103, 1, 1, 0, 0),
     ("wind_get",         AES, 104, 2, 5, 0, 0),

@@ -243,8 +243,11 @@ int main(void)
     scrp_write("X:\\");
     fsel_input(path, name, &a);
     fsel_exinput(path, name, &a, "x");
+    r1.g_x = 1; r1.g_y = 2; r1.g_w = 3; r1.g_h = 4;
     wind_create(0, 1, 2, 3, 4);
+    wind_create_grect(0, &r1);
     wind_open(1, 1, 2, 3, 4);
+    wind_open_grect(1, &r1);
     wind_close(1);
     wind_delete(1);
     wind_get(1, 4, &a, &b, &c, &d);
