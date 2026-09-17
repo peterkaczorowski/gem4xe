@@ -58,8 +58,8 @@ which must start as a 6502 and become a 65C816 with nothing driving it;
 the boot screen, read off the text screen while it is held and compared
 with what the machine then reports of itself -- the version in VERSION,
 the memory the probe recorded, the DOS, the VBXE the fixture has, and
-that both GEM4XE.CFG and LANG.RSC, which every product disk carries,
-were the ones read;
+that LANG.RSC, which every product disk carries, and GEM4XE.CFG, which
+the SpartaDOS X ones do, were the ones read;
 the far image, spot checked against the linker's own output where a DOS
 that mangles the staging would show (this gate found one that does -- MyDOS, section 2 of
 docs/shipping.md); and the desk at the end, pixel for pixel against
@@ -125,7 +125,7 @@ PRODUCTS = [
 ]
 
 
-def desk_model(mark, brk, pointer, drvmap, dirs, dev=None):
+def desk_model(mark, brk, pointer, drvmap, dirs, dev=None, psystem=False):
     """The desktop against the model, up to its first wait: the same
     prelude and the same sh_main the desktop gates run (m17_desktop), and
     then one step producer, which photographs the desk and chooses
@@ -161,6 +161,7 @@ def desk_model(mark, brk, pointer, drvmap, dirs, dev=None):
 
     d = Desktop(v, a, mark, link_near, near_size, g_link, drvmap, [first_wait],
                  imbase=im_base)
+    a.psystem = psystem                 # the DOS's command processor, or not
     d.main()
     return v, a, d
 
@@ -226,9 +227,12 @@ def check_boot(name, report, gtia, b, syms, check):
     L = lambda k: words["BOOT_" + k]        # noqa: E731
     with open(os.path.join(ROOT, "VERSION")) as f:
         version = f.read().strip()
+    # the DOS 2 floppy carries no GEM4XE.CFG (phase 43): the boot screen
+    # says the settings are the defaults, which is what the file says too
+    cfg = L("DEFAULTS") if name == "gem-boot.atr" else "GEM4XE.CFG"
     for label, want in ((L("VERSION"), version),
                         (L("CPU"), "65C816, Rapidus"),
-                        (L("CONFIG"), "GEM4XE.CFG"),
+                        (L("CONFIG"), cfg),
                         (L("LANG"), "LANG.RSC"),
                         (L("VIDEO"), "VBXE 1.26 ($D640)")):
         check(report.get(label) == want,
@@ -350,16 +354,18 @@ def one(name, progname, how, batches, cart, keep, check):
               f"return to")
         free = fs.free_count() * fs.data_bytes
         print(f"  {fs.free_count()} sectors free, {free // 1024} KB")
-        # The floor is eighty sectors -- 20 KB, enough for a program of
-        # somebody's own beside the system -- and the number is here so
+        # The floor is seventy-two sectors -- 18 KB, enough for a program
+        # of somebody's own beside the system -- and the number is here so
         # that the smallest disk gem4xe ships on stays somewhere a person
         # can put one.  It was below eight for a while (docs/shipping.md
-        # section 1 has the history); the packed far image is what put it
-        # back above eighty, and growth that takes it below again is a
-        # decision to make on purpose, not to discover here.
-        check(fs.free_count() >= 80,
+        # section 1 has the history); the packed far image put it above
+        # eighty, and growth that takes it below is a decision to make on
+        # purpose, not to discover here: phase 43's DOS command took the
+        # DOS 2 floppy to 65, and the decision was GEM4XE.CFG off that
+        # floppy (its every value is the default) and the floor at 72.
+        check(fs.free_count() >= 72,
               f"{name}: {fs.free_count()} sectors free -- under the floor of "
-              f"80 that keeps room for a program of the user's own")
+              f"72 that keeps room for a program of the user's own")
 
     if cart == "":
         print(f"  not booted: no SDX cartridge fixture ([spartados].sdx_cart "
@@ -500,7 +506,11 @@ def one(name, progname, how, batches, cart, keep, check):
         print(f"  DOS kind {kind}, drive map {drvmap:#04x}, pool ${mark:04X}, "
               f"far brk ${brk:06X}, pointer {pointer}")
         dirs = listing(disk) if sdfs else dos2_listing(fs)
-        ref_v, ref_a, d = desk_model(mark, brk, pointer, drvmap, dirs)
+        # File -> DOS command is greyed unless the DOS is a SpartaDOS X of
+        # 4.4 or later whose jfsymbol is in place (src/sys/dos.c dos_command)
+        psystem = kind == 2 and b.peek(0x0701) >= 0x44 and b.peek(0x07EB) == 0x4C
+        ref_v, ref_a, d = desk_model(mark, brk, pointer, drvmap, dirs,
+                                     psystem=psystem)
         print(f"  the model's desktop: {len(d.script)} calls to its first wait "
               f"at {d.waits[0]}, near ${d.near:04X}, G ${d.G:04X}")
         check(len(ref_a.shots) == 1, f"{name}: the model took {len(ref_a.shots)} shots")

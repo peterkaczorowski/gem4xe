@@ -707,6 +707,39 @@ void fun_mkdir(WNODE *pw)
     win_rebld(pw);
 }
 
+/* File -> DOS command: a line for the DOS's command processor, typed
+ * into the dialog that lives beside the chooser in PREFS.RSC (desktop.c
+ * do_prefs says why that file), and run by deskcmd.c, which shows what
+ * it printed.  Nothing is returned: the desktop's loop goes on. */
+void fun_command(void)
+{
+    OBJECT *tree;
+    char line[LEN_ZCMD];
+    WORD ok, n;
+
+    if (!rsrc_load("PREFS.RSC")) {
+        fun_alert(1, STNOPREF);
+        return;
+    }
+    rsrc_gaddr(R_TREE, ADCMDBOX, (void **)&tree);
+    inf_sset(tree, CMLINE, "");
+    fun_start(tree);
+    form_do(tree, CMLINE);
+    fun_end();
+    ok = inf_what(tree, CMOK);
+    if (ok)
+        inf_sget(tree, CMLINE, line);
+    rsrc_free();                                /* the nested one */
+    if (!ok)
+        return;
+    for (n = 0; line[n]; n++)                   /* less the field's padding */
+        ;
+    while (n > 0 && line[n - 1] == ' ')
+        line[--n] = 0;
+    if (n)
+        cmd_run(line);
+}
+
 /* File -> Show info: the selected item, what the listing knows about
  * it, and the two things this dialog can change -- the name, which is
  * where the desktop's rename lives, and the read-only bit.

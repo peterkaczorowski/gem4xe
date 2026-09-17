@@ -150,6 +150,18 @@ SIMPLE_CALL uint16_t dsk_call(uint16_t unused);
                                  * asminc/atari.inc, SDX_KD_SETTD) */
 SIMPLE_CALL uint16_t dos_call(uint16_t fn);
 
+/* ---- SpartaDOS X's entries, by address --------------------------------- */
+/* The fourth way in (src/sys/cio.s): a JSR to whatever bank-$00 address
+ * sdx_vec holds, A and X from sdx_ax and back into it, and the P it came
+ * back with as the result -- for the entries SpartaDOS X names by a
+ * symbol (src/sys/dos.c dos_command).  sdx_put is the 6502 routine the
+ * DOS's PUT_V points at while a command runs: every byte printed is
+ * stored through sdx_put_ptr, a long address bumped as it goes, while
+ * sdx_put_left says there is room. */
+SIMPLE_CALL uint16_t sdx_call(uint16_t unused);
+extern uint16_t sdx_vec, sdx_ax, sdx_put_left;
+extern uint8_t  sdx_put[], sdx_put_ptr[3];
+
 extern uint16_t cio_calls;      /* round trips made */
 extern uint8_t  cio_env;        /* bisection knobs (src/sys/cio.s): 1 = leave CRITIC alone */
 extern uint8_t  cio_last;       /* the last status */

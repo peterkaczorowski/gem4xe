@@ -60,7 +60,8 @@
               .extern ae_sp, ae_pokmsk      ; src/crt_atari.s
               .extern irq_frames, irq_kput  ; src/sys/irq.c, irq.s
               .extern irq_cio_swap          ; src/sys/irq.c
-              .public cio_call, dsk_call, dos_call, cio_env
+              .public cio_call, dsk_call, dos_call, sdx_call, cio_env
+              .public sdx_vec, sdx_ax, sdx_put, sdx_put_ptr, sdx_put_left
 
 #define POKMSK 0x0010                 /* OS shadow of IRQEN */
 #define RTCLOK 0x0012                 /* three bytes, high first */
@@ -86,9 +87,12 @@ cio_pokmsk:   .space  1               ; gem4xe's POKMSK across the call
 cio_stat:     .space  2               ; the OS's Y, zero-extended
 cio_which:    .space  1               ; 0 = CIOV, 1 = SIOV (dsk_call), 2 = KERNEL (dos_call)
 cio_fn:       .space  1               ; dos_call's function number, for Y
+sdx_vec:      .space  2               ; sdx_call's target, a bank-$00 routine
+sdx_ax:       .space  2               ; its A (low) and X (high), in and out
+sdx_put_left: .space  2               ; sdx_put's room left, counted down
 
               .section code, root
-;;; Three ways in, one round trip.  cio_call takes an IOCB number in A and
+;;; Four ways in, one round trip.  cio_call takes an IOCB number in A and
 ;;; ends at CIOV; dsk_call takes nothing, the DCB in page 3 being the
 ;;; argument, and ends at SIOV -- which is the entry a PBI hard disk is
 ;;; served through as well as a floppy, so one sector read reaches every
@@ -97,6 +101,12 @@ cio_fn:       .space  1               ; dos_call's function number, for Y
 ;;; JMP at $0703, the way the SDX User Guide (6.8, "Page Seven Kernel
 ;;; Values") says a program calls the kernel.  It answers with the P the
 ;;; kernel came back with: the carry is what a kernel call reports in.
+;;; sdx_call takes nothing either: it ends at a JSR to the bank-$00
+;;; address in sdx_vec, with A and X from sdx_ax, puts A and X back there
+;;; and answers with P as dos_call does -- the way in to what SpartaDOS X
+;;; names by a SYMBOL rather than a vector (src/sys/dos.c dos_command:
+;;; jfsymbol, and XCOMLI, its command processor).  CRITIC is left alone
+;;; for it: a command's run is long, and the DOS ran it with the VBI whole.
 cio_call:     php
               sep     #0x20
               stz     abs:cio_which
@@ -113,6 +123,13 @@ dos_call:     php
               sep     #0x20
               sta     abs:cio_fn
               lda     #2
+              sta     abs:cio_which
+              rep     #0x20
+              lda     ##0
+              bra     os_call
+sdx_call:     php
+              sep     #0x20
+              lda     #3
               sta     abs:cio_which
               rep     #0x20
               lda     ##0
@@ -142,6 +159,9 @@ os_call:      sei
               lda     abs:cio_env
               lsr     a
               bcs     cio_nocrit
+              lda     abs:cio_which
+              cmp     #3              ; sdx_call: see above
+              beq     cio_nocrit
               lda     #1
               sta     CRITIC
 cio_nocrit:   stz     ATRACT
@@ -173,6 +193,8 @@ cio_go:       cli
               beq     cio_cio
               cmp     #2
               beq     cio_dos
+              cmp     #3
+              beq     cio_sdx
               jsr     SIOV
               bra     cio_back
 cio_cio:      jsr     CIOV
@@ -180,6 +202,15 @@ cio_cio:      jsr     CIOV
 cio_dos:      ldy     abs:cio_fn
               jsr     KERNEL
               php                     ; its P, carry and all, is the answer
+              pla
+              tay
+              bra     cio_back
+cio_sdx:      lda     abs:sdx_ax      ; A and X in ...
+              ldx     abs:sdx_ax+1
+              jsr     sdx_go
+              sta     abs:sdx_ax      ; ... and out, with P as dos_call's
+              stx     abs:sdx_ax+1
+              php
               pla
               tay
 cio_back:     sei
@@ -204,6 +235,9 @@ cio_took:     clc
               lda     abs:cio_env
               lsr     a
               bcs     cio_keepcrit
+              lda     abs:cio_which
+              cmp     #3
+              beq     cio_keepcrit
               stz     CRITIC
 cio_keepcrit:
 ;;; The blanks the OS counted: RTCLOK is big-endian, so its low two bytes
@@ -237,3 +271,35 @@ cio_nokey:    lda     abs:cio_pokmsk
               lda     abs:cio_stat
               plp
               rtl
+
+sdx_go:       jmp     (sdx_vec)
+
+;;; sdx_put -- what SpartaDOS X's library calls for every byte a command
+;;; prints while the console's handle is 100 (Programming Guide 4.50, 9.7
+;;; and 18.9.5.2): 6502 code, the byte in A, every register preserved,
+;;; ending in RTS.  The byte is stored through the long address kept in
+;;; the store's own operand -- the 65816 takes a long store in emulation
+;;; mode, so the buffer is far while the DOS runs in bank $00 -- and the
+;;; operand is bumped; sdx_put_left is the room, and a byte past it is
+;;; dropped rather than written over whatever follows the buffer.
+sdx_put:      php
+              pha
+              lda     abs:sdx_put_left
+              ora     abs:sdx_put_left+1
+              beq     sdx_put_full
+              pla
+              pha
+sdx_put_op:   .byte   0x8F            ; sta long ...
+sdx_put_ptr:  .byte   0, 0, 0         ; ... here: set from C, bumped below
+              inc     abs:sdx_put_ptr
+              bne     sdx_put_cnt
+              inc     abs:sdx_put_ptr+1
+              bne     sdx_put_cnt
+              inc     abs:sdx_put_ptr+2
+sdx_put_cnt:  lda     abs:sdx_put_left
+              bne     sdx_put_dec
+              dec     abs:sdx_put_left+1
+sdx_put_dec:  dec     abs:sdx_put_left
+sdx_put_full: pla
+              plp
+              rts

@@ -18,9 +18,17 @@ and the SDX product disk's files (tools/mkfloppy.py) with a CONFIG.SYS that load
 The gate: SpartaDOS X says the driver loaded, and the desktop reaches its first wait
 with nothing refused and no interrupt fault.
 
+Then the one thing only this machine can do -- File -> DOS command.  The desktop hands
+a line to SpartaDOS X's own command processor (XCOMLI, Programming Guide 4.50 18.9.2)
+through GEMDOS's Psystem, with what it prints caught in a far buffer and shown in a
+window (src/sys/dos.c dos_command, src/desk/deskcmd.c).  The gate pulls the File menu
+at the pointer, chooses the item, types VER into the dialog and Return, and reads the
+buffer back: VER's banner, a window on it, MEMLO where it was, nothing refused.
+
   python3 tests/emu/sdx816.py --os=ROM --cart=CAR --driver=65816.SYS [--shot]
 """
 import os
+import struct
 import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
@@ -28,9 +36,17 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from a8test.launcher import launch          # noqa: E402
 import mkfloppy, symfile                    # noqa: E402
+from aesref import RETURN, DISABLED         # noqa: E402
+import fontref                              # noqa: E402
+from vbxeref import SHOT_X0, SHOT_Y0, SCR_W, SCR_H   # noqa: E402
+from deskrsc import (THEBAR, THEACTIVE, FILEMENU, THEDROPS, FILEBOX,  # noqa: E402
+                     CMDITEM)
+from demo_aes import path                   # noqa: E402
+from m4_aes import SHOTDIR                  # noqa: E402
+from m7_form import F, B, K, apply_step     # noqa: E402
 from m11_abi import os_profile              # noqa: E402
 from m14_sparta import screen               # noqa: E402
-from m4_aes import SHOTDIR                  # noqa: E402
+from m17_desktop import header, DESKTOP, DESK_SYM   # noqa: E402
 
 BUILD = os.path.abspath(os.path.join(ROOT, "build"))
 DISK = os.path.join(BUILD, "sdx816-boot.atr")
@@ -40,6 +56,162 @@ CONFIG = ["DEVICE SPARTA OSRAM", "DEVICE SIO", "DEVICE D1:65816",
 LOADED = "65816 v."                         # what 65816.SYS prints as it installs
 FIRST_WAIT = 43                             # the desktop's calls to its first wait
 LIMIT = 12000                               # frames
+COMMAND = "VER"                             # what the dialog is given
+BANNER = "SpartaDOS"                        # ...and what it prints, drawn
+MEMLO = 0x02E7
+OB_SIZE = 24
+CMD_TEXT = 64 + 4                           # where the text starts in the far
+                                            # buffer: its title comes first
+                                            # (src/desk/deskcmd.c)
+
+
+def obj(b, tree, i):
+    """One OBJECT out of the target, as the AES has it in memory."""
+    d = bytes(b.memdump(tree + i * OB_SIZE, OB_SIZE))
+    (nxt, head, tail, typ, flags, state, spec,
+     x, y, w, h) = struct.unpack("<hhhHHHIhhhh", d)
+    return dict(next=nxt, head=head, tail=tail, type=typ, flags=flags,
+                state=state, spec=spec, x=x, y=y, w=w, h=h)
+
+
+def centre(b, tree, chain):
+    """The screen centre of the last object of a parent chain."""
+    x = y = 0
+    for i in chain:
+        o = obj(b, tree, i)
+        x += o["x"]
+        y += o["y"]
+    return x + o["w"] // 2, y + o["h"] // 2
+
+
+def glyph_rows(text):
+    """The eight rows of `text` in the system font, one bit a pixel, the
+    leftmost pixel the highest bit (tools/fontref.py: a row strip)."""
+    rows = []
+    for r in range(8):
+        v = 0
+        for ch in text:
+            v = (v << 8) | fontref.FONT_8X8[r * fontref.FONT_STRIDE + (ord(ch) & 0xFF)]
+        rows.append(v)
+    return rows
+
+
+def find_text(shot_path, text):
+    """Where `text` stands on the screenshot, drawn dark on light in the
+    system font at any pixel position; None when it is nowhere.  The
+    bridge reads no memory above $FFFF, so what a command printed into
+    far memory is read off the screen instead -- which also proves the
+    window drew it."""
+    from PIL import Image
+    px = Image.open(shot_path).convert("RGB").load()
+    packed = []
+    for y in range(SCR_H):
+        v = 0
+        for x in range(SCR_W):
+            v = (v << 1) | (1 if sum(px[SHOT_X0 + x, SHOT_Y0 + y]) < 192 else 0)
+        packed.append(v)
+    want = glyph_rows(text)
+    width = 8 * len(text)
+    mask = (1 << width) - 1
+    for y in range(SCR_H - 7):
+        for x in range(SCR_W - width + 1):
+            shift = SCR_W - width - x
+            if all(((packed[y + r] >> shift) & mask) == want[r] for r in range(8)):
+                return x, y
+    return None
+
+
+def command(b, syms, shot):
+    """File -> DOS command, VER, and what came of it.  The failures."""
+    fails = []
+
+    def check(cond, msg):
+        if not cond:
+            fails.append(msg)
+            print(f"  FAIL: {msg}")
+
+    # the desktop's own variables, where the loader put them (app.c app_near)
+    link_near, _, _ = header(DESKTOP)
+    dsyms = symfile.load(DESK_SYM)
+    near = b.peek16(syms["app_near"])
+    g = near + dsyms["G"] - link_near
+
+    def var(name):                              # a direct-page scalar of deskcmd.c
+        return near + dsyms[name] - link_near
+    a_menu = b.peek16(g)                        # G.a_menu, its first field
+    item = obj(b, a_menu, CMDITEM)
+    check(item["state"] & DISABLED == 0,
+          "the item is greyed: Psystem says this DOS has no command processor")
+    if fails:
+        return fails
+    title_xy = centre(b, a_menu, [THEBAR, THEACTIVE, FILEMENU])
+    item_xy = centre(b, a_menu, [THEDROPS, FILEBOX, CMDITEM])
+    # straight down from the title into its drop-down: a slant would
+    # cross the next title first and drop that menu instead
+    item_xy = (title_xy[0], item_xy[1])
+    memlo = b.peek16(MEMLO)
+    ptr = syms["ptr_state"]
+    here = (b.peek16(ptr), b.peek16(ptr + 2))
+    print(f"  the File title at {title_xy}, DOS command at {item_xy}; MEMLO ${memlo:04X}")
+    steps = ([F(3)] + path(here, title_xy) + [F(10)]
+             + path(title_xy, item_xy, speed=4) + [F(10), B(1)])
+    def state(what):
+        """The AES's double-click machine and the pointer records, for
+        the log: what a press that goes nowhere looks like."""
+        w = {k: b.peek16(syms[k]) for k in ("gl_btrue", "gl_bpend", "gl_bclick",
+                                            "gl_bdely", "gl_bdesired", "app_calls",
+                                            "irq_frames")}
+        w["ptr_state"] = tuple(b.peek16(syms["ptr_state"] + 2 * i) for i in range(3))
+        w["ptr_seen"] = tuple(b.peek16(syms["ptr_seen"] + 2 * i) for i in range(3))
+        print(f"  {what}: " + ", ".join(f"{k} {v}" for k, v in w.items()))
+
+    # The pointer's place is poked, as every gate pokes it; the BUTTON is
+    # not, because this is the product binary with the product's config,
+    # an ST mouse, whose sampler reads the trigger every tick and would
+    # overwrite a poke (src/vdi/pointer.c).  So the press is the port's
+    # trigger, through the emulator: the way a mouse button arrives.
+    press = steps.index(B(1))
+    for step in steps[:press]:
+        apply_step(b, ptr, step)
+    b.joy(0, "center", fire=True)
+    b.frames(14)
+    b.joy(0, "center", fire=False)
+    b.frames(20)
+    state("after the press")
+    b.frames(90)                                # PREFS.RSC read, the dialog drawn
+    for ch in COMMAND:
+        apply_step(b, ptr, K(ch, 0))
+        b.frames(3)
+    apply_step(b, ptr, K("RETURN", RETURN))     # OK, the default button
+    # the command runs inside the desktop's Psystem; the window opens after
+    for _ in range(300):
+        b.frames(10)
+        if b.peek16(var("cmd_len")):
+            break
+    b.frames(60)
+    n = b.peek16(var("cmd_len"))
+    lines = b.peek16(var("cmd_lines"))
+    wh = b.peek16(var("cmd_id"))
+    buf = int.from_bytes(b.memdump(var("cmd_buf"), 3), "little")
+    # the window's title is far, and the AES brings it near to draw it
+    # (src/aes/wind.c w_ptext): what gl_nbuf holds is what was drawn
+    title = bytes(b.memdump(syms["gl_nbuf"], 41)).split(b"\0")[0].decode("latin-1")
+    b.screenshot(shot)
+    where = find_text(shot, BANNER)
+    print(f"  {COMMAND}: {n} bytes, {lines} line(s), window {wh} titled {title!r}, "
+          f"buffer ${buf:06X}; {BANNER!r} on the screen at {where}")
+    check(n > 0, f"{COMMAND} printed nothing the desktop caught")
+    check(lines >= 1, f"{n} bytes made {lines} lines")
+    check(wh > 0, "no window opened on the output")
+    # the bridge types the line in lower case and the dialog keeps what was
+    # typed, as SpartaDOS X takes it either way
+    check(title.upper() == f" {COMMAND} ", f"the window is titled {title!r}, not ' {COMMAND} '")
+    check(where is not None, f"{BANNER!r} is not drawn on the screen")
+    check(b.peek16(MEMLO) == memlo,
+          f"MEMLO is ${b.peek16(MEMLO):04X} afterwards, was ${memlo:04X}")
+    check(b.peek16(syms["gem_bad"]) == 0, f"{b.peek16(syms['gem_bad'])} ABI call(s) refused")
+    check(b.peek(syms["irq_fault"]) == 0, f"irq_fault {b.peek(syms['irq_fault'])}")
+    return fails
 
 
 def arg(argv, name):
@@ -106,13 +278,19 @@ def main(argv):
         check(b.peek16(syms["gem_bad"]) == 0, f"{b.peek16(syms['gem_bad'])} ABI call(s) refused")
         check(b.peek(syms["irq_fault"]) == 0, f"irq_fault {b.peek(syms['irq_fault'])}")
         b.screenshot(shot)
+        cmdshot = os.path.join(SHOTDIR, "sdx816-cmd.png")
+        if not fails:
+            fails += command(b, syms, cmdshot)
         if not fails and not keep:
             os.remove(shot)
+            if os.path.exists(cmdshot):
+                os.remove(cmdshot)
     finally:
         emu.stop()
 
     print(f"gem4xe-sdx816: {'PASS' if not fails else 'FAIL'} -- GEM with SpartaDOS X's "
-          f"65816.SYS under Rapidus OS, {len(fails)} problem(s)")
+          f"65816.SYS under Rapidus OS, and a DOS command from the desktop, "
+          f"{len(fails)} problem(s)")
     return 1 if fails else 0
 
 

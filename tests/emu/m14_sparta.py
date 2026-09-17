@@ -59,8 +59,11 @@ KEYS = {" ": ("SPACE", False), ".": ("PERIOD", False), "-": ("MINUS", False),
 
 def screen(b):
     """The OS text screen as 24 lines of ASCII."""
-    savmsc = b.peek(0x58) | (b.peek(0x59) << 8)
-    if not savmsc:
+    # one read, not two: the OS rewrites SAVMSC while it boots, and two
+    # peeks a bridge round trip apart once read $FE78 -- a torn value that
+    # sent the dump past the top of memory (test-m17, 2026-09-16)
+    savmsc = b.peek16(0x58)
+    if not savmsc or savmsc + 960 > 0x10000:
         return []
     raw = bytes(b.memdump(savmsc, 960))
     out = []

@@ -605,6 +605,11 @@ class AES:
         # search Fsnext goes on with
         self.dos_brk = 0
         self.dos_dta = 0
+        # whether the DOS the gate booted has a command processor a
+        # program may hand a line to (Psystem, src/sys/dos.c): a
+        # SpartaDOS X of 4.4 or later, which the gate says; a DOS 2 and
+        # a SpartaDOS 3 have not
+        self.psystem = False
         self.dos_dta_data = None
         self.dos_dirs = {}
         self.dos_searches = {}
@@ -4450,6 +4455,8 @@ class AES:
                 return 0
             del self.dos_searches[self.dos_dta]
             return GD_ENMFIL & 0xFFFFFFFF
+        if fn == GD_PSYSTEM:            # the probe: a null line asks
+            return 0 if self.psystem else GD_EINVFN & 0xFFFFFFFF
         raise ValueError(f"unknown GEMDOS function {fn:#x}")
 
 
@@ -4484,10 +4491,12 @@ DCREATE, DDELETE, FDELETE = GEMDOS_OP + 0x39, GEMDOS_OP + 0x3A, GEMDOS_OP + 0x41
 FATTRIB, FRENAME = GEMDOS_OP + 0x43, GEMDOS_OP + 0x56
 FCREATE, FOPEN, FCLOSE = GEMDOS_OP + 0x3C, GEMDOS_OP + 0x3D, GEMDOS_OP + 0x3E
 FREAD, FWRITE = GEMDOS_OP + 0x3F, GEMDOS_OP + 0x40
+PSYSTEM = GEMDOS_OP + 0x1F0         # gem4xe's own (src/sys/gemdos.h)
 # src/sys/gemdos.h: the attributes and the error the searches answer
 FA_RDONLY, FA_HIDDEN, FA_SYSTEM, FA_VOLUME, FA_SUBDIR, FA_ARCHIVE = (
     0x01, 0x02, 0x04, 0x08, 0x10, 0x20)
 GD_EINVFN = -32
+GD_PSYSTEM = 0x1F0                  # gem4xe's own (src/sys/gemdos.h)
 GD_EPTHNF, GD_EACCDN, GD_EFILNF, GD_ENMFIL = -34, -36, -33, -49
 GD_ENHNDL, GD_EIHNDL = -35, -37
 

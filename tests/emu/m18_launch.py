@@ -210,7 +210,11 @@ def main(argv):
               if ln.startswith(name + " ")][0].split()
         return tuple(int(x, 16) for x in ln[1].split("-"))
 
-    stk_lo, stk_hi = map_range("m3.map", "stack")
+    # m3desk's own map: the runner this gate boots.  m3's shares its
+    # layout only until one of them relinks -- a stale m3.map once put
+    # the painted range eleven bytes into live variables and read the
+    # stack as touching bottom (2026-09-16)
+    stk_lo, stk_hi = map_range("m3desk.map", "stack")
     dstk = map_range("desktop.map", "stack")         # at the link's near base
     dlink = map_range("desktop.map", "AppDP")[0]
     PAINT, MARGIN, DESK_MARGIN = 0xA5, 256, 64

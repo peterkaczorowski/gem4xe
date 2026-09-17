@@ -1435,6 +1435,14 @@ LONG Tgettimeofday(struct timeval FAR *tv, struct timezone FAR *tz)
     return dos(0x155);
 }
 
+LONG Psystem(const char FAR *line, void FAR *out, LONG max)
+{
+    dl(6, (LONG)(uint32_t)line);
+    dl(10, (LONG)(uint32_t)out);
+    dl(14, max);
+    return dos(0x1F0);
+}
+
 /* clock(): elapsed time since the program first asked, in CLOCKS_PER_SEC
  * units as the compiler's <time.h> defines them, over Tgettimeofday.  It
  * lives here and not in clib.c because it is a binding -- and because

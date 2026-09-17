@@ -15,6 +15,7 @@
 #include "dos.h"
 #include "farmem.h"
 #include "clock.h"
+#include "irq.h"
 #include "app.h"
 #include "abi.h"
 #include "con.h"
@@ -1890,6 +1891,12 @@ static LONG gd_nopath(WORD fn)
         break;
     case GD_FFORCE:
         r = gd_fforce(arg_w(6), arg_w(8));
+        break;
+    case GD_PSYSTEM:                    /* the DOS's command processor: it
+                                         * is lent the pool above its cursor,
+                                         * so nothing of ours is taken first */
+        r = dos_command((uint32_t)arg_l(6), (uint32_t)arg_l(10),
+                        (uint32_t)arg_l(14));
         break;
     default:
         r = GD_PATHCALL;

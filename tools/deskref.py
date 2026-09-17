@@ -68,7 +68,8 @@ from aesref import (Obj, Text, Iconblk, Rect,  # noqa: E402
                     DSETDRV, DGETDRV, DSETPATH, FSETDTA, MALLOC, FSFIRST,
                     FSNEXT, DCREATE, DDELETE, FDELETE, FA_SUBDIR,
                     GRAF_MKSTATE, GRAF_DRAGBOX, GRAF_RUBBOX,
-                    FOPEN, FCREATE, FCLOSE, FREAD, FWRITE, GD_EACCDN)
+                    FOPEN, FCREATE, FCLOSE, FREAD, FWRITE, GD_EACCDN,
+                    PSYSTEM)
 from rsc import R_TREE, R_ICONBLK, R_STRING, ICONBLK_SIZE  # noqa: E402
 from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA, ADFINFO,  # noqa: E402
                      DESKMENU, FILEMENU, ABOUITEM,
@@ -86,7 +87,7 @@ from deskrsc import (ADMENU, ADDINFO, ADMKDBOX, ADDELDIA, ADFINFO,  # noqa: E402
                      STFLINE, STFMARK, VIEWMENU, ICONITEM, TEXTITEM,
                      NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM, NSRTITEM, FITITEM,
                      IB_HARD, IB_FLOPPY, IB_TRASH,
-                     IB_FOLDER, IB_APPL, IB_DOCU, NOT_YET)
+                     IB_FOLDER, IB_APPL, IB_DOCU, NOT_YET, CMDITEM)
 
 # the two AES calls aesref numbers only in its dispatcher
 OBJC_ORDER = 1045
@@ -2307,6 +2308,12 @@ class Desktop:
         self.set_version()
         for item in NOT_YET:
             self.call(MENU_IENABLE, (item, 0), tree=self.a_menu)
+        # deskcmd.c cmd_init: File -> DOS command is greyed on a DOS with
+        # no command processor to hand a line to (Psystem, src/sys/dos.c;
+        # the AES model answers by its `psystem`, which the gate sets from
+        # the DOS it booted)
+        if self.gemdos(PSYSTEM, (0,) * 6) < 0:
+            self.call(MENU_IENABLE, (CMDITEM, 0), tree=self.a_menu)
         self.obj_init()
         self.desk_build()
         self.win_view()                             # V_ICON, until the INF

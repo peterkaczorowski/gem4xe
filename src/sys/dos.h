@@ -78,6 +78,12 @@ extern DOS_INFO dos;
 /* Look at the machine once; fills `dos`.  Before anything opens a file. */
 void dos_ident(void);
 
+/* The DOS's command processor given a line -- SpartaDOS X's XCOMLI --
+ * with what it prints caught in the far buffer at `out`, `max` bytes of
+ * it (src/sys/cio.s sdx_put).  The bytes caught; GD_EINVFN on a DOS
+ * with no such entry.  A null `line` asks only whether there is one. */
+int32_t dos_command(uint32_t line, uint32_t out, uint32_t max);
+
 /* Does this 17-character directory line carry the DOS's mark for a
  * subdirectory?  DOS_MARK_NONE for a file (or on a flat DOS, always);
  * DOS_MARK_FLAG when the mark is in the flag column and the extension

@@ -2579,8 +2579,11 @@ void vdi_input_poll(void)
 
 typedef void (*VDI_OP)(void);
 
-/* Two flat tables, split exactly as DRI split them: 1..39 and 100..137. */
-static const VDI_OP jmptb1[] = {
+/* Two flat tables, split exactly as DRI split them: 1..39 and 100..137.
+ * FAR: 284 bytes of function pointers, and bank $00 has none to spare
+ * (tools/memreport.py); a far fetch of the pointer costs a VDI call a
+ * few cycles, which nothing here can measure. */
+static const VDI_OP FAR jmptb1[] = {
     vdi_v_opnwk,     /*  1 */  v_nop,           /*  2 v_clswk        */
     vdi_v_clrwk,     /*  3 */  vdi_v_updwk,     /*  4 */
     vdi_v_escape,    /*  5 */                   vdi_v_pline,     /*  6 */
@@ -2603,7 +2606,7 @@ static const VDI_OP jmptb1[] = {
     vdi_vst_alignment /* 39 */
 };
 
-static const VDI_OP jmptb2[] = {
+static const VDI_OP FAR jmptb2[] = {
     vdi_v_opnvwk,    /* 100 */
     vdi_v_clsvwk,    /* 101 */
     vdi_vq_extnd,    /* 102 */

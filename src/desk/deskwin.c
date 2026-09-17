@@ -883,7 +883,7 @@ static void do_wopen(WORD new_win, WORD wh, WORD curr, const GRECT *pt)
 }
 
 /* The window between its full size and the size before that. */
-static void do_wfull(WORD wh)
+void do_wfull(WORD wh)
 {
     GRECT curr, prev, full;
 

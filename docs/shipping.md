@@ -76,6 +76,21 @@ SpartaDOS floppy carries an `INSTALL.BAT` that puts what it holds on a
 drive (`docs/media.md`).  The DOS 2 floppy has `DUP.SYS`, the full
 `GEM4XE.CFG` and 87 sectors free.
 
+**Phase 43 was the next.**  File -> DOS command is 3.4 KB more
+`DESKTOP.G4A` and 0.7 KB more `GEM.COM`, and the DOS 2 floppy went to 65
+sectors free again.  This time the file went and the floor moved:
+`GEM4XE.CFG` is off the DOS 2 floppy -- every value in it is the
+default, so a machine without the file runs exactly as the file says,
+and the boot screen says *defaults* where it said the file's name -- and
+the floor is 72 sectors, 18 KB, still two programs of `HELLO.G4A`'s
+size.  The SpartaDOS X floppy and the card carry the file as before.
+Behind the decision is a plainer one: nobody runs DOS 2 now -- people
+run MyDOS or SpartaDOS X -- so the DOS 2 floppy is the third-party-DOS
+tester it was built as, and its sectors are not worth a feature.  A
+MyDOS tester disk could be double-sided and the question would not
+arise, but MyDOS is the DOS section 2 caught mangling the staged image,
+so that swap is work of its own.
+
 That is the honest shape of the thing rather than a regression to be
 fixed: a 640x240 GUI with a resident AES belongs on a volume measured in
 megabytes, and the machine this project targets (Rapidus, VBXE, U1MB) is
@@ -382,8 +397,10 @@ in its OWN directory, the one `GEM.COM` was started from, and never in
 allocators are bump allocators, and anything taken after a program has
 loaded is freed underneath it when that program exits.
 
-Every product disk carries the same `GEM4XE.CFG`, with every setting in
-it commented out, so that finding the file is finding its documentation.
+Every SpartaDOS X medium carries the same `GEM4XE.CFG`, with every
+setting in it commented out, so that finding the file is finding its
+documentation; the DOS 2 floppy has carried none since phase 43
+(section 1), and runs on the same defaults.
 How much documentation has gone up and down with the DOS 2 floppy's
 room: for two phases it was a generated short form, the keys without the
 prose, because the disk had 3 KB free; the packed image gave the room

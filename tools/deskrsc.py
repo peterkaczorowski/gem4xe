@@ -58,15 +58,15 @@ THEDROPS = 7
 DESKBOX, ABOUITEM = 8, 9                    # 10 separator, 11..16 accessories
 FILEBOX, OPENITEM, SHOWITEM = 17, 18, 19    # 20 separator
 NFOLITEM, CLOSITEM, CLSWITEM = 21, 22, 23   # 24 separator
-DELTITEM, FORMITEM = 25, 26                 # 27 separator
-QUITITEM = 28
-VIEWBOX, ICONITEM, TEXTITEM = 29, 30, 31    # 32 separator
-NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM, NSRTITEM = 33, 34, 35, 36, 37  # 38
-FITITEM = 39
-OPTNBOX, IICNITEM, IAPPITEM = 40, 41, 42    # 43 separator
-PREFITEM = 44                               # 45 separator
-READITEM, SAVEITEM = 46, 47
-NOBS_MENU = 48
+DELTITEM, FORMITEM, CMDITEM = 25, 26, 27    # 28 separator.  CMDITEM sits
+QUITITEM = 29                               # where EmuTOS puts its CLIITEM
+VIEWBOX, ICONITEM, TEXTITEM = 30, 31, 32    # 33 separator
+NAMEITEM, TYPEITEM, SIZEITEM, DATEITEM, NSRTITEM = 34, 35, 36, 37, 38  # 39
+FITITEM = 40
+OPTNBOX, IICNITEM, IAPPITEM = 41, 42, 43    # 44 separator
+PREFITEM = 45                               # 46 separator
+READITEM, SAVEITEM = 47, 48
+NOBS_MENU = 49
 
 # ADDINFO objects.  DEVERSN and DEOK moved down one when the gem4xe
 # version line went in; they are constants for exactly that reason, and
@@ -218,6 +218,22 @@ FILE_LINE = [
 PREF_ALERT = [
     (STNOPREF, "STNOPREF", "[1][PREFS.RSC is not|on the disk.][ OK ]"),
 ]
+# ...and when there is no far memory for what a DOS command prints.
+STCMDMEM = 25
+CMD_ALERT = [
+    (STCMDMEM, "STCMDMEM", "[1][There is no memory|for the output.][ OK ]"),
+]
+
+# PREFS.RSC's second tree: the DOS command dialog, beside the chooser
+# for the same reason the chooser is there -- loaded only while it is
+# up (src/desk/desktop.c do_prefs; deskfun.c fun_command).  Fifty places
+# for the line: SpartaDOS X's LBUF holds 63, and a longer line than this
+# would not fit the dialog on an 80-column screen.
+ADCMDBOX = 1
+CMBOX, CMTITLE, CMLINE, CMOK, CMCNCL = 0, 1, 2, 3, 4
+NOBS_CMD = 5
+CMD_W, CMD_H = 62, 7
+CMD_TMPL, CMD_VALID = "Command: " + "_" * 50, "X"
 
 # ICONBLKs, in the order of the table; IG_* name them
 IB_HARD, IB_FLOPPY, IB_TRASH, IB_FOLDER, IB_APPL, IB_DOCU = 0, 1, 2, 3, 4, 5
@@ -226,7 +242,10 @@ IB_TABLE = ((IB_HARD, deskicons.IG_HARD), (IB_FLOPPY, deskicons.IG_FLOPPY),
             (IB_APPL, deskicons.IG_APPLICATION), (IB_DOCU, deskicons.IG_DOCUMENT))
 
 INDICES = [
-    ("STNOPREF", STNOPREF), ("ADPREF", ADPREF), ("PRTITLE", PRTITLE), ("PRBGLBL", PRBGLBL),
+    ("STNOPREF", STNOPREF), ("STCMDMEM", STCMDMEM),
+    ("ADCMDBOX", ADCMDBOX), ("CMTITLE", CMTITLE), ("CMLINE", CMLINE),
+    ("CMOK", CMOK), ("CMCNCL", CMCNCL),
+    ("ADPREF", ADPREF), ("PRTITLE", PRTITLE), ("PRBGLBL", PRBGLBL),
     ("PRDESK", PRDESK), ("PRWIND", PRWIND), ("PRPATLBL", PRPATLBL),
     ("PRPATBOX", PRPATBOX), ("PRPAT0", PRPAT0),
     ("PRCOLLBL", PRCOLLBL), ("PRCOLBOX", PRCOLBOX), ("PRCOL0", PRCOL0),
@@ -238,7 +257,8 @@ INDICES = [
     ("OPTNMENU", OPTNMENU), ("DESKBOX", DESKBOX), ("ABOUITEM", ABOUITEM),
     ("OPENITEM", OPENITEM), ("SHOWITEM", SHOWITEM), ("NFOLITEM", NFOLITEM),
     ("CLOSITEM", CLOSITEM), ("CLSWITEM", CLSWITEM), ("DELTITEM", DELTITEM),
-    ("FORMITEM", FORMITEM), ("QUITITEM", QUITITEM), ("ICONITEM", ICONITEM),
+    ("FORMITEM", FORMITEM), ("CMDITEM", CMDITEM), ("QUITITEM", QUITITEM),
+    ("ICONITEM", ICONITEM),
     ("TEXTITEM", TEXTITEM), ("NAMEITEM", NAMEITEM), ("TYPEITEM", TYPEITEM),
     ("SIZEITEM", SIZEITEM), ("DATEITEM", DATEITEM), ("NSRTITEM", NSRTITEM),
     ("FITITEM", FITITEM), ("IICNITEM", IICNITEM), ("IAPPITEM", IAPPITEM),
@@ -273,7 +293,8 @@ MENU = [
     (" Desk ", 2, 20, ["  About gem4xe...", "-", "1", "2", "3", "4", "5", "6"]),
     (" File ", 8, 19, ["  Open", "  Show info...", "-", "  New folder...",
                        "  Close folder", "  Close window", "-",
-                       "  Delete...", "  Format...", "-", "  Quit"]),
+                       "  Delete...", "  Format...", "  DOS command...", "-",
+                       "  Quit"]),
     (" View ", 14, 17, [("  Show as icons", CHECKED), "  Show as text", "-",
                         ("  Sort by name", CHECKED), "  Sort by type",
                         "  Sort by size", "  Sort by date", "  No sort",
@@ -563,10 +584,33 @@ def pref_tree(r):
     return r.tree(objs)
 
 
+def cmd_tree(r):
+    """ADCMDBOX: a line for the DOS's command processor, typed into an
+    editable field -- File -> DOS command (src/desk/deskfun.c
+    fun_command, deskcmd.c).  The mkdir dialog's shape, wider."""
+    objs = [
+        (NIL, CMTITLE, CMCNCL, G_BOX, NONE, OUTLINED, 0x00021100,
+         ch(0), ch(0), ch(CMD_W), ch(CMD_H)),
+        (CMLINE, NIL, NIL, G_STRING, NONE, NORMAL, r.string("DOS COMMAND"),
+         ch((CMD_W - 11) // 2), ch(1), ch(11), ch(1)),
+        (CMOK, NIL, NIL, G_FTEXT, EDITABLE, NORMAL,
+         r.ted(" " * CMD_TMPL.count("_"), CMD_TMPL, CMD_VALID),
+         ch(1), ch(3), ch(len(CMD_TMPL)), ch(1)),
+        (CMCNCL, NIL, NIL, G_BUTTON, SELECTABLE | DEFAULT | EXIT, NORMAL,
+         r.string("OK"), ch(CMD_W // 2 - 10), ch(5), ch(9), ch(1)),
+        (ROOT, NIL, NIL, G_BUTTON, SELECTABLE | EXIT | LASTOB, NORMAL,
+         r.string("Cancel"), ch(CMD_W // 2 + 1), ch(5), ch(9), ch(1)),
+    ]
+    assert len(objs) == NOBS_CMD, (len(objs), NOBS_CMD)
+    return r.tree(objs)
+
+
 def build_prefs():
-    """PREFS.RSC: the chooser alone, loaded only while it is open."""
+    """PREFS.RSC: the chooser and the DOS command dialog, loaded only
+    while one of them is open."""
     r = rsc.Rsc()
     assert pref_tree(r) == ADPREF
+    assert cmd_tree(r) == ADCMDBOX
     return r
 
 
@@ -588,6 +632,8 @@ def build():
     for i, name, text in FILE_LINE:
         assert r.free_string(text) == i, (name, i)
     for i, name, text in PREF_ALERT:
+        assert r.free_string(text) == i, (name, i)
+    for i, name, text in CMD_ALERT:
         assert r.free_string(text) == i, (name, i)
     for ib, ig in IB_TABLE:
         (mask, data, char, xchar, ychar, xicon, yicon, wicon, hicon,
@@ -629,8 +675,8 @@ def main(argv):
     pref = build_prefs().file()
     with open(argv[3], "wb") as f:
         f.write(pref)
-    print(f"{argv[3]}: {len(pref)} bytes, {NOBS_PREF} objects in one tree "
-          f"-- loaded only while the dialog is open")
+    print(f"{argv[3]}: {len(pref)} bytes, {NOBS_PREF} + {NOBS_CMD} objects in "
+          f"two trees -- loaded only while a dialog is open")
     return 0
 
 

@@ -306,6 +306,7 @@ int main(void)
     struct timeval tv;                  /* declared here: the test reads
                                          * a call by its four-space indent */
     Tgettimeofday(&tv, 0);
+    Psystem(path, 0, 0L);
     Tsettime(0);
     Fgetdta();
     Sversion();

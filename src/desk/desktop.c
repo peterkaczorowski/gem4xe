@@ -289,6 +289,10 @@ static WORD do_filemenu(WORD item)
         if (pw)
             win_close(pw, TRUE);
         break;
+    case CMDITEM:                               /* a line for the DOS, and a
+                                                 * window on what it printed */
+        fun_command();
+        break;
     case QUITITEM:
         shel_write(SHW_SHUTDOWN, 0, 0, "", "\0");
         return TRUE;
@@ -562,7 +566,9 @@ static WORD hndl_msg(void)
     case WM_SIZED:
     case WM_MOVED:
     case WM_NEWTOP:
-        hndl_wmsg(msg);
+        if (!cmd_msg(msg))                      /* the DOS command's window
+                                                 * is not a folder's */
+            hndl_wmsg(msg);
         return FALSE;
     default:
         return FALSE;
@@ -613,6 +619,7 @@ int main(void)
     set_version();
     for (i = 0; i < N_NOT_YET; i++)
         menu_ienable(G.a_menu, not_yet[i], 0);
+    cmd_init();
 
     obj_init();
     desk_build();
@@ -657,6 +664,7 @@ int main(void)
     /* The windows stay open, as the donor leaves them: the shell's
      * reinitialisation takes the screen back, and their places are in
      * the shell buffer for the next desktop. */
+    cmd_exit();
     cnx_put();
     app_save();
     menu_bar(G.a_menu, 0);

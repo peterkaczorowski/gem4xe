@@ -162,6 +162,9 @@ uint8_t  vbxe_reg_read(uint8_t off);
 
 void     vram_map(uint32_t addr);                     /* window the 4K page */
 void     vram_map_page(uint8_t page);                 /* ... by page number  */
+void     vram_unmap(void);                            /* closed until the next
+                                                         vram_map: RAM lent to
+                                                         a DOS command */
 /* Map a 4K page and hand back a pointer into the window, so a bulk writer can
  * stream with 16-bit pointer arithmetic instead of paying 32-bit address
  * maths per byte.  Valid until the next vram_* call or blit. */

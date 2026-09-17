@@ -238,6 +238,16 @@ void vbxe_xdl_hr(uint32_t screen, uint16_t height, uint8_t topmargin)
     REG(FX_VIDEO_CONTROL) = VC_XDL_ENABLE | VC_NO_TRANS;
 }
 
+/* The window closed, and forgotten: $8000-$8FFF is motherboard RAM until
+ * the next vram_map(), which opens it again.  For a DOS command's run
+ * (src/sys/dos.c dos_command), which is lent that RAM. */
+void vram_unmap(void)
+{
+    REG(FX_MEMAC_BANK_SEL) = 0;
+    REG(FX_MEMAC_CONTROL)  = 0;
+    memac_invalidate();
+}
+
 /* The way out: overlay off, so ANTIC's own display shows again, and the
  * MEMAC window closed, so $8000-$8FFF is motherboard RAM again for whoever
  * comes next.  The blitter is left to finish whatever it was doing. */

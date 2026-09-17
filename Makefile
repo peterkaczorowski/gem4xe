@@ -582,9 +582,12 @@ $(eval $(call g4a,clockacc,$(CLOCKACC_OBJS),1152,128,384,,))
 # runner whose staging leaves the pool the room GEM.COM leaves it
 # (build/m3desk.xex, above).
 DESK_OBJS  = $(G4A_LIB) build/desk/desktop.o build/desk/deskobj.o build/desk/deskwin.o \
-             build/desk/deskfun.o
-DESK_BSS   = 2944
+             build/desk/deskfun.o build/desk/deskcmd.o
+DESK_BSS   = 3072
 DESK_BITS  = 512
+# The near region is page-rounded (src/sys/app.c app_load): DP + bss + bits
+# is 3840 with DESK_BSS anywhere from 2944 to 3072, so the pool pays the
+# same for either.  The next byte costs a page (test-m28: tools/memreport.py).
 DESK_STACK = 640
 DESK_H     = src/app/gem.h src/desk/desk.h build/deskrsc.h
 
@@ -945,11 +948,15 @@ build/dosclock.cfg: dist/gem4xe.cfg
 # is a gate's more than anybody's way in.
 DOS2_FILES = --add build/desktop.g4a DESKTOP.G4A --add build/desktop.rsc DESKTOP.RSC \
 	     --add build/lang.rsc LANG.RSC --add build/816.com 816.COM
-build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com build/gem4xe.cfg
+# No GEM4XE.CFG on this one since phase 43: every value in the file is the
+# default, and the seven sectors were what File -> DOS command cost the
+# floppy's floor (docs/shipping.md section 1).  The SpartaDOS X floppy
+# and the card carry it.
+build/gem-boot.atr: build/gem.xex build/desktop.g4a build/desktop.rsc build/m11_app.g4a build/lang.rsc build/816.com
 	@test -n "$(SRC_DD)" || { echo "no double-density DOS fixture: set [dos].dd_dos2 in fixtures.toml"; exit 1; }
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DD)" $< $@ AUTORUN.SYS --sweep \
-	    $(DOS2_FILES) --add build/gem4xe.cfg GEM4XE.CFG
+	    $(DOS2_FILES)
 
 # The same shipped disk with the safe-mode line uncommented: what a user
 # writes from the DOS prompt when the VBXE's output is not something

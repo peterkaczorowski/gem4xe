@@ -753,6 +753,15 @@ struct timeval  { LONG tv_sec, tv_usec; };
 struct timezone { WORD tz_minuteswest, tz_dsttime; };
 LONG Tgettimeofday(struct timeval FAR *tv, struct timezone FAR *tz);
 
+/* gem4xe's own (0x1F0): the DOS's command processor -- SpartaDOS X's --
+ * given `line`, run to completion with GEM's screen left as it is, and
+ * every byte it printed caught in `out`, `max` bytes of it (a Malloc'd
+ * buffer; the DOS's EOL, $9B, ends its lines).  The bytes caught, or
+ * EINVFN on a DOS with no such entry; Psystem(0, 0, 0) asks only that.
+ * The command runs on a console it cannot show, so one that asks a
+ * question has nobody to answer it. */
+LONG Psystem(const char FAR *line, void FAR *out, LONG max);
+
 /* The C functions, through the ST's standard handles: 0 and 1 the
  * console, a VT-52 on GEM's screen; 2 aux:, with nothing behind it here;
  * 3 prn:, the printer GEM4XE.CFG names.  Fforce points one at a file or

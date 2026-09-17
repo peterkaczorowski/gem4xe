@@ -255,6 +255,14 @@ void win_rebld(WNODE *pw);
 /* The listing entry an item object shows, or 0. */
 FNODE FAR *win_fnode(WNODE *pw, WORD obj);
 void hndl_wmsg(const WORD *msg);
+void do_wfull(WORD wh);
+
+/* deskcmd.c: File -> DOS command's window, on what the command printed */
+#define LEN_ZCMD    64                  /* the DOS's line buffer, LBUF */
+void cmd_init(void);                    /* greys the item on a DOS without */
+void cmd_run(const char *line);         /* run it, and show the output */
+WORD cmd_msg(const WORD *msg);          /* TRUE: the message was its window's */
+void cmd_exit(void);
 void app_start(void);
 void app_save(void);
 /* Options -> Save desktop, and Options -> Read .INF file: the same
@@ -267,6 +275,7 @@ void cnx_put(void);
 
 /* deskfun.c: what the desktop says, and what the File menu does to files */
 WORD fun_alert(WORD defbut, WORD stnum);
+void fun_command(void);                 /* File -> DOS command: the dialog */
 void fun_mkdir(WNODE *pw);
 /* An item dragged out of pw and let go over (dst_wh, dst_obj): a copy,
  * a move when SHIFT is held, a delete over the trash. */

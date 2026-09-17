@@ -1,7 +1,12 @@
 /* dos.c -- which DOS is behind CIO.  See dos.h. */
+#include "portab.h"
 #include <string.h>
 #include "dos.h"
 #include "cio.h"
+#include "app.h"
+#include "farmem.h"
+#include "gemdos.h"
+#include "vbxe/vbxe.h"
 
 DOS_INFO dos;
 
@@ -169,4 +174,126 @@ uint16_t dos_wildcmp(const char *pattern, const char *filename)
             filename++;
     }
     return *pattern == *filename;
+}
+
+/* ---- the DOS's command processor ------------------------------------ */
+/* SpartaDOS X will run a whole command line for a program: XCOMLI,
+ * "eXecute COMmand LIne" (Programming Guide 4.50, 18.9.2).  The line
+ * goes in LBUF (COMTAB+63, 64 bytes, EOL-ended), BUFOFF (COMTAB+10) is
+ * zeroed, and one JSR does what the prompt would -- an internal command,
+ * a CAR: command, a program, >> redirection; only batch files are out.
+ * What it prints can be caught in memory (18.9.5.2): with the console's
+ * handle at COMTAB+6 set to 100 the library's FPUTC jumps through PUT_V
+ * for every byte, and src/sys/cio.s sdx_put stores each through a long
+ * address into a far buffer of the caller's.
+ *
+ * FINDING THE ENTRIES.  Both are symbols, which the DOS's loader
+ * resolves for its own relocatable binaries and not for a .xex.  The
+ * fixed entry jfsymbol at $07EB (16.1, as of 4.40) looks one up by its
+ * space-padded name -- AX in, AX out, Z for none -- and is asked once,
+ * on the first call, and only on a SpartaDOS X of 4.4 or later ($0701
+ * holds the version, User Guide 6.8) whose $07EB is the JMP it should
+ * be.  A program started with X.COM has no symbol list; jfsymbol's Z
+ * says so and the item stays grey.
+ *
+ * THE ROOM.  XCOMLI loads COMMAND.COM (~3.6 KB) at MEMLO and a program
+ * above it, so for the call MEMLO is raised to the pool's cursor and
+ * the MEMAC window is closed: from there to the DOS's screen at $9C00
+ * -- the pool's free top, the window's 4 KB and the idle $9000-$9BFF --
+ * is the command's, ten KB or so with the product resident
+ * (tools/memreport.py).  MEMLO goes back afterwards, so a program that
+ * stays resident from here does not; it would sit where the next
+ * application loads.  A DOS 2 has no command processor: EINVFN.
+ */
+#define SDX_VERSION  (*(volatile uint8_t *)0x0701)  /* $44 = 4.4 */
+#define SDX_JFSYMBOL 0x07EB
+#define SDX_STDOUT   6                  /* COMTAB+6: the console's handle */
+#define SDX_BUFOFF   10
+#define SDX_LBUF     63                 /* 64 bytes */
+#define SDX_LBUF_LEN 64
+#define SDX_EOL      0x9B
+#define SDX_PUTV_H   100                /* the handle that goes through PUT_V */
+
+static uint16_t sdx_xcomli, sdx_putv;   /* the two entries; 0 = none */
+static uint8_t  sdx_asked;              /* jfsymbol has been asked */
+
+/* One symbol's address, by its eight-character name in bank $00. */
+static uint16_t sdx_symbol(const char *name)
+{
+    uint16_t p;
+
+    sdx_vec = SDX_JFSYMBOL;
+    sdx_ax = (uint16_t)name;
+    p = sdx_call(0);
+    return (uint16_t)((p & 0x02) ? 0 : sdx_ax);    /* Z: no such symbol */
+}
+
+static void sdx_lookup(void)
+{
+    static const char FAR names[] = "XCOMLI  PUT_V   ";
+    uint16_t mark;
+    char *n;
+
+    if (dos.kind != DOS_SDX || SDX_VERSION < 0x44
+     || *(volatile uint8_t *)SDX_JFSYMBOL != 0x4C) {
+        sdx_asked = 1;
+        return;
+    }
+    mark = pool_mark();                 /* the names, in bank $00 for a moment */
+    n = pool_alloc(17, 1);
+    if (!n)
+        return;                         /* asked again next time */
+    far_strget(n, (uint32_t)names, 17);
+    sdx_xcomli = sdx_symbol(n);
+    sdx_putv = sdx_symbol(n + 8);
+    pool_release(mark);
+    sdx_asked = 1;
+}
+
+int32_t dos_command(uint32_t line, uint32_t out, uint32_t max)
+{
+    uint8_t *comtab = DOSVEC;
+    uint8_t *lbuf = comtab + SDX_LBUF;
+    uint16_t *putv;
+    uint16_t memlo, was, i;
+    uint8_t handle;
+
+    if (!sdx_asked)
+        sdx_lookup();
+    if (!sdx_xcomli || !sdx_putv)
+        return GD_EINVFN;
+    if (!line)
+        return 0;                       /* the probe: there is one */
+    if (max > 0xFFFFUL)
+        max = 0xFFFFUL;
+
+    /* the line, ended as the prompt would leave it */
+    far_strget((char *)lbuf, line, SDX_LBUF_LEN);
+    for (i = 0; i < SDX_LBUF_LEN - 1 && lbuf[i]; i++)
+        ;
+    lbuf[i] = SDX_EOL;
+    comtab[SDX_BUFOFF] = 0;
+
+    /* what it prints, into the caller's buffer */
+    sdx_put_ptr[0] = (uint8_t)out;
+    sdx_put_ptr[1] = (uint8_t)(out >> 8);
+    sdx_put_ptr[2] = (uint8_t)(out >> 16);
+    sdx_put_left = (uint16_t)max;
+    putv = (uint16_t *)sdx_putv;
+    was = *putv;
+    *putv = (uint16_t)sdx_put;
+    handle = comtab[SDX_STDOUT];
+    comtab[SDX_STDOUT] = SDX_PUTV_H;
+
+    /* the room, then the run */
+    memlo = MEMLO;
+    MEMLO = pool_mark();
+    vram_unmap();
+    sdx_vec = sdx_xcomli;
+    sdx_call(0);
+
+    MEMLO = memlo;
+    comtab[SDX_STDOUT] = handle;
+    *putv = was;
+    return (int32_t)(max - sdx_put_left);
 }
