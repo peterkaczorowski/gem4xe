@@ -21,7 +21,7 @@
 
               .extern irq_frames, irq_timer, irq_qlo, irq_qhi
               .extern irq_kb, irq_kb_head, irq_kb_tail, irq_kb_count
-              .extern irq_fault, irq_ptr_on, irq_plo, irq_phi, irq_qtab
+              .extern irq_fault, irq_ptr_on, ptr_port, irq_plo, irq_phi, irq_qtab
               .extern irq_prev_lo, irq_prev_hi, irq_pend, irq_tmp
               .extern gem_cop
               .public _irq_vec_cop, _irq_vec_brk, _irq_vec_abort
@@ -108,7 +108,13 @@ irq_t1_ctd:   sep     #0x20
               lda     abs:irq_ptr_on
               beq     irq_key
               lda     PORTA
-              and     #0x0f
+              ldx     abs:ptr_port    ; port 2 lives in the HIGH nibble
+              beq     irq_t1_lonib
+              lsr     a
+              lsr     a
+              lsr     a
+              lsr     a
+irq_t1_lonib: and     #0x0f
               tax
               lda     abs:irq_plo,x  ; this axis's line pair, 0..3
               sta     abs:irq_tmp

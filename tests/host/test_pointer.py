@@ -144,17 +144,24 @@ class TestDeviceWalks(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        names = [f"r_{d}[{i}]" for d in ("st", "amiga", "tb") for i in range(8)]
+        names = [f"r_{d}[{i}]" for d in ("st", "amiga", "tb") for i in range(16)]
         names.append("r_handler_agrees")
         cls.got = simulate("quad", [QUAD_SIM_C], names)
 
-    def walks(self, dev):
-        g = self.got
-        return [(g[f"r_{dev}[{2 * w}]"], g[f"r_{dev}[{2 * w + 1}]"]) for w in range(4)]
+    def walks(self, dev, port=2):
+        """The sim walks every device twice: port 2 into [0..7], port 1
+        into [8..15].  Port 2 is the standard and the default."""
+        g, base = self.got, 0 if port == 2 else 8
+        return [(g[f"r_{dev}[{base + 2 * w}]"], g[f"r_{dev}[{base + 2 * w + 1}]"])
+                for w in range(4)]
 
     def check_device(self, dev):
         n = self.STEPS
-        self.assertEqual(self.walks(dev), [(n, 0), (-n, 0), (0, n), (0, -n)], dev)
+        want = [(n, 0), (-n, 0), (0, n), (0, -n)]
+        self.assertEqual(self.walks(dev, 2), want, f"{dev} on port 2")
+        self.assertEqual(self.walks(dev, 1), want,
+                         f"{dev} on port 1, the escape for a machine wired "
+                         f"the other way")
 
     def test_st_mouse(self):
         self.check_device("st")

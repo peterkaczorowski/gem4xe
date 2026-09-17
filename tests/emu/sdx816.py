@@ -185,9 +185,9 @@ def command(b, syms, shot):
     press = steps.index(B(1))
     for step in steps[:press]:
         apply_step(b, ptr, step)
-    b.joy(0, "center", fire=True)
+    b.joy(1, "center", fire=True)
     b.frames(14)
-    b.joy(0, "center", fire=False)
+    b.joy(1, "center", fire=False)
     b.frames(20)
     state("after the press")
     b.frames(90)                                # PREFS.RSC read, the dialog drawn

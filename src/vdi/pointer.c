@@ -17,12 +17,25 @@ PTR_STATE ptr_seen;
 #define POTGO  (*(volatile uint8_t *)0xD20B)
 
 #define POT_MAX 228     /* POKEY's pot counter tops out here on a real Atari */
+/* A quadrature mouse's right button grounds its paddle line: the counter
+ * reads ~0 held and ~229 free, so anything low is a press. */
+#define PTR_RMB_MAX 64
 
 static uint8_t last_x, last_y;      /* previous line pair per axis (polled) */
 static uint16_t last_qlo, last_qhi; /* the IRQ's counters as last consumed  */
 static WORD    pot_pending;
 
 static uint8_t xem_port;            /* XEM1: joystick port it answered on */
+
+/* Port 2 by default: it is what the Atari world wires a mouse to, and
+ * port 1 is reported to interfere with the keyboard.  The 4 kHz sampler
+ * (src/sys/irq.s) reads this byte to pick PORTA's nibble. */
+uint8_t ptr_port = PTR_PORT_2;
+
+void ptr_setport(WORD port)
+{
+    ptr_port = (uint8_t)((port == PTR_PORT_1) ? PTR_PORT_1 : PTR_PORT_2);
+}
 static uint8_t xem_found;
 static uint8_t xem_rx, xem_ry;      /* the readings the movement is from */
 static uint8_t xem_wheel;           /* previous wheel phase */
@@ -108,7 +121,7 @@ static void lines_select(ptr_kind kind)
         irq_qtab[n] = tab[n];
     /* Start from the lines as they are now, so the first sample is not
      * counted as a transition from zero. */
-    n = (uint8_t)(PORTA & 0x0F);
+    n = (uint8_t)((ptr_port ? (PORTA >> 4) : PORTA) & 0x0F);
     last_x = irq_plo[n];
     last_y = irq_phi[n];
     irq_prev_lo = (uint8_t)(last_x << 2);
@@ -162,8 +175,11 @@ void ptr_init(ptr_kind kind, WORD x, WORD y)
     pot_pending = 0;
     xem_found = 0;
     xem_wheel = 0;
-    if (kind == PTR_TABLET || kind == PTR_XEM1) {
-        POTGO = 0;                  /* start the first scan */
+    if (kind == PTR_TABLET || kind == PTR_XEM1
+            || kind == PTR_ST_MOUSE || kind == PTR_AMIGA_MOUSE
+            || kind == PTR_TRAKBALL) {
+        POTGO = 0;                  /* the absolute devices' position, and
+                                     * a quadrature mouse's right button */
         pot_pending = 1;
     }
 }
@@ -185,7 +201,7 @@ static void poll_relative(void)
         ptr_state.y = (WORD)(ptr_state.y + (WORD)(q - last_qhi));
         last_qhi = q;
     } else {
-        uint8_t p = (uint8_t)(PORTA & 0x0F);
+        uint8_t p = (uint8_t)((ptr_port ? (PORTA >> 4) : PORTA) & 0x0F);
         uint8_t qx = irq_plo[p], qy = irq_phi[p];
         ptr_state.x = (WORD)(ptr_state.x + irq_qtab[(last_x << 2) | qx]);
         ptr_state.y = (WORD)(ptr_state.y + irq_qtab[(last_y << 2) | qy]);
@@ -193,7 +209,27 @@ static void poll_relative(void)
         last_y = qy;
     }
     clamp();
-    ptr_state.buttons = (WORD)(((TRIG0 & 1) ? 0 : 1) | ((TRIG1 & 1) ? 0 : 2));
+    /* Both buttons are this port's.  Left is its trigger; right is its
+     * FIRST PADDLE LINE -- POT0 for port 1, POT2 for port 2 -- which the
+     * adapter pulls to 0 and leaves near 229 otherwise.  It is not the
+     * other port's trigger, which is what this read used to be and which
+     * answered a joystick plugged in beside the mouse. */
+    /* Bit 1 of the button word IS the cache: the right button keeps its
+     * last answer while the paddle scan runs, and bank $00 pays for no
+     * variable to hold it. */
+    ptr_state.buttons = (WORD)(((TRIG(ptr_port) & 1) ? 0 : 1)
+                               | (ptr_state.buttons & 2));
+    /* The paddle counts UP through a scan, so reading it mid-scan reads
+     * low -- which is indistinguishable from a held button.  Sample it
+     * only when the scan has finished, keep the answer until the next
+     * one, and start the next immediately.  (Reading it every poll is
+     * what made the right button stick down and the desktop unusable.) */
+    if (pot_pending && (ALLPOT & (1 << (ptr_port * 2))) != 0)
+        return;                     /* still counting: last answer stands */
+    ptr_state.buttons = (WORD)((ptr_state.buttons & ~2)
+                               | ((POT(ptr_port * 2) < PTR_RMB_MAX) ? 2 : 0));
+    POTGO = 0;
+    pot_pending = 1;
 }
 
 /* Absolute devices.  POKEY's pot scan takes a full frame in normal mode, so

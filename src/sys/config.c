@@ -72,6 +72,7 @@ static const CFG_WORD FAR cfg_clock[] = {
 /* ...and the keys themselves, for the same reason. */
 static const char FAR k_video[] = "VIDEO";
 static const char FAR k_mouse[] = "MOUSE";
+static const char FAR k_mouseport[] = "MOUSEPORT";
 static const char FAR k_printer[] = "PRINTER";
 static const char FAR k_printto[] = "PRINTTO";
 static const char FAR k_clock[] = "CLOCK";
@@ -175,6 +176,13 @@ static void cfg_line(char *s)
         config.printer = lookup(NAMES(cfg_printer), val, config.printer);
     else if (same(k_clock, key))
         config.clock = lookup(NAMES(cfg_clock), val, config.clock);
+    else if (same(k_mouseport, key)) {
+        /* Straight into the pointer layer's own byte: CONFIG has no room
+         * for a field bank $00 would have to pay for, and nothing else
+         * needs to read it back.  1 or 2, and anything else keeps the
+         * standard rather than stopping the machine. */
+        ptr_setport(cfg_num(val, 2, 2) == 1 ? PTR_PORT_1 : PTR_PORT_2);
+    }
     else if (same(k_topmargin, key))
         config.topmargin = cfg_num(val, config.topmargin, CFG_TOPMARGIN_MAX);
     else if (same(k_screenh, key))

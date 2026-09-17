@@ -73,6 +73,22 @@ typedef struct {
 extern PTR_STATE ptr_state;
 extern PTR_STATE ptr_seen;
 
+/* WHICH JOYSTICK PORT the relative devices are on.  Port 2 is the
+ * standard: the Atari community wires a mouse there, and port 1 is
+ * reported to interfere with the keyboard.  A quadrature device occupies
+ * ONE port completely -- its four direction lines are the two axes, its
+ * trigger is the left button, and its first paddle line is the right
+ * button (0 pressed, ~229 released), which is how the ST-mouse adapter
+ * is built and how Altirra models it.  So the port decides every read,
+ * not just the direction nibble. */
+#define PTR_PORT_1  0
+#define PTR_PORT_2  1
+/* ONE byte, and the 4 kHz sampler in src/sys/irq.s reads this very
+ * variable rather than a copy: two that had to agree would be one too
+ * many, and bank $00 has no room for the spare. */
+extern uint8_t ptr_port;        /* PTR_PORT_1 or PTR_PORT_2 */
+void ptr_setport(WORD port);    /* before ptr_init; the sampler follows */
+
 void ptr_init(ptr_kind kind, WORD x, WORD y);
 void ptr_poll(void);            /* refresh ptr_state from the hardware */
 void ptr_sample(void);          /* ptr_seen = ptr_state, torn reads retried */

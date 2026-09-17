@@ -195,7 +195,7 @@ def main(argv):
 
         # -- the trak-ball --------------------------------------------------
         print("trak-ball")
-        b.joy(0, "centre")
+        b.joy(1, "centre")
         script = vdiref.encode([
             (SYS_PTR, (), (PTR_TRAKBALL, 300, 100)),
             (SYS_WAIT, (), (120,)),
@@ -211,10 +211,10 @@ def main(argv):
             check("target entered the wait", False)
         # 20 changes of state on the x pulse line, 10 on y's, one a frame.
         for i in range(20):
-            b.joy(0, "down" if i % 2 == 0 else "centre")
+            b.joy(1, "down" if i % 2 == 0 else "centre")
             b.frames(1)
         for i in range(10):
-            b.joy(0, "right" if i % 2 == 0 else "centre")
+            b.joy(1, "right" if i % 2 == 0 else "centre")
             b.frames(1)
         check("wait finished and the script completed", wait_done(b))
         n = b.peek16(count_addr)

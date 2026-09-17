@@ -37,7 +37,7 @@
 /* Results, one per device: for each of +x, -x, +y, -y in turn, the change
  * in ptr_state.x and ptr_state.y over STEPS steps, packed as signed bytes:
  * [0]=dx(+x) [1]=dy(+x) [2]=dx(-x) [3]=dy(-x) [4]=dx(+y) ... [7]=dy(-y). */
-int8_t r_st[8], r_amiga[8], r_tb[8];
+int8_t r_st[16], r_amiga[16], r_tb[16];   /* [0..7] port 2, [8..15] port 1 */
 /* 1 if the handler-arithmetic copy agreed with the polled path on every
  * step of every walk; otherwise the walk number it first disagreed on,
  * negated. */
@@ -63,6 +63,20 @@ static uint8_t model_bits(WORD kind)
 /* One model step along an axis: dir = +1 or -1.  Altirra moves the
  * accumulator one count toward the target per update and, for the
  * trak-ball, sets the axis's direction bit for - and clears it for +. */
+/* The four lines go in the nibble the selected port owns, so the walk
+ * exercises the port the system will actually read (src/vdi/pointer.c,
+ * ptr_port).  The idle level is high, hence the complement. */
+static void set_lines(uint8_t bits)
+{
+    uint8_t n = (uint8_t)(~bits & 0x0F);
+    PORTA = (uint8_t)(ptr_port ? (uint8_t)(n << 4) | 0x0F : n | 0xF0);
+}
+
+static uint8_t read_lines(void)
+{
+    return (uint8_t)((ptr_port ? (PORTA >> 4) : PORTA) & 0x0F);
+}
+
 static void model_step(WORD axis, int dir)
 {
     if (axis == 0) {
@@ -70,7 +84,7 @@ static void model_step(WORD axis, int dir)
     } else {
         if (dir > 0) { ay++; tb_dir &= (uint8_t)~4; } else { ay--; tb_dir |= 4; }
     }
-    PORTA = (uint8_t)(~model_bits(ptr_state.kind) & 0x0F);
+    set_lines(model_bits(ptr_state.kind));
 }
 
 static int walk_no;
@@ -83,7 +97,7 @@ static void walk(WORD kind, WORD axis, int dir, int8_t *out)
 
     ax = 0; ay = 0; tb_dir = 0;
     ptr_state.kind = kind;
-    PORTA = (uint8_t)(~model_bits(kind) & 0x0F);
+    set_lines(model_bits(kind));
     TRIG0 = 1; TRIG1 = 1;
     ptr_init((ptr_kind)kind, 320, 120);     /* seeds from PORTA as set */
     x0 = ptr_state.x; y0 = ptr_state.y;
@@ -94,7 +108,7 @@ static void walk(WORD kind, WORD axis, int dir, int8_t *out)
         model_step(axis, dir);
         ptr_poll();
         /* the handler's arithmetic, over the same sample */
-        n = (uint8_t)(PORTA & 0x0F);
+        n = read_lines();
         p = irq_plo[n];
         hx = (int16_t)(hx + irq_qtab[irq_prev_lo | p]);
         irq_prev_lo = (uint8_t)(p << 2);
@@ -121,8 +135,16 @@ int main(void)
 {
     irq.how = IRQ_OFF;
     r_handler_agrees = 1;
+    /* Port 2 first, because it is the default and the standard; then
+     * port 1, into the same arrays.  A device that decodes on one port
+     * and not the other would show as the second pass disagreeing. */
+    ptr_setport(PTR_PORT_2);
     device(PTR_ST_MOUSE, r_st);
     device(PTR_AMIGA_MOUSE, r_amiga);
     device(PTR_TRAKBALL, r_tb);
+    ptr_setport(PTR_PORT_1);
+    device(PTR_ST_MOUSE, r_st + 8);
+    device(PTR_AMIGA_MOUSE, r_amiga + 8);
+    device(PTR_TRAKBALL, r_tb + 8);
     return 0;
 }
