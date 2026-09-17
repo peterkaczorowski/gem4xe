@@ -100,6 +100,37 @@ declared: `v_string` answers **one** GEM key code per call rather than
 a line, and a `vex_*` vector is a `LONG` rather than a function
 pointer, because a handler is 24 bits under the large code model.
 
+## Porting from the ST
+
+What a program written against the ST's C libraries meets here, found by
+compiling cflib against this kit (94 of its 141 files build with no
+edit) and written down so the next port does not find it one error at a
+time:
+
+- **The published names are here.**  Object types, flags and states,
+  `ED_*`, `K_*`, `WM_*` and `WF_*` (AES 4's `WM_ONTOP`, `WM_UNTOPPED`
+  and `WF_BOTTOM` among them, declared and not served), `MD_*`, the line
+  types and ends, and the structs an ST resource or binding names --
+  `CICONBLK`, `MENU`, `PARMBLK`, `USERBLK` -- each with a line in `gem.h`
+  saying what this AES does with it, which is not always what the ST's
+  does (`G_CICON` draws its mono form; `G_USERDEF` draws nothing yet;
+  `menu_popup` is not served).
+- **`evnt_multi` has the ST's shape**: twenty-three arguments, the two
+  mouse rectangles flat.  `evnt_multi_moblk` is the same call with the
+  rectangles as `MOBLK`s, for a program written here; the AES sees no
+  difference.
+- **`<sys/stat.h>` and `<mint/cookie.h>` are the kit's**, Calypsi's C
+  library having neither: `stat()` is one `Fsfirst` (kind, size, one
+  stamp for all three times, `ENOENT` for a path that names nothing),
+  and `Getcookie()` answers `C_NOTFOUND` for every cookie, there being
+  no jar -- the answer a well-written program defaults on.
+- **The compiler says `__CALYPSI__`, not `__GNUC__`.**  A header that
+  branches on `__GNUC__` takes its other path here; and a symbol such a
+  header defines only under `__GNUC__` or `__PUREC__` (cflib's `_WORD`)
+  must come as `-D`, Calypsi having no `-include`.
+- **Files with bytes above 127** -- Atari sources often are -- defeat a
+  `grep` without `-a`, including a grep for exactly those bytes.
+
 ## Your resource
 
 `rsrc_load` reads the whole `.RSC` into the application pool in one

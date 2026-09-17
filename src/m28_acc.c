@@ -67,7 +67,7 @@ int main(void)
      * between AC_OPENs, and the point of the count is to show it running
      * while the desktop runs. */
     for (;;) {
-        WORD what = evnt_multi((UWORD)(MU_MESAG | MU_TIMER), 1, 1, 1,
+        WORD what = evnt_multi_moblk((UWORD)(MU_MESAG | MU_TIMER), 1, 1, 1,
                                0, 0, msg, 500, 0,
                                &mx, &my, &mb, &ks, &kr, &br);
         if (what & MU_TIMER)

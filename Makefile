@@ -441,7 +441,7 @@ build/scrap.o: src/aes/scrap.c src/aes/aes.h src/sys/farmem.h
 # GPLv2 tree (docs/licence.md).  It is part of the LIBRARY and not of a
 # program, so the kit ships it and anybody's application gets it.
 G4A_LIB = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o \
-          build/app/clib.o
+          build/app/gemstat.o build/app/clib.o
 
 # ...and the same three for an application compiled --data-model=large.
 # The linker refuses to mix runtime models, so a large-data program needs
@@ -449,7 +449,7 @@ G4A_LIB = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o \
 # than clib-lc-sd.a.  The SOURCES are the same files: only the model
 # differs (docs/gacs.md).
 G4A_LIB_LD = build/appld/crt_gemapp.o build/appld/gemabi.o build/appld/gemlib.o \
-             build/appld/clib.o
+             build/appld/gemstat.o build/appld/clib.o
 LIB_LD     = clib-lc-ld.a
 
 build/app/clib.o: src/sys/clib.c
@@ -511,6 +511,14 @@ build/app/%.o: src/app/%.s
 build/app/%.o: src/app/%.c src/app/gem.h
 	@mkdir -p build/app
 	$(CC) $(CFLAGS) -I src/app -o $@ $<
+# The bindings in the small model take the same flag as the large
+# (build/appld/gemlib.o below says why), not for a saving -- the small
+# model shares no tail -- but so that the kit, whose Makefile gives
+# gemlib.c the flag in every model, rebuilds the gate application byte
+# for byte (tests/host/test_sdk.py).
+build/app/gemlib.o: src/app/gemlib.c src/app/gem.h
+	@mkdir -p build/app
+	$(CC) $(CFLAGS) --no-interprocedural-cross-jump -I src/app -o $@ $<
 
 build/app/%.o: src/%.c src/app/gem.h
 	@mkdir -p build/app

@@ -156,7 +156,7 @@ void clock_panel(WORD handle)
     objc_draw(tree, ROOT, MAX_DEPTH, x, y, w, h);
 
     while (!done) {
-        ev = evnt_multi((UWORD)(MU_TIMER | MU_BUTTON | MU_KEYBD),
+        ev = evnt_multi_moblk((UWORD)(MU_TIMER | MU_BUTTON | MU_KEYBD),
                         1, 1, 1, 0, 0, msg, TICK_MS, 0,
                         &mx, &my, &mb, &ks, &kr, &br);
         if (ev & MU_TIMER) {

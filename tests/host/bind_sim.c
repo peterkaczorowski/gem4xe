@@ -201,7 +201,9 @@ int main(void)
     evnt_mouse(0, 1, 2, 3, 4, &a, &b, &c, &d);
     evnt_mesag(out);
     evnt_timer(100, 0);
-    evnt_multi(0x0011, 1, 1, 1, 0, 0, out, 100, 0,
+    evnt_multi(0x0011, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, out, 100, 0,
+               &a, &b, &c, &d, &a, &b);
+    evnt_multi_moblk(0x0011, 1, 1, 1, 0, 0, out, 100, 0,
                &a, &b, &c, &d, &a, &b);
     evnt_dclick(3, 0);
     menu_bar(tree, 1);

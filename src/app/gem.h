@@ -126,6 +126,10 @@ typedef struct {
 #define G_TEXT     21
 #define G_BOXTEXT  22
 #define G_IMAGE    23
+#define G_USERDEF  24   /* declared so a resource that has one loads and a
+                         * port compiles; objc_draw draws nothing for it yet
+                         * (src/aes/objc.c), so a USERBLK's routine is never
+                         * called */
 #define G_IBOX     25
 #define G_BUTTON   26
 #define G_BOXCHAR  27
@@ -220,6 +224,26 @@ typedef struct {
 #define IP_HOLLOW       0
 #define IP_SOLID        7
 
+/* vswr_mode's modes, vsl_type's line types (1..7: the VDI's own
+ * numbering, src/vdi/vdi.c vdi_vsl_type -- the Compendium's table on
+ * its vsl_type page is off by one) and vsl_ends's end styles. */
+#define MD_REPLACE      1
+#define MD_TRANS        2
+#define MD_XOR          3
+#define MD_ERASE        4
+
+#define SOLID           1
+#define LDASHED         2
+#define DOTTED          3
+#define DASHDOT         4
+#define DASH            5
+#define DASHDOTDOT      6
+#define USERLINE        7
+
+#define SQUARE          0
+#define ARROWED         1
+#define ROUND           2
+
 #define TXT_NORMAL      0x0000
 #define TXT_THICKENED   0x0001
 #define TXT_LIGHT       0x0002
@@ -294,6 +318,62 @@ typedef struct {
     WORD m_x, m_y, m_w, m_h;
 } MOBLK;
 
+/* The ST's own shapes of three more things a resource or a port names.
+ * Declared for a program that parses a .RSC file itself or compiles
+ * unchanged from the ST; none of them is what THIS AES hands out or
+ * takes, and each line says what it does instead.  Pointers are LONGs,
+ * as in ICONBLK and TEDINFO: addresses, not C pointers. */
+
+/* A colour icon's forms, one CICON per depth (22 bytes, the ST's), and
+ * the CICONBLK a G_CICON's ob_spec points at in an ST resource FILE.
+ * rsrc_load here reads that layout and converts: a loaded G_CICON's
+ * ob_spec points at the AES's own 50-byte near record (the mono ICONBLK
+ * first, so it draws as a G_ICON), and the colour forms stay in far
+ * memory, parsed and not yet drawn.  Read a loaded tree's ob_spec as an
+ * ICONBLK, never as a CICONBLK. */
+typedef struct {
+    WORD num_planes;
+    LONG col_data, col_mask;
+    LONG sel_data, sel_mask;
+    LONG next_res;
+} CICON;
+
+typedef struct {
+    ICONBLK monoblk;
+    LONG    mainlist;           /* the CICON chain */
+} CICONBLK;
+
+/* menu_popup's argument (AES 36).  Not served: the call answers -1 as
+ * every unknown AES opcode does (tools/surface.py lists it). */
+typedef struct {
+    LONG mn_tree;
+    WORD mn_menu, mn_item;
+    WORD mn_scroll, mn_keystate;
+} MENU;
+
+/* A G_USERDEF's ob_spec points at a USERBLK, and the AES would call
+ * ub_code with a PARMBLK; here it does not (G_USERDEF above). */
+typedef struct {
+    LONG pb_tree;
+    WORD pb_obj, pb_prevstate, pb_currstate;
+    WORD pb_x, pb_y, pb_w, pb_h;
+    WORD pb_xc, pb_yc, pb_wc, pb_hc;
+    LONG pb_parm;
+} PARMBLK;
+
+typedef struct {
+    LONG ub_code;               /* WORD (*)(PARMBLK *) on the ST */
+    LONG ub_parm;
+} USERBLK;
+
+/* evnt_multi's kstate and evnt_button's: the shift keys as the ST reports
+ * them (The Atari Compendium, evnt_keybd/graf_mkstate). */
+#define K_RSHIFT    0x0001
+#define K_LSHIFT    0x0002
+#define K_CTRL      0x0004
+#define K_ALT       0x0008
+#define K_CAPSLOCK  0x0010
+
 #define MN_SELECTED 10
 #define WM_REDRAW   20
 #define WM_TOPPED   21
@@ -305,6 +385,8 @@ typedef struct {
 #define WM_SIZED    27
 #define WM_MOVED    28
 #define WM_NEWTOP   29
+#define WM_UNTOPPED 30  /* AES 4's: a program may test for them, this */
+#define WM_ONTOP    31  /* AES sends neither -- it is single-application */
 #define AC_OPEN     40
 #define AC_CLOSE    41
 
@@ -336,6 +418,7 @@ typedef struct {
 #define WF_NEWDESK  14
 #define WF_HSLSIZ   15
 #define WF_VSLSIZ   16
+#define WF_BOTTOM   25  /* AES 4's: wind_set(WF_BOTTOM) is not served here */
 /* WM_ARROWED's word 4 */
 #define WA_UPPAGE   0
 #define WA_DNPAGE   1
@@ -345,6 +428,11 @@ typedef struct {
 #define WA_RTPAGE   5
 #define WA_LFLINE   6
 #define WA_RTLINE   7
+/* objc_edit's kind */
+#define ED_START    0
+#define ED_INIT     1
+#define ED_CHAR     2
+#define ED_END      3
 #define WC_BORDER   0
 #define WC_WORK     1
 #define END_UPDATE  0
@@ -522,12 +610,21 @@ WORD evnt_button(WORD clicks, UWORD mask, UWORD state,
                  WORD *mx, WORD *my, WORD *mb, WORD *ks);
 WORD evnt_mesag(WORD *msg);     /* eight words */
 WORD evnt_timer(UWORD lo, UWORD hi);
-/* m1 and m2 may be 0 when MU_M1 / MU_M2 are not asked for; msg is eight
- * words, filled when MU_MESAG comes back. */
-WORD evnt_multi(UWORD flags, WORD bclk, UWORD bmsk, UWORD bst,
-                const MOBLK *m1, const MOBLK *m2, WORD *msg,
-                UWORD tlo, UWORD thi,
+/* evnt_multi in the ST's shape -- the twenty-three arguments every port
+ * arrives with (The Atari Compendium, 6.10), the two mouse rectangles as
+ * five words each: flags, x, y, w, h.  msg is eight words, filled when
+ * MU_MESAG comes back; the timer is lo then hi.  A program written here
+ * may prefer evnt_multi_moblk below, the same call with the rectangles
+ * as MOBLKs and 0 for one not asked for; the AES sees no difference. */
+WORD evnt_multi(WORD flags, WORD bclk, WORD bmsk, WORD bst,
+                WORD m1flags, WORD m1x, WORD m1y, WORD m1w, WORD m1h,
+                WORD m2flags, WORD m2x, WORD m2y, WORD m2w, WORD m2h,
+                WORD *msg, WORD tlo, WORD thi,
                 WORD *mx, WORD *my, WORD *mb, WORD *ks, WORD *kr, WORD *br);
+WORD evnt_multi_moblk(UWORD flags, WORD bclk, UWORD bmsk, UWORD bst,
+                      const MOBLK *m1, const MOBLK *m2, WORD *msg,
+                      UWORD tlo, UWORD thi,
+                      WORD *mx, WORD *my, WORD *mb, WORD *ks, WORD *kr, WORD *br);
 
 WORD menu_bar(OBJECT *tree, WORD showit);
 WORD menu_icheck(OBJECT *tree, WORD item, WORD check);

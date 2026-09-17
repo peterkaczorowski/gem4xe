@@ -136,6 +136,7 @@ EXPECT = [
     ("evnt_mesag",       AES, 23, 0, 1, 1, 0),
     ("evnt_timer",       AES, 24, 2, 1, 0, 0),
     ("evnt_multi",       AES, 25, 16, 7, 1, 0),
+    ("evnt_multi_moblk", AES, 25, 16, 7, 1, 0),
     ("evnt_dclick",      AES, 26, 2, 1, 0, 0),
     ("menu_bar",         AES, 30, 1, 1, 1, 0),
     ("menu_icheck",      AES, 31, 2, 1, 1, 0),

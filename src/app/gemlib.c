@@ -821,10 +821,10 @@ WORD evnt_mesag(WORD *msg)
 
 /* The ST's int_in: flags, the button's clicks/mask/state, the two mouse
  * rectangles as five words each, the timer's two words -- 16 words. */
-WORD evnt_multi(UWORD flags, WORD bclk, UWORD bmsk, UWORD bst,
-                const MOBLK *m1, const MOBLK *m2, WORD *msg,
-                UWORD tlo, UWORD thi,
-                WORD *mx, WORD *my, WORD *mb, WORD *ks, WORD *kr, WORD *br)
+WORD evnt_multi_moblk(UWORD flags, WORD bclk, UWORD bmsk, UWORD bst,
+                      const MOBLK *m1, const MOBLK *m2, WORD *msg,
+                      UWORD tlo, UWORD thi,
+                      WORD *mx, WORD *my, WORD *mb, WORD *ks, WORD *kr, WORD *br)
 {
     static const MOBLK none = { 0, 0, 0, 0, 0 };
     const WORD *p;
@@ -851,6 +851,30 @@ WORD evnt_multi(UWORD flags, WORD bclk, UWORD bmsk, UWORD bst,
     *kr = int_out[5];
     *br = int_out[6];
     return r;
+}
+
+/* The ST's shape of the same call: the rectangles arrive flat, five
+ * words each, and go into two MOBLKs for the call above. */
+WORD evnt_multi(WORD flags, WORD bclk, WORD bmsk, WORD bst,
+                WORD m1flags, WORD m1x, WORD m1y, WORD m1w, WORD m1h,
+                WORD m2flags, WORD m2x, WORD m2y, WORD m2w, WORD m2h,
+                WORD *msg, WORD tlo, WORD thi,
+                WORD *mx, WORD *my, WORD *mb, WORD *ks, WORD *kr, WORD *br)
+{
+    MOBLK m1, m2;
+
+    m1.m_out = m1flags;
+    m1.m_x = m1x;
+    m1.m_y = m1y;
+    m1.m_w = m1w;
+    m1.m_h = m1h;
+    m2.m_out = m2flags;
+    m2.m_x = m2x;
+    m2.m_y = m2y;
+    m2.m_w = m2w;
+    m2.m_h = m2h;
+    return evnt_multi_moblk((UWORD)flags, bclk, (UWORD)bmsk, (UWORD)bst, &m1, &m2,
+                            msg, (UWORD)tlo, (UWORD)thi, mx, my, mb, ks, kr, br);
 }
 
 /* -- the menu, object, form, graphics and resource libraries: a tree in

@@ -644,7 +644,7 @@ int main(void)
 
     done = FALSE;
     while (!done) {
-        ev_which = evnt_multi(MU_BUTTON | MU_MESAG | MU_KEYBD, 0x02, 0x01, 0x01,
+        ev_which = evnt_multi_moblk(MU_BUTTON | MU_MESAG | MU_KEYBD, 0x02, 0x01, 0x01,
                               0, 0, G.g_rmsg, 0, 0,
                               &mx, &my, &button, &kstate, &kret, &bret);
         wind_update(BEG_UPDATE);
@@ -654,7 +654,7 @@ int main(void)
         while ((ev_which & MU_MESAG) && !done) {
             if (hndl_msg())
                 done = TRUE;
-            ev_which = evnt_multi(MU_MESAG | MU_TIMER, 0x02, 0x01, 0x01,
+            ev_which = evnt_multi_moblk(MU_MESAG | MU_TIMER, 0x02, 0x01, 0x01,
                                   0, 0, G.g_rmsg, 0, 0,
                                   &mx, &my, &button, &kstate, &kret, &bret);
         }

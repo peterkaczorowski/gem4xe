@@ -55,7 +55,7 @@ LDLIB  = clib-lc-sd.a
 # order given.  Code goes in `farcode`, and a function returns with rtl:
 # every call into it is a jsl.
 ASM_OBJS = $(patsubst %.s,build/%.o,$(notdir $(ASM)))
-OBJS = build/crt_gemapp.o build/gemabi.o build/gemlib.o build/clib.o \
+OBJS = build/crt_gemapp.o build/gemabi.o build/gemlib.o build/gemstat.o build/clib.o \
        build/$(NAME).o $(ASM_OBJS)
 LDOPT = lib/gemapp.scm $(OBJS) $(LDLIB) --rtattr exit=simplified \
         --cstartup gemapp --stack-size $(STACK)

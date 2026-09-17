@@ -32,7 +32,10 @@ MANIFEST = [
     ("Makefile",            "tools/sdk/Makefile"),
     ("include/gem.h",       "src/app/gem.h"),
     ("include/portab.h",    "src/portab.h"),
+    ("include/sys/stat.h",  "src/app/sys/stat.h"),      # no <sys/> in Calypsi's libc
+    ("include/mint/cookie.h", "src/app/mint/cookie.h"),  # a jar that answers "none"
     ("lib/gemlib.c",        "src/app/gemlib.c"),
+    ("lib/gemstat.c",       "src/app/gemstat.c"),       # stat() over Fsfirst
     ("lib/clib.c",          "src/sys/clib.c"),
     ("lib/gemabi.s",        "src/app/gemabi.s"),
     ("lib/crt_gemapp.s",    "src/app/crt_gemapp.s"),
