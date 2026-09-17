@@ -9,12 +9,14 @@
 ;;; are those of the sign word (dividend ^ divisor), not of the quotient.
 ;;; `8 / 8` therefore tests as zero and `7 / 8` as non-zero; `_Mod16` is the
 ;;; same with the dividend in place of the sign word, so `a % b == 0` is
-;;; false for every non-zero a.  The AES trips on it in gsx_tcalc(), where a
+;;; false for every POSITIVE non-zero a.  The AES trips on it in gsx_tcalc(),
+;;; where a
 ;;; string in a box exactly one character tall (`*ph / hc`) would not draw.
 ;;;
 ;;; tools/ccbug/ carries the reproducer and `make check-cc` runs it against
-;;; the library, then against this file, in the vendor's own simulator: 365
-;;; dividend/divisor pairs, quotient, remainder and both truth tests.  When a
+;;; the library, then against this file, in the vendor's own simulator:
+;;; three truth tests, which is what it has always run.  (This comment used
+;;; to claim 365 dividend/divisor pairs; no such sweep ever existed.)  When a
 ;;; Calypsi release passes the library half, this file and the two
 ;;; `--override` linker flags in the Makefile can go.
 ;;;

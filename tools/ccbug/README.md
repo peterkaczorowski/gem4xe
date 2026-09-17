@@ -161,14 +161,32 @@ answers 1004, and the two sit in one `-O2` listing as `ldy 16,x / lda
 
 ## B2 — `_Div16` / `_Mod16` return with the wrong flags
 
-Not the compiler alone: a mismatch between it and its library. At `-O1` and
-above `if (a / b)` compiles to `jsl _Div16; beq`, relying on the callee to
+Not the compiler alone: a mismatch between it and its library. At `-O2`
+`if (a / b)` compiles to `jsl _Div16; beq`, relying on the callee to
 leave N and Z from the result. The library's `_DivModSign16`
 (`src/lib/lowlevel/integer.s`) ends `plx; bpl; rtl` on the non-negative path,
 so the flags describe the **sign word** (dividend ^ divisor), not the
 quotient. Hence `8 / 8` tests as zero and `7 / 8` as non-zero; `_Mod16` tests
-the dividend, so `a % b == 0` is false for every non-zero `a`. Over 365
-test pairs the library's flags are right 236 times; the override's, 365.
+the dividend, so `a % b == 0` is false for every **positive** non-zero `a`
+(a negative dividend takes the library's `inc a` path and the flags come
+out right).
+
+**THE COMPILER DISAGREES WITH ITSELF, and that is the way to report it.**
+At `-O0` and `-O1` the same call is followed by `inc a; dec a`, which
+regenerates N and Z from the returned value — the compiler assuming the
+helper's flags mean nothing. At `-O2` that pair is deleted and the branch
+takes the callee's flags. One of the two is wrong whatever the intended
+contract, and neither `assembly-interface.html` nor `efficient-coding.html`
+documents a condition-code contract for the runtime helpers.
+
+**-O2 only.** An earlier version of this entry, and the comment in
+`src/sys/div16.s`, both said "-O1 and above". They were wrong.
+
+**An earlier version also claimed "over 365 test pairs the library's flags
+are right 236 times".  No such sweep has ever existed in this repository**
+— `check-cc` tests three rows, and no version of `check.py` in the history
+sweeps anything. The number was unsupported from the day it was written and
+is removed rather than reconstructed. If a figure is wanted, measure one.
 
 `src/sys/div16.s` is a replacement that computes the result and then loads it
 (`tay; tya`) so the flags are its own. It is linked with
@@ -193,14 +211,52 @@ fine.
 Found by `make test-m4`, in the same `gsx_tcalc` as B2: the character count
 came back as uninitialised stack.
 
-## B4 — `(int8_t)` of a 32-bit-derived value does not sign-extend
+**Send the sentinel version upstream, not this one.**  `num` here is an
+uninitialised local whose address is taken, and although the callee writes
+it unconditionally — so there is no undefined behaviour — a vendor reading
+it will reach for "uninitialised variable" first.  Give it a value the
+correct answer cannot be:
+
+    WORD num = 23117;                     /* 0x5A4D */
+    b3_bug_callee(s, pw, &num);
+    return num;                           /* must be 7 */
+
+It returns **0** at -O1 and -O2: neither the right answer nor the
+sentinel, so a definite, unconditional store was dropped and there is
+nothing indeterminate left to blame.
+
+## B4 — a narrowed operand loses its `(int8_t)` sign extension
 
     th = (WORD)(int8_t)((spec >> 16) & 0xFF);     /* ob_sst(), spec is uint32_t */
 
-The cast is dropped — the byte is zero-extended — whenever the operand is
-derived from a 32-bit value in the same expression: with or without the
-`& 0xFF`, through `(uint16_t)` or `(WORD)`, from `int32_t` as well. All `-O`
-levels. A `WORD` local in between restores it:
+The cast is dropped and the byte is zero-extended, at all `-O` levels.
+
+**THE TRIGGER IS NOT "A 32-BIT VALUE", though this entry said so for
+months.**  It is an operand the compiler has already narrowed, and 16 bits
+are enough:
+
+    short narrow(unsigned short x)  { return (short)(signed char)(x & 0xFF); }
+
+compiles to `and ##255 / rtl` — the sign extension simply absent, with no
+32-bit value anywhere in the function.  Swept: `& 0xFF`, `% 256u` and a
+32-bit `>> 16` all lose it; a plain value, an `| 0x00`, a *signed* operand,
+a `(uint8_t)` cast and an intermediate 16-bit local all keep it.  A vendor
+given the "32-bit" recipe would try a 16-bit control, see it fail too, and
+stop trusting the description.
+
+**And the 32-bit form drops the TRUNCATION as well**, which no conversion
+rule permits and which is the case to lead with, because it needs no
+argument about implementation-defined conversions:
+
+    short narrow32(unsigned long x) { return (short)(signed char)(x >> 16); }
+
+`narrow32(0x12341100)` must be `(int8_t)0x34` = 52.  It returns **4660**
+(`0x1234`) — a value outside `int8_t`'s range entirely, so the conversion
+was not performed at all rather than performed differently.  Prefer that
+to the 254 case, where a vendor can retreat to C17 6.3.1.3p3 and call an
+out-of-range conversion implementation-defined.
+
+A `WORD` local in between restores it:
 
     WORD hi = (WORD)(spec >> 16);  int8_t sth = (int8_t)hi;  th = sth;
 
