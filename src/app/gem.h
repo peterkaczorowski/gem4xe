@@ -128,18 +128,44 @@ typedef struct {
  * word's zero -- bank $00, which is where these structures live.  An
  * OBJECT is 24 bytes and ob_spec sits at offset 12 either way.
  *
- * gemlib's bit-field member (framesize, framecol, ...) is deliberately
- * absent: its layout depends on the compiler's bit ordering, which is
- * not settled here.  Take a box's colour word out of .index. */
+ * THE BIT-FIELD MEMBER IS DECLARED BACKWARDS ON PURPOSE.  A box's four
+ * bytes are, from the top: character, border thickness, then the colour
+ * word as frame / text / pattern / interior.  The 68000's compilers
+ * allocate a bit-field from the HIGH end, so gemlib writes that list in
+ * reading order and gets that layout; this compiler allocates from the
+ * LOW end, so the same list would come out mirrored -- a character read
+ * out of the bottom byte.  Written in reverse it lands exactly where the
+ * ST puts it, which is what a resource and a port both expect.  Read out
+ * of the generated code, not assumed: `.obspec.interiorcol` compiles to
+ * `and ##15` on the low word and `.obspec.character` to a load at byte 2
+ * with an `xba`, so the two ends are where they should be.
+ *
+ * The fields are `long` for the same reason.  gemlib writes `unsigned`,
+ * which is 32 bits where it comes from and SIXTEEN here, and a 16-bit
+ * storage unit cannot hold the whole word -- written that way the struct
+ * comes out eight bytes, which would push every field of an OBJECT after
+ * ob_spec four bytes along.  With `long` fields it is the four bytes it
+ * has to be. */
 struct tedinfo;
 struct iconblk;
 struct bitblk;
 struct userblk;
 struct ciconblk;
 
+typedef struct {                /* see the note above: reversed on purpose,
+                                 * and named as gemlib names them */
+    unsigned long interiorcol : 4;
+    unsigned long fillpattern : 4;
+    unsigned long textcol     : 4;
+    unsigned long framecol    : 4;
+    signed   long framesize   : 8;  /* negative draws the border outward */
+    unsigned long character   : 8;
+} OBSPEC_BITS;
+
 typedef union {
     LONG index;                 /* the raw four bytes: a colour word, a
                                  * character, or an address */
+    OBSPEC_BITS      obspec;    /* what a G_BOX and its family carry */
     char            *free_string;
     struct tedinfo  *tedinfo;
     struct iconblk  *iconblk;

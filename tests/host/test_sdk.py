@@ -124,6 +124,53 @@ class TestTheObjectLayoutIsTheSTs(unittest.TestCase):
         for what, expr in self.CASES:
             self.check("large", expr, what)
 
+    def test_the_bit_field_ends_are_where_the_st_puts_them(self):
+        """ob_spec.obspec is declared in the reverse of gemlib's order,
+        because this compiler allocates a bit-field from the LOW end
+        where the 68000's allocate from the high one.  Get it wrong and a
+        box's character is read out of its interior colour -- four bytes
+        that are still four bytes, so nothing else would notice.
+
+        Read back out of the generated code, which is where the fact came
+        from: the two ENDS of the word are what pin the direction, so
+        `interiorcol` must come off the low word and `character` must
+        come from the top byte."""
+        src = os.path.join(self.dir, "bits.c")
+        with open(src, "w") as f:
+            f.write('#include "gem.h"\n'
+                    "int low(OBSPEC *u) { return u->obspec.interiorcol; }\n"
+                    "int high(OBSPEC *u) { return u->obspec.character; }\n")
+        asm = os.path.join(self.dir, "bits.s")
+        r = subprocess.run(
+            [self.cc, "--code-model=large", "--data-model=small", "-O2",
+             "-I", os.path.join(self.kit, "include"),
+             "--assembly-source", asm, "-c",
+             "-o", os.path.join(self.dir, "bits.o"), src],
+            capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        text = open(asm).read()
+
+        def body(name):
+            out, on = [], False
+            for line in text.splitlines():
+                if line.startswith(name + ":") or (on and not line.strip()
+                                                   .startswith(name)):
+                    on = True
+                    out.append(line)
+                if on and "rtl" in line:
+                    break
+            return "\n".join(out)
+
+        lo, hi = body("low"), body("high")
+        self.assertIn("##15", lo,
+                      "interiorcol does not mask four bits off the low "
+                      f"word -- the bit-field is the wrong way round:\n{lo}")
+        self.assertNotIn("2,x", lo,
+                         f"interiorcol reaches the high word:\n{lo}")
+        self.assertIn("2,x", hi,
+                      "character is not read from the top byte -- the "
+                      f"bit-field is mirrored:\n{hi}")
+
     def test_a_pointer_is_the_size_the_union_argument_rests_on(self):
         self.check("small", "sizeof(char *) == 2",
                    "a small-model pointer is the low word")
