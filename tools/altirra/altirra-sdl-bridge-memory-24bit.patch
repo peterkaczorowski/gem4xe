@@ -1,0 +1,223 @@
+diff --git a/src/AltirraSDL/source/bridge/bridge_commands_write.cpp b/src/AltirraSDL/source/bridge/bridge_commands_write.cpp
+--- a/src/AltirraSDL/source/bridge/bridge_commands_write.cpp
++++ b/src/AltirraSDL/source/bridge/bridge_commands_write.cpp
+@@ -31,6 +31,7 @@
+ #include "bridge_savestate.h"   // ATBridge::SlotStore + memory I/O
+ 
+ #include "simulator.h"
++#include <at/atcore/address.h>   // kATAddressSpace_CPU: MEMDUMP/MEMLOAD above $FFFF
+ #include "cpu.h"              // ATCPUEmulator::GetInsnPC (used by BOOT_BARE settle)
+ #include "cpumemory.h"        // ATCPUEmulatorMemory::WriteByte (hardware-register path)
+ #include "antic.h"
+@@ -1323,13 +1324,23 @@
+ // per-server filesystem paths; we always use inline so the same
+ // command works over `adb forward` on Android. Cap matches PEEK
+ // (16384 bytes) by default; can be raised if a use case appears.
++//
++// An address above $FFFF is a 24-bit address in the 65C816's linear
++// space -- bank in the high byte -- read through the memory manager's
++// banked debug path (ATSimulator::DebugGlobalReadByte, address space
++// CPU), which is the CPU's own view of that bank: an accelerator's
++// fast RAM included.  A range may cross a bank there; it may not cross
++// $FFFFFF.  Addresses in bank 0 keep the 16-bit path and its rules, so
++// nothing that read bank 0 before reads differently now.
+ // ---------------------------------------------------------------------------
+ 
++static std::string Hex24(uint32_t v) { char b[12]; std::snprintf(b, sizeof b, "\"$%06x\"", v & 0xffffff); return b; }
++
+ std::string CmdMemDump(ATSimulator& sim, const std::vector<std::string>& tokens) {
+ 	if (tokens.size() < 3)
+ 		return JsonError("MEMDUMP: usage: MEMDUMP addr length");
+-	uint16_t addr = 0;
+-	if (!ParseAddr16(tokens[1], addr))
++	uint32_t addr = 0;
++	if (!ParseUint(tokens[1], addr) || addr > 0xFFFFFFu)
+ 		return JsonError("MEMDUMP: bad address");
+ 	uint32_t length = 0;
+ 	if (!ParseUint(tokens[2], length))
+@@ -1338,15 +1349,19 @@
+ 		return JsonError("MEMDUMP: length must be >= 1");
+ 	if (length > 65536u)
+ 		return JsonError("MEMDUMP: length too large (max 65536)");
+-	if ((uint32_t)addr + length > 0x10000u)
++	const bool wide = addr > 0xFFFFu;
++	if (!wide && addr + length > 0x10000u)
+ 		return JsonError("MEMDUMP: range crosses end of 64K address space");
++	if (wide && addr + length > 0x1000000u)
++		return JsonError("MEMDUMP: range crosses end of 24-bit address space");
+ 
+ 	std::vector<uint8_t> buf(length);
+ 	for (uint32_t i = 0; i < length; ++i)
+-		buf[i] = sim.DebugReadByte((uint16_t)(addr + i));
++		buf[i] = wide ? sim.DebugGlobalReadByte(kATAddressSpace_CPU + addr + i)
++		              : sim.DebugReadByte((uint16_t)(addr + i));
+ 
+ 	std::string payload;
+-	AddField(payload, "addr",   Hex16(addr));
++	AddField(payload, "addr",   wide ? Hex24(addr) : Hex16(addr));
+ 	AddU32  (payload, "length", length);
+ 	payload += "\"format\":\"base64\",";
+ 	payload += "\"data\":\"";
+@@ -1366,22 +1381,27 @@
+ std::string CmdMemLoad(ATSimulator& sim, const std::vector<std::string>& tokens) {
+ 	if (tokens.size() < 3)
+ 		return JsonError("MEMLOAD: usage: MEMLOAD addr base64data");
+-	uint16_t addr = 0;
+-	if (!ParseAddr16(tokens[1], addr))
++	// A 24-bit address writes the 65C816's linear space, as MEMDUMP
++	// reads it; the write path was global already.
++	uint32_t addr = 0;
++	if (!ParseUint(tokens[1], addr) || addr > 0xFFFFFFu)
+ 		return JsonError("MEMLOAD: bad address");
+ 	std::vector<uint8_t> bytes;
+ 	if (!Base64Decode(tokens[2], bytes))
+ 		return JsonError("MEMLOAD: bad base64 payload");
+ 	if (bytes.empty())
+ 		return JsonError("MEMLOAD: empty payload");
+-	if ((uint32_t)addr + bytes.size() > 0x10000u)
++	const bool wide = addr > 0xFFFFu;
++	if (!wide && addr + bytes.size() > 0x10000u)
+ 		return JsonError("MEMLOAD: payload exceeds 64K address space");
++	if (wide && addr + bytes.size() > 0x1000000u)
++		return JsonError("MEMLOAD: payload exceeds 24-bit address space");
+ 
+ 	for (size_t i = 0; i < bytes.size(); ++i)
+-		sim.DebugGlobalWriteByte((uint32_t)(addr + i), bytes[i]);
++		sim.DebugGlobalWriteByte(kATAddressSpace_CPU + (uint32_t)(addr + i), bytes[i]);
+ 
+ 	std::string payload;
+-	AddField(payload, "addr",   Hex16(addr));
++	AddField(payload, "addr",   wide ? Hex24(addr) : Hex16(addr));
+ 	AddU32  (payload, "length", (uint32_t)bytes.size());
+ 	StripTrailingComma(payload);
+ 	return JsonOk(payload);
+diff --git a/src/AltirraSDL/source/bridge/bridge_commands_state.cpp b/src/AltirraSDL/source/bridge/bridge_commands_state.cpp
+--- a/src/AltirraSDL/source/bridge/bridge_commands_state.cpp
++++ b/src/AltirraSDL/source/bridge/bridge_commands_state.cpp
+@@ -12,6 +12,7 @@
+ #include "bridge_protocol.h"
+ 
+ #include "simulator.h"
++#include <at/atcore/address.h>   // kATAddressSpace_CPU: PEEK above $FFFF
+ #include "cpu.h"
+ #include "cpumemory.h"
+ #include "antic.h"
+@@ -326,8 +327,14 @@
+ 	uint32_t addr = 0;
+ 	if (!ParseUint(tokens[1], addr))
+ 		return JsonError("PEEK: bad address");
+-	if (addr > 0xFFFF)
+-		return JsonError("PEEK: address > $FFFF (use PEEK_BANK for extended memory; coming in phase 5)");
++	if (addr > 0xFFFFFF)
++		return JsonError("PEEK: address > $FFFFFF");
++	// Above $FFFF the address is the 65C816's linear space, bank in the
++	// high byte, read through the memory manager's banked debug path
++	// (DebugGlobalReadByte, address space CPU): the CPU's own view of
++	// the bank, an accelerator's fast RAM included.  Bank 0 keeps the
++	// 16-bit path below unchanged.
++	const bool wide = addr > 0xFFFF;
+ 	uint32_t length = 1;
+ 	if (tokens.size() >= 3) {
+ 		if (!ParseUint(tokens[2], length))
+@@ -337,8 +344,10 @@
+ 		if (length > kMaxPeekLen)
+ 			return JsonError("PEEK: length too large (max 16384)");
+ 	}
+-	if (addr + length > 0x10000)
++	if (!wide && addr + length > 0x10000)
+ 		return JsonError("PEEK: range crosses end of 64K address space");
++	if (wide && addr + length > 0x1000000)
++		return JsonError("PEEK: range crosses end of 24-bit address space");
+ 
+ 	std::vector<uint8_t> buf(length);
+ 	for (uint32_t i = 0; i < length; ++i) {
+@@ -348,11 +357,12 @@
+ 		// "Debug" prefix bypasses I/O register side effects so
+ 		// reading $D000-$D7FF doesn't trigger ANTIC/GTIA/POKEY
+ 		// state changes.
+-		buf[i] = sim.DebugReadByte((uint16_t)(addr + i));
++		buf[i] = wide ? sim.DebugGlobalReadByte(kATAddressSpace_CPU + addr + i)
++		              : sim.DebugReadByte((uint16_t)(addr + i));
+ 	}
+ 
+ 	std::string payload;
+-	AddField(payload, "addr",   Hex16(addr));
++	AddField(payload, "addr",   wide ? Hex24(addr) : Hex16(addr));
+ 	AddU32  (payload, "length", length);
+ 	payload += "\"data\":\"";
+ 	payload += HexBytes(buf.data(), buf.size());
+@@ -370,15 +380,20 @@
+ 	uint32_t addr = 0;
+ 	if (!ParseUint(tokens[1], addr))
+ 		return JsonError("PEEK16: bad address");
+-	if (addr > 0xFFFE)
++	if (addr > 0xFFFFFE)
++		return JsonError("PEEK16: address > $FFFFFE");
++	const bool wide = addr > 0xFFFF;            // as PEEK: the 24-bit space
++	if (!wide && addr > 0xFFFE)
+ 		return JsonError("PEEK16: address > $FFFE");
+ 
+-	uint8_t lo = sim.DebugReadByte((uint16_t)addr);
+-	uint8_t hi = sim.DebugReadByte((uint16_t)(addr + 1));
++	uint8_t lo = wide ? sim.DebugGlobalReadByte(kATAddressSpace_CPU + addr)
++	                  : sim.DebugReadByte((uint16_t)addr);
++	uint8_t hi = wide ? sim.DebugGlobalReadByte(kATAddressSpace_CPU + addr + 1)
++	                  : sim.DebugReadByte((uint16_t)(addr + 1));
+ 	uint16_t value = (uint16_t)lo | ((uint16_t)hi << 8);
+ 
+ 	std::string payload;
+-	AddField(payload, "addr",  Hex16(addr));
++	AddField(payload, "addr",  wide ? Hex24(addr) : Hex16(addr));
+ 	AddField(payload, "value", Hex16(value));
+ 	StripTrailingComma(payload);
+ 	return JsonOk(payload);
+diff --git a/src/AltirraSDL/AltirraBridge/docs/PROTOCOL.md b/src/AltirraSDL/AltirraBridge/docs/PROTOCOL.md
+--- a/src/AltirraSDL/AltirraBridge/docs/PROTOCOL.md
++++ b/src/AltirraSDL/AltirraBridge/docs/PROTOCOL.md
+@@ -268,9 +268,15 @@
+ effects, so reading $D000-$D7FF does NOT trigger ANTIC/GTIA/POKEY
+ state changes.
+ 
+-`addr` must be 0..$FFFF; the range must not cross $FFFF. For raw
+-banked-memory access (RAMBO/130XE/cartridge banks bypassing PORTB),
+-see `PEEK_BANK` in Phase 5.
++`addr` is 0..$FFFFFF. In bank 0 (`addr` up to $FFFF) the range must
++not cross $FFFF and the read is as above. Above $FFFF the address is
++the 65C816's 24-bit linear space, bank in the high byte -- `$013740`
++is bank 1 -- read through the memory manager's banked debug path
++(`DebugGlobalReadByte`, address space CPU): the CPU's own view of
++that bank, an accelerator's fast RAM included; the range may cross
++a bank but not $FFFFFF, and `addr` comes back as six hex digits. For
++raw banked-memory access (RAMBO/130XE/cartridge banks bypassing
++PORTB), see `PEEK_BANK` in Phase 5.
+ 
+ ```json
+ {"ok":true,"addr":"$0080","length":16,"data":"00000018781f00..."}
+@@ -473,8 +479,10 @@
+ 
+ Read `length` bytes (1..65536) from `addr` and return them inline
+ as base64. Same debug-safe read path as `PEEK` (CPU view, banking
+-applied, no I/O side effects). The base64 wire format makes this
+-work over `adb forward` on Android with no shared filesystem.
++applied, no I/O side effects), and the same 24-bit addresses: above
++$FFFF the 65C816's linear space, bank in the high byte, `addr` back
++as six hex digits. The base64 wire format makes this work over
++`adb forward` on Android with no shared filesystem.
+ 
+ ```json
+ {"ok":true,"addr":"$0700","length":64,"format":"base64","data":"AAECAwQF..."}
+@@ -482,9 +490,11 @@
+ 
+ #### `MEMLOAD addr base64data`
+ 
+-Write the base64-decoded payload starting at `addr`. The full
+-range must fit within $0000-$FFFF. Bytes are written via the
+-debug-safe path (no I/O side effects).
++Write the base64-decoded payload starting at `addr`. In bank 0 the
++full range must fit within $0000-$FFFF; above $FFFF `addr` is the
++65C816's 24-bit linear space, as `MEMDUMP` reads it, and the range
++must fit within $FFFFFF. Bytes are written via the debug-safe path
++(no I/O side effects).
+ 
+ ```json
+ {"ok":true,"addr":"$0700","length":64}

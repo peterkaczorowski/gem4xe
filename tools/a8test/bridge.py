@@ -112,6 +112,12 @@ class Bridge:
         return r
 
     def memdump(self, addr, length):
+        """`length` bytes from `addr`.  Above $FFFF the address is the
+        65C816's 24-bit linear space, bank in the high byte, read through
+        the emulator's banked debug path -- an accelerator's fast RAM
+        included; a build without tools/altirra/altirra-sdl-bridge-
+        memory-24bit.patch refuses it as a bad address.  The chunking per
+        64K is for the 16-bit path's rule; the 24-bit one would not need it."""
         out = bytearray()
         while length > 0:
             chunk = min(length, 0x10000 - (addr & 0xFFFF))

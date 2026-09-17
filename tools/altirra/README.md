@@ -130,6 +130,33 @@ one-hunk context merge.  The copy here is the merged form -- what PR
 #90 carries, rebased onto the other two patches -- so that the three
 apply in the order below.
 
+## altirra-sdl-bridge-memory-24bit.patch -- memory above $FFFF (not yet upstream)
+
+`MEMDUMP`, `MEMLOAD`, `PEEK` and `PEEK16` took a 16-bit address
+(`ParseAddr16`, `DebugReadByte((uint16_t))`), so nothing a program keeps
+above bank `$00` -- which on this machine is everything but its near
+data -- could be read through the bridge: a session bisecting a fault
+in a 200 KB application had to walk its stack frame by hand, and
+`test-sdx816` read the DOS command's output off the screen with the
+model's font because it could not read the buffer.  The emulator has
+the read: `ATSimulator::DebugGlobalReadByte` in address space CPU is
+`DebugExtReadByte`, the memory manager's banked debug path, which is the
+65C816's own view of a bank, the Rapidus's SRAM included; and `MEMLOAD`
+already wrote through `DebugGlobalWriteByte`, only its address check
+was 16-bit.
+
+The patch widens the four verbs: an address above `$FFFF` is the 24-bit
+linear space, bank in the high byte (`$033F36`), the range may cross a
+bank but not `$FFFFFF`, and `addr` comes back as six hex digits.  Bank
+`$00` keeps the 16-bit path byte for byte, so no gate that read it reads
+differently.  `PROTOCOL.md` says the same at the three entries.
+Proved by `test-sdx816` reading `gd_devnames` -- a far string of
+gem4xe's own in bank `$03` -- back as `CON:AUX:PRN:`, and the command's
+buffer as the banner the screen search had stood in for.  Not sent
+upstream yet; the author's `PEEK` note names a `PEEK_BANK` for raw
+extended memory "in Phase 5", which this is not -- this is the CPU's
+view, which is the one a debugger of a 65C816 program wants.
+
 ## Building
 
 Upstream `main` already carries #88 and #90; only the host-path fix

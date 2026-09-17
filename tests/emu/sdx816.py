@@ -98,10 +98,9 @@ def glyph_rows(text):
 
 def find_text(shot_path, text):
     """Where `text` stands on the screenshot, drawn dark on light in the
-    system font at any pixel position; None when it is nowhere.  The
-    bridge reads no memory above $FFFF, so what a command printed into
-    far memory is read off the screen instead -- which also proves the
-    window drew it."""
+    system font at any pixel position; None when it is nowhere.  This
+    is the proof that the window DREW the text; the buffer itself is
+    read through the bridge, which reads above $FFFF now."""
     from PIL import Image
     px = Image.open(shot_path).convert("RGB").load()
     packed = []
@@ -139,6 +138,19 @@ def command(b, syms, shot):
     def var(name):                              # a direct-page scalar of deskcmd.c
         return near + dsyms[name] - link_near
     a_menu = b.peek16(g)                        # G.a_menu, its first field
+    # The bridge reads memory above $FFFF now (tools/altirra/
+    # altirra-sdl-bridge-memory-24bit.patch): first a fact -- a far string
+    # of gem4xe's own, in the accelerator's RAM -- then the command's
+    # buffer itself, which the screen search below used to stand in for.
+    try:
+        far = bytes(b.memdump(syms["gd_devnames"], 12))
+    except Exception as e:                      # an unpatched build refuses
+        check(False, f"the bridge does not read far memory ({e}); the emulator "
+                     f"needs tools/altirra/altirra-sdl-bridge-memory-24bit.patch")
+        return fails
+    check(far == b"CON:AUX:PRN:",
+          f"far memory read back {far!r} at gd_devnames ${syms['gd_devnames']:06X}, "
+          f"not the string src/sys/gemdos.c keeps there")
     item = obj(b, a_menu, CMDITEM)
     check(item["state"] & DISABLED == 0,
           "the item is greyed: Psystem says this DOS has no command processor")
@@ -198,9 +210,12 @@ def command(b, syms, shot):
     title = bytes(b.memdump(syms["gl_nbuf"], 41)).split(b"\0")[0].decode("latin-1")
     b.screenshot(shot)
     where = find_text(shot, BANNER)
+    text = bytes(b.memdump(buf + CMD_TEXT, n)) if n and buf else b""
+    first = next((ln for ln in text.split(b"\x9b") if ln), b"").decode("latin-1")
     print(f"  {COMMAND}: {n} bytes, {lines} line(s), window {wh} titled {title!r}, "
-          f"buffer ${buf:06X}; {BANNER!r} on the screen at {where}")
+          f"buffer ${buf:06X} starting {first!r}; {BANNER!r} on the screen at {where}")
     check(n > 0, f"{COMMAND} printed nothing the desktop caught")
+    check(BANNER.encode() in text, f"the buffer does not hold {BANNER!r}: {text[:40]!r}")
     check(lines >= 1, f"{n} bytes made {lines} lines")
     check(wh > 0, "no window opened on the output")
     # the bridge types the line in lower case and the dialog keeps what was
