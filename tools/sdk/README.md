@@ -139,6 +139,21 @@ The ST's 200 Hz system variable is not reachable here (no supervisor
 mode, no address an application may read), so a port that reads
 `_hz_200` directly changes that line to `Tgettimeofday`.
 
+**There is a DOS prompt to hand a line to.**  `Psystem(line, out, max)`
+-- gem4xe's own, GEMDOS `0x1F0` -- runs `line` through SpartaDOS X's
+command processor (`XCOMLI`) with GEM's screen left as it is, and every
+byte the command prints lands in `out`, `max` bytes of a buffer you
+`Malloc`'d, the DOS's `$9B` ending each line; it answers the bytes
+caught.  `DIR`, `COPY`, `DEL`, `MKDIR`, `CHKDSK` and the rest of the CAR:
+set run in the ten KB of bank `$00` the system is not using; a program
+that stays resident from there does not survive the call, and a command
+that asks a question has nobody to answer it -- the DOS's console is
+under the overlay.  `Psystem(0, 0, 0)` asks only whether there is a
+command processor: `EINVFN` on a DOS 2, a SpartaDOS 3, a SpartaDOS X
+before 4.4 or one that started GEM with `X.COM`, and a program should
+grey its item on that answer, as the desktop's **File -> DOS command...**
+does.
+
 **There is no C heap.** Your heap block is zero bytes, because memory
 above bank `$00` is `Malloc`'s to give out. `malloc` and `free` are
 refused at link time -- a call to either fails with an undefined symbol
