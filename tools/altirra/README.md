@@ -130,7 +130,7 @@ one-hunk context merge.  The copy here is the merged form -- what PR
 #90 carries, rebased onto the other two patches -- so that the three
 apply in the order below.
 
-## altirra-sdl-bridge-memory-24bit.patch -- memory above $FFFF (not yet upstream)
+## altirra-sdl-bridge-memory-24bit.patch -- memory above $FFFF (#92)
 
 `MEMDUMP`, `MEMLOAD`, `PEEK` and `PEEK16` took a 16-bit address
 (`ParseAddr16`, `DebugReadByte((uint16_t))`), so nothing a program keeps
@@ -152,12 +152,43 @@ bank but not `$FFFFFF`, and `addr` comes back as six hex digits.  Bank
 differently.  `PROTOCOL.md` says the same at the three entries.
 Proved by `test-sdx816` reading `gd_devnames` -- a far string of
 gem4xe's own in bank `$03` -- back as `CON:AUX:PRN:`, and the command's
-buffer as the banner the screen search had stood in for.  Not sent
-upstream yet; the author's `PEEK` note names a `PEEK_BANK` for raw
-extended memory "in Phase 5", which this is not -- this is the CPU's
+buffer as the banner the screen search had stood in for.  Offered as
+[#92](https://github.com/ilmenit/AltirraSDL/pull/92) on 2026-09-17; the
+author's `PEEK` note names a `PEEK_BANK` for raw extended memory "in
+Phase 5", which this is not and does not disturb -- this is the CPU's
 view, which is the one a debugger of a 65C816 program wants.
 
+## altirra-sdl-cpu-highbanks.patch -- --cpu and --highbanks (#93)
+
+The simulator has always had a CPU model and a high-bank count of its
+own (`ATSimulator::SetCPUMode`, `SetHighMemoryBanks` -- what the Windows
+UI offers under System > CPU and System > Memory), but the SDL front end
+had no switch for either.  So the only 65C816 a headless run could get
+was the one inside an accelerator device, and the only way to select one
+at all was to let a previous run persist it into `settings.ini` -- which
+is exactly how an emulator build with no such switch came to PASS the
+gate that tests it (`tools/a8test/launcher.py`, `private_config`).
+
+    --cpu 6502|65c02|65c816[,multiplier]
+    --highbanks na|0|1|3|15|63
+
+A PLAIN 65C816 with high banks is a different machine from an
+accelerator -- it is the shape of an Antonia -- and being able to ask
+for one is what lets `make test-m5p` prove gem4xe's far memory does not
+depend on the Rapidus.  The two do not compete: high banks are already
+overridden while a Rapidus is fitted
+(`GetHighMemoryBanksOverridden`), so with the device present the device
+wins.  Offered as
+[#93](https://github.com/ilmenit/AltirraSDL/pull/93) on 2026-09-17.
+
 ## Building
+
+Each of the three outstanding patches is a single commit on its own
+branch off upstream `main` (#91, #92, #93), and each was built and gated
+ALONE before it was offered -- a branch that only works in combination
+with the other two is not a reviewable change.  #92 was checked with
+`make test-m6` (code copied into banks `$01-$04` and read back through
+`MEMDUMP` at 24-bit addresses), #93 with `make test-m5p`.
 
 Upstream `main` already carries #88 and #90; only the host-path fix
 needs applying:
