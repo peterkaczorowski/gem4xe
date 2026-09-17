@@ -39,7 +39,7 @@ static WORD day, month, year;               /* year is the century's two */
 
 static char *field(WORD obj)
 {
-    TEDINFO *ted = (TEDINFO *)(uint16_t)tree[obj].ob_spec;
+    TEDINFO *ted = (TEDINFO *)(uint16_t)tree[obj].ob_spec.index;
 
     return (char *)(uint16_t)ted->te_ptext;
 }
@@ -49,7 +49,7 @@ static char *field(WORD obj)
  * order, this decides only what the numbers are. */
 static void fill(WORD obj, WORD a, WORD b, WORD c)
 {
-    TEDINFO *ted = (TEDINFO *)(uint16_t)tree[obj].ob_spec;
+    TEDINFO *ted = (TEDINFO *)(uint16_t)tree[obj].ob_spec.index;
     const char *t = (const char *)(uint16_t)ted->te_ptmplt;
     char *d = field(obj);
     WORD v[3], n = 0, i = 0;

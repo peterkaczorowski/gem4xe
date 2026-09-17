@@ -77,7 +77,7 @@ static char *put_far(char *d, const char FAR *s)
 
 static TEDINFO *ted_of(OBJECT *tree, WORD obj)
 {
-    return (TEDINFO *)(uint16_t)tree[obj].ob_spec;
+    return (TEDINFO *)(uint16_t)tree[obj].ob_spec.index;
 }
 
 static void inf_sset(OBJECT *tree, WORD obj, const char *str)
@@ -499,7 +499,7 @@ static void dlg_title(OBJECT *tree, WORD obj, WORD stnum)
     WORD len;
 
     rsrc_gaddr(R_STRING, stnum, (void **)&str);
-    tree[obj].ob_spec = (LONG)(uint32_t)(char FAR *)str;
+    tree[obj].ob_spec.index = (LONG)(uint32_t)(char FAR *)str;
     for (len = 0; str[len]; len++)
         ;
     len = (WORD)(len * G.g_wchar);

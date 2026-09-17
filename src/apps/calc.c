@@ -40,7 +40,7 @@ static WORD    fresh;                       /* the next digit starts a number */
  * TEDINFO points at it and objc_draw reads it where it stands. */
 static char *disp_text(void)
 {
-    TEDINFO *ted = (TEDINFO *)(uint16_t)tree[CDISP].ob_spec;
+    TEDINFO *ted = (TEDINFO *)(uint16_t)tree[CDISP].ob_spec.index;
 
     return (char *)(uint16_t)ted->te_ptext;
 }

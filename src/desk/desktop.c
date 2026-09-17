@@ -96,7 +96,7 @@ static void desk_build(void)
 
     obj_wfree(DROOT, 0, 0, (WORD)(G.g_desk.g_x + G.g_desk.g_w),
               (WORD)(G.g_desk.g_y + G.g_desk.g_h));
-    G.g_screen[DROOT].ob_spec = DESK_SPEC;
+    G.g_screen[DROOT].ob_spec.index = DESK_SPEC;
 
     rsrc_gaddr(R_STRING, STDISK, (void **)&disk);
     rsrc_gaddr(R_STRING, STTRASH, (void **)&trash);
@@ -160,7 +160,7 @@ static void pref_show(OBJECT *tree, LONG spec)
     for (i = 0; i < N_COL; i++)
         if (!(tree[PRCOL0 + i].ob_state & DISABLED))
             tree[PRCOL0 + i].ob_state = (UWORD)(i == col ? SELECTED : NORMAL);
-    tree[PRSAMPLE].ob_spec = spec;
+    tree[PRSAMPLE].ob_spec.index = spec;
 }
 
 /* The background chooser: EmuTOS's inf_backgrounds in gem4xe's one
@@ -184,8 +184,8 @@ static void do_prefs(void)
         return;
     }
     rsrc_gaddr(R_TREE, ADPREF, (void **)&tree);
-    LONG curdesk = G.g_screen[DROOT].ob_spec;
-    LONG curwin = G.g_screen[DROOT + 1].ob_spec;
+    LONG curdesk = G.g_screen[DROOT].ob_spec.index;
+    LONG curwin = G.g_screen[DROOT + 1].ob_spec.index;
     LONG spec;
     WORD ret, i, ncol, desk = TRUE;
 
@@ -232,9 +232,9 @@ static void do_prefs(void)
     rsrc_free();                    /* the nested one: ours is untouched */
 
     if (ret == PROK) {
-        G.g_screen[DROOT].ob_spec = curdesk;
+        G.g_screen[DROOT].ob_spec.index = curdesk;
         for (i = 1; i <= NUM_WNODES; i++)
-            G.g_screen[DROOT + i].ob_spec = curwin;
+            G.g_screen[DROOT + i].ob_spec.index = curwin;
         do_wredraw(DESKWH, &G.g_desk);
     }
 }
@@ -579,7 +579,7 @@ static WORD hndl_msg(void)
  * written over the resource's "0.00". */
 static void set_version(void)
 {
-    char *v = (char *)(uint16_t)G.a_info[DEVERSN].ob_spec;
+    char *v = (char *)(uint16_t)G.a_info[DEVERSN].ob_spec.index;
     UWORD g = (UWORD)global[0];
     static const char hex[] = "0123456789ABCDEF";
 

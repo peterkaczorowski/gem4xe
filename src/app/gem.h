@@ -113,13 +113,46 @@ typedef struct {
     WORD g_x, g_y, g_w, g_h;
 } GRECT;
 
-/* -- The AES object, as in aes.h: ob_spec is a LONG whose low word holds
- * a bank-$00 address for the types that point at something. */
+/* -- The AES object, as in aes.h.  ob_spec is four bytes whose low word
+ * holds a bank-$00 address for the types that point at something, and it
+ * is declared as the union gemlib declares, so that a program written
+ * against either reads it the same way: ob_spec.index for the raw bits,
+ * ob_spec.tedinfo and the rest for what an object of that type points at.
+ *
+ * The union is the same four bytes in both data models and needs no
+ * conversion in either, which is why it can be spelled this way at all.
+ * Measured, not assumed: --data-model=small makes a pointer two bytes, so
+ * a member lands on the low word, which is where the near address is;
+ * --data-model=large makes it four, little-endian with the bank in byte
+ * 2, so the whole long reads as a far pointer whose bank is the high
+ * word's zero -- bank $00, which is where these structures live.  An
+ * OBJECT is 24 bytes and ob_spec sits at offset 12 either way.
+ *
+ * gemlib's bit-field member (framesize, framecol, ...) is deliberately
+ * absent: its layout depends on the compiler's bit ordering, which is
+ * not settled here.  Take a box's colour word out of .index. */
+struct tedinfo;
+struct iconblk;
+struct bitblk;
+struct userblk;
+struct ciconblk;
+
+typedef union {
+    LONG index;                 /* the raw four bytes: a colour word, a
+                                 * character, or an address */
+    char            *free_string;
+    struct tedinfo  *tedinfo;
+    struct iconblk  *iconblk;
+    struct bitblk   *bitblk;
+    struct userblk  *userblk;
+    struct ciconblk *ciconblk;
+} OBSPEC;
+
 typedef struct {
-    WORD  ob_next, ob_head, ob_tail;
-    UWORD ob_type, ob_flags, ob_state;
-    LONG  ob_spec;
-    WORD  ob_x, ob_y, ob_width, ob_height;
+    WORD   ob_next, ob_head, ob_tail;
+    UWORD  ob_type, ob_flags, ob_state;
+    OBSPEC ob_spec;
+    WORD   ob_x, ob_y, ob_width, ob_height;
 } OBJECT;
 
 #define G_BOX      20
@@ -273,10 +306,21 @@ typedef struct {
 #define NOT_SANDD  14
 #define ALL_BLACK  15
 
+/* BITBLK, what a G_IMAGE's ob_spec points at: 14 bytes, the ST's.  A
+ * one-plane form drawn transparently in bi_color; bi_pdata is a LONG
+ * holding a bank-$00 address, and bi_wb is a width in BYTES. */
+typedef struct bitblk {
+    LONG bi_pdata;
+    WORD bi_wb;
+    WORD bi_hl;
+    WORD bi_x, bi_y;
+    WORD bi_color;
+} BITBLK;
+
 /* ICONBLK, what a G_ICON's ob_spec points at: 34 bytes, the ST's.  The
  * three pointers are LONGs holding bank-$00 addresses; the mask and the
  * data are 1-bit rows of ib_wicon/16 words, the text a C string. */
-typedef struct {
+typedef struct iconblk {
     LONG ib_pmask;
     LONG ib_pdata;
     LONG ib_ptext;
@@ -292,7 +336,7 @@ typedef struct {
  * the AES fills in at rsrc_load from the file's own text -- so a field
  * an application means to fill in later still carries a buffer of the
  * right length in the resource. */
-typedef struct {
+typedef struct tedinfo {
     LONG te_ptext;              /* what the field holds: the raw places */
     LONG te_ptmplt;             /* "Name: ________.___" */
     LONG te_pvalid;             /* one class character per place */
@@ -338,7 +382,7 @@ typedef struct {
     LONG next_res;
 } CICON;
 
-typedef struct {
+typedef struct ciconblk {
     ICONBLK monoblk;
     LONG    mainlist;           /* the CICON chain */
 } CICONBLK;
@@ -361,7 +405,7 @@ typedef struct {
     LONG pb_parm;
 } PARMBLK;
 
-typedef struct {
+typedef struct userblk {
     LONG ub_code;               /* WORD (*)(PARMBLK *) on the ST */
     LONG ub_parm;
 } USERBLK;

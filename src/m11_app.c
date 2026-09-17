@@ -94,8 +94,8 @@ int main(void)
     WORD pxy[8];
 
     ncalls = 0;
-    tree[1].ob_spec = (LONG)(uint32_t)(char FAR *)s_hello;
-    tree[2].ob_spec = (LONG)(uint32_t)(char FAR *)s_ok;
+    tree[1].ob_spec.index = (LONG)(uint32_t)(char FAR *)s_hello;
+    tree[2].ob_spec.index = (LONG)(uint32_t)(char FAR *)s_ok;
 
     appl_init();                                        record_aes();
     handle = graf_handle(&wchar, &hchar, &wbox, &hbox); record_aes();

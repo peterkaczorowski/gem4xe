@@ -164,7 +164,7 @@ static void cmd_paint(const GRECT *work, const GRECT *pc)
     tree[ROOT].ob_type = G_BOX;
     tree[ROOT].ob_flags = NONE;
     tree[ROOT].ob_state = NORMAL;
-    tree[ROOT].ob_spec = WINDOW_SPEC;
+    tree[ROOT].ob_spec.index = WINDOW_SPEC;
     tree[ROOT].ob_x = work->g_x;
     tree[ROOT].ob_y = work->g_y;
     tree[ROOT].ob_width = work->g_w;
@@ -175,7 +175,7 @@ static void cmd_paint(const GRECT *work, const GRECT *pc)
     tree[CMD_LINE].ob_type = G_STRING;
     tree[CMD_LINE].ob_flags = LASTOB;
     tree[CMD_LINE].ob_state = NORMAL;
-    tree[CMD_LINE].ob_spec = (LONG)(uint16_t)line;
+    tree[CMD_LINE].ob_spec.index = (LONG)(uint16_t)line;
     tree[CMD_LINE].ob_x = 1;
     tree[CMD_LINE].ob_y = 0;
     tree[CMD_LINE].ob_width = (WORD)(G.g_wchar * CMD_COLS);

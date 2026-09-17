@@ -53,6 +53,84 @@ def g4a_header(path):
                 far_size=far_size, far_bank=d[14], far_banks=d[15])
 
 
+class TestTheObjectLayoutIsTheSTs(unittest.TestCase):
+    """An OBJECT is 24 bytes with ob_spec at offset 12, in BOTH data
+    models -- which is what lets ob_spec be declared as gemlib's union
+    rather than a bare LONG.
+
+    The union is only safe because of an accident worth pinning down: a
+    pointer is two bytes under --data-model=small and lands on the low
+    word, which is where a bank-$00 address is kept, and four bytes under
+    --data-model=large, little-endian with the bank in byte 2, so the
+    whole four bytes read as a far pointer whose bank is the high word's
+    zero.  Either way a member sees the address the AES put there.
+
+    Checked by compiling, because a size that has gone wrong will not
+    announce itself at run time: it moves every field after ob_spec and
+    the AES and the application then disagree about a tree neither can
+    see the other reading.  Three sizes pin the offset between them --
+    the six words before ob_spec are 12 bytes, ob_spec is 4, the whole
+    is 24 -- which leaves no room for padding anywhere.
+    """
+
+    CASES = (("the six words before ob_spec are 12 bytes",
+              "sizeof(struct { WORD a, b, c; UWORD d, e, f; }) == 12"),
+             ("ob_spec is four bytes", "sizeof(OBSPEC) == 4"),
+             ("an OBJECT is 24 bytes", "sizeof(OBJECT) == 24"),
+             ("a TEDINFO is the ST's 28", "sizeof(TEDINFO) == 28"),
+             # ICONBLK and BITBLK are the two the compiler PADS: they begin
+             # with LONGs and end on an odd number of WORDs, so 34 and 14 in
+             # the file become 36 and 16 here.  What matters to a program
+             # reading a loaded resource is that the struct is not SHORTER
+             # than the record, and that it never be used as a file stride
+             # (tests/host/test_rsrc.py).
+             ("an ICONBLK covers the file's 34", "sizeof(ICONBLK) >= 34"),
+             ("a BITBLK covers the file's 14", "sizeof(BITBLK) >= 14"))
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cc = os.path.join(CALYPSI, "bin", "cc65816")
+        if not os.path.exists(cls.cc):
+            raise unittest.SkipTest("Calypsi not installed")
+        cls.dir = tempfile.mkdtemp(prefix="gem4xe-sdk-")
+        cls.kit = os.path.join(cls.dir, "gem4xe-sdk")
+        mksdk.build(cls.kit)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.dir, ignore_errors=True)
+
+    def check(self, model, expr, what):
+        """A negative-size array is the assertion: it compiles when the
+        expression holds and cannot when it does not."""
+        src = os.path.join(self.dir, "layout.c")
+        with open(src, "w") as f:
+            f.write('#include "gem.h"\n'
+                    f"char probe[({expr}) ? 1 : -1];\n")
+        r = subprocess.run(
+            [self.cc, "--code-model=large", f"--data-model={model}", "-O2",
+             "-I", os.path.join(self.kit, "include"),
+             "-o", os.path.join(self.dir, "layout.o"), src],
+            capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0,
+                         f"--data-model={model}: {what} is not true "
+                         f"({expr})\n{r.stdout}{r.stderr}")
+
+    def test_the_layout_holds_in_the_small_data_model(self):
+        for what, expr in self.CASES:
+            self.check("small", expr, what)
+
+    def test_the_layout_holds_in_the_large_data_model(self):
+        for what, expr in self.CASES:
+            self.check("large", expr, what)
+
+    def test_a_pointer_is_the_size_the_union_argument_rests_on(self):
+        self.check("small", "sizeof(char *) == 2",
+                   "a small-model pointer is the low word")
+        self.check("large", "sizeof(char *) == 4",
+                   "a large-model pointer is the whole four bytes")
+
+
 class TestManifest(unittest.TestCase):
     """These read the sources; no toolchain needed."""
 
