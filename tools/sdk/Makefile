@@ -55,7 +55,8 @@ LDLIB  = clib-lc-sd.a
 # order given.  Code goes in `farcode`, and a function returns with rtl:
 # every call into it is a jsl.
 ASM_OBJS = $(patsubst %.s,build/%.o,$(notdir $(ASM)))
-OBJS = build/crt_gemapp.o build/gemabi.o build/gemlib.o build/gemstat.o build/clib.o \
+OBJS = build/crt_gemapp.o build/gemabi.o build/gemlib.o build/gemstat.o \
+       build/gemstub.o build/clib.o \
        build/$(NAME).o $(ASM_OBJS)
 LDOPT = lib/gemapp.scm $(OBJS) $(LDLIB) --rtattr exit=simplified \
         --cstartup gemapp --stack-size $(STACK)
@@ -79,6 +80,11 @@ build/%.o: lib/%.c include/gem.h | build
 # its own section: 3-13 bytes more per binding you CALL, nothing for the
 # rest.  Keep this flag if you build the bindings with your own rules.
 build/gemlib.o: lib/gemlib.c include/gem.h | build
+	$(CC) $(CFLAGS) --no-interprocedural-cross-jump -o $@ $<
+
+# gemstub.c is nine functions that end the same way, which is the same
+# shape -- without the flag, printf links the six stubs it never calls.
+build/gemstub.o: lib/gemstub.c include/gem.h | build
 	$(CC) $(CFLAGS) --no-interprocedural-cross-jump -o $@ $<
 
 build/$(NAME).o: $(APP) include/gem.h | build

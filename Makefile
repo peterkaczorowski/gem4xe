@@ -448,7 +448,7 @@ build/scrap.o: src/aes/scrap.c src/aes/aes.h src/sys/farmem.h
 # GPLv2 tree (docs/licence.md).  It is part of the LIBRARY and not of a
 # program, so the kit ships it and anybody's application gets it.
 G4A_LIB = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o \
-          build/app/gemstat.o build/app/clib.o
+          build/app/gemstat.o build/app/gemstub.o build/app/clib.o
 
 # ...and the same three for an application compiled --data-model=large.
 # The linker refuses to mix runtime models, so a large-data program needs
@@ -456,7 +456,7 @@ G4A_LIB = build/app/crt_gemapp.o build/app/gemabi.o build/app/gemlib.o \
 # than clib-lc-sd.a.  The SOURCES are the same files: only the model
 # differs (docs/gacs.md).
 G4A_LIB_LD = build/appld/crt_gemapp.o build/appld/gemabi.o build/appld/gemlib.o \
-             build/appld/gemstat.o build/appld/clib.o
+             build/appld/gemstat.o build/appld/gemstub.o build/appld/clib.o
 LIB_LD     = clib-lc-ld.a
 
 build/app/clib.o: src/sys/clib.c
@@ -483,6 +483,10 @@ build/appld/%.o: src/app/%.c src/app/gem.h
 # section and costs a program 3-13 bytes more per binding it CALLS;
 # tools/ccbug/objchain.py then finds nothing that brings clock in.
 build/appld/gemlib.o: src/app/gemlib.c src/app/gem.h
+	@mkdir -p build/appld
+	$(CC) --code-model=large --data-model=large -O2 --no-interprocedural-cross-jump \
+	    -I src -I src/app -o $@ $<
+build/appld/gemstub.o: src/app/gemstub.c src/app/gem.h
 	@mkdir -p build/appld
 	$(CC) --code-model=large --data-model=large -O2 --no-interprocedural-cross-jump \
 	    -I src -I src/app -o $@ $<
@@ -524,6 +528,12 @@ build/app/%.o: src/app/%.c src/app/gem.h
 # gemlib.c the flag in every model, rebuilds the gate application byte
 # for byte (tests/host/test_sdk.py).
 build/app/gemlib.o: src/app/gemlib.c src/app/gem.h
+	@mkdir -p build/app
+	$(CC) $(CFLAGS) --no-interprocedural-cross-jump -I src/app -o $@ $<
+# gemstub.c is nine functions that end the same way (`r < 0 ? -errno : 0`),
+# which is the shape the compiler shares a tail across -- and a program
+# that calls printf would then link the six it does not use.
+build/app/gemstub.o: src/app/gemstub.c src/app/gem.h
 	@mkdir -p build/app
 	$(CC) $(CFLAGS) --no-interprocedural-cross-jump -I src/app -o $@ $<
 

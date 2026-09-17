@@ -20,6 +20,12 @@ import unittest
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 PORTAB = os.path.join(ROOT, "src", "portab.h")
+# ...and one other file is the compiler's seam by its whole purpose:
+# src/app/gemstub.c answers the routines Calypsi's C library asks the
+# board for, by the names that library uses.  A second toolchain does not
+# want these renamed, it wants its own file -- so naming the vendor's
+# header here is the point rather than a leak.
+DIALECT_FILES = (PORTAB, os.path.join(ROOT, "src", "app", "gemstub.c"))
 
 # The dialect, as words.  __attribute__ is in the list as a whole: the
 # tree wraps every attribute it uses, so none should be visible.
@@ -90,7 +96,7 @@ class TestPortab(unittest.TestCase):
         """No C source or header says the compiler's words itself."""
         bad = []
         for path in sorted(SOURCES):
-            if os.path.samefile(path, PORTAB):
+            if any(os.path.samefile(path, x) for x in DIALECT_FILES):
                 continue
             with open(path) as f:
                 bad += offenders(path, f.read())

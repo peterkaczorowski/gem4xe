@@ -36,6 +36,7 @@ MANIFEST = [
     ("include/mint/cookie.h", "src/app/mint/cookie.h"),  # a jar that answers "none"
     ("lib/gemlib.c",        "src/app/gemlib.c"),
     ("lib/gemstat.c",       "src/app/gemstat.c"),       # stat() over Fsfirst
+    ("lib/gemstub.c",       "src/app/gemstub.c"),       # the C library's board stubs
     ("lib/clib.c",          "src/sys/clib.c"),
     ("lib/gemabi.s",        "src/app/gemabi.s"),
     ("lib/crt_gemapp.s",    "src/app/crt_gemapp.s"),

@@ -22,6 +22,10 @@ the packer.
                         the rest -- in one place, for a second compiler
     lib/gemlib.c        the bindings: they fill a parameter block and
                         make the call
+    lib/gemstub.c       the routines the C library asks the BOARD for --
+                        open, read, write and the rest -- over GEMDOS,
+                        which is what makes printf work
+    lib/gemstat.c       stat(), one Fsfirst with the caller's DTA put back
     lib/gemabi.s        the three call gates -- COP #$56 (VDI),
                         COP #$41 (AES), COP #$44 (GEMDOS); a program
                         built with an older kit's ($73, $C8, $01) is
@@ -129,6 +133,24 @@ time:
   stamp for all three times, `ENOENT` for a path that names nothing),
   and `Getcookie()` answers `C_NOTFOUND` for every cookie, there being
   no jar -- the answer a well-written program defaults on.
+- **`printf` works, and a file descriptor is a GEMDOS handle.**  The C
+  library reaches the platform through nine routines it expects the board
+  to provide, and `lib/gemstub.c` is all nine, over GEMDOS.  Descriptors
+  pass straight through with no table: stdout is handle 1 and reaches the
+  VT-52 console on GEM's screen, `Fforce` redirects it into a file as it
+  does on an ST, and `open` hands back the GEMDOS handle itself.  Without
+  that file a program that prints does not link, and what the linker says
+  -- *missing stub routine '_Stub_write' needs to be provided for your
+  hardware/board-support* -- names the board rather than the program, so
+  it is worth recognising.  Two things are not a Unix system call and
+  cannot be: `O_APPEND` seeks to the end once, at open, GEMDOS having no
+  append mode; and the errors are GEMDOS's, mapped to the nearest
+  `errno`, so a missing file and a missing path both arrive as `ENOENT`.
+- **Stdout is unbuffered, so a line costs a call per character.**  Ten
+  bytes are ten trips through the call gate and into GEMDOS, which is
+  fine for a diagnostic and slow for a report.  `setvbuf` with a buffer
+  of your own is the fix; there is no heap, so give it the array rather
+  than asking stdio to allocate one.
 - **The compiler says `__CALYPSI__`, not `__GNUC__`.**  A header that
   branches on `__GNUC__` takes its other path here; and a symbol such a
   header defines only under `__GNUC__` or `__PUREC__` (cflib's `_WORD`)
