@@ -1216,6 +1216,14 @@ gacs-check:
 check-cc:
 	python3 tools/ccbug/check.py --calypsi $(CALYPSI)
 
+# B17's scan: every source compiled alone at -O2, looking for a call the
+# compiler reaches with an 8-bit accumulator.  Not part of `make test`,
+# because it compiles the whole tree a second time; run it after a
+# toolchain change, or when something dies inside a callee that is not
+# at fault.
+mscan:
+	python3 tools/ccbug/mscan.py --tree
+
 # The host tests want the gate application built, because the kit's own
 # test rebuilds it out of the kit and compares the bytes: what test-m11
 # proves about that binary is what the kit inherits.
@@ -1611,4 +1619,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-boot test-install test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc mscan test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-boot test-install test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean

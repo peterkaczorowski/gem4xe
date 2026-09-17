@@ -1,6 +1,7 @@
 # tools/ccbug — the cc65816 bugs gem4xe works around
 
-Sixteen defects in Calypsi cc65816, found against **5.18** — twelve in
+Seventeen defects in Calypsi cc65816, sixteen found against **5.18**
+here and one (B17) reported from another project — twelve in
 code generation, two crashes, one in the front end's arithmetic and one
 in the run-time library's division — each reproduced from a shape
 lifted out of gem4xe or out of the vendor's own C library, each with the
@@ -710,6 +711,55 @@ eight polls in `bootinfo.c`. The sources now read the byte into a word
 through a helper and compare the word — `while (vcount() < line) ;`, with
 `vcount()` a real call (`jsl`) that costs nothing at 20 MHz — and that
 shape runs in `bugs.c` as `r_b16_fix`. Rule 16.
+
+## B17 — a call entered with an 8-bit accumulator
+
+    st = plat_measure_text(f, bytes, len, width_out);   /* linebreak.c, RetroWP */
+
+At -O2 the caller reaches the `jsl` with M set.  The callee is compiled
+for a 16-bit accumulator, so its first `##` immediate decodes short --
+the operand's high byte is executed as an opcode -- and the program dies
+inside a function that is not at fault.  RetroWP met it as a BRK with
+`P=$21` at `plat_measure_text +0x33`, and keeps `-O1` on that one file;
+at -O2 the image is 636 bytes smaller and does not survive measuring a
+word.
+
+The contract is not in doubt.  The vendor's own `assembly-interface.html`
+says: *"The 65816 is used in native mode with 16 bit registers.  In some
+situations the runtime needs to switch to 8 bit register mode ... This is
+done automatically and the compiler will then switch back to 16 bits
+mode."*  So a `jsl` reached narrow is a violation whatever the callee
+does about it.
+
+**NOT REPRODUCED IN THIS TREE, and this entry says so rather than
+implying otherwise.**  Every other entry here was met in gem4xe and
+minimised; this one was met in another project, measured there twice --
+on the target and in the listing, under 5.18 and again under 5.18.2 --
+and is recorded on that evidence.  `tools/ccbug/mscan.py --tree` scans
+every source gem4xe builds and finds **zero**, so nothing here is waiting
+to die of it.  A minimal reproducer has defeated both projects: the
+obvious shape, 8-bit work in front of a call to an `extern`, compiles
+correctly, and RetroWP's own small case compiled clean at -O2 -- which,
+after B1, is exactly what a shape folded away by the inliner looks like.
+Whoever tries next should try with `--no-inline` before believing a
+negative.
+
+**5.18.2 does NOT fix it**, measured by RetroWP against the 0.4 kit:
+the BRK is in the same place and the listing reaches the `jsl` narrow
+under both compilers.  Five shapes went in that release; this is not one
+of them, and it must not be marked fixed on their account.
+
+`mscan.py` is the scan, and it is deliberately hard to make lie.  A
+`##` immediate proves the accumulator is wide, so seeing one clears the
+state; any call makes the state unknown, because the callee's exit width
+is its own business; any label that is not a function entry makes it
+unknown, because control can arrive there from a branch this scan does
+not follow; and a call to a `?Lnnnn` fragment is never reported, because
+that is the compiler talking to itself.  The first version of it had none
+of that and reported 61 calls, every one of them safe -- the compiler
+calls an outlined fragment while narrow and the fragment widens before it
+returns.  Rule 17: do not spin a scan's output into a bug without reading
+one hit all the way through.
 
 ## Reading the map — not a bug, and it gave the wrong answer twice
 
