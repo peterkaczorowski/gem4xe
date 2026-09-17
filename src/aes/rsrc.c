@@ -101,6 +101,43 @@ static WORD fix_long(const RSHDR *h, uint32_t *p)
     return 1;
 }
 
+/* The sizes these records have IN THE FILE, which are NOT sizeof().  The
+ * compiler aligns a 32-bit field to four bytes, so an ICONBLK measures 36
+ * and a BITBLK 16 where the file gives them 34 and 14 -- the two that
+ * begin with LONGs and end on an odd number of WORDs.  OBJECT and TEDINFO
+ * happen to come out at the file's 24 and 28, which is exactly why using
+ * sizeof for a stride looked right for years: it is right for the two
+ * tables every resource has and wrong for the two an ICON resource has.
+ *
+ * The FIELD offsets are the file's either way, the padding being at the
+ * end, so the structs stay valid overlays on the file's bytes -- only the
+ * step from one record to the next has to come from here.  tools/rsc.py
+ * names the same four numbers and tests/host/test_rsrc.py holds the two
+ * lists against each other, against the ST's format, and against the
+ * tables of the resources this tree builds.
+ *
+ * NOT used by rs_cicons below, deliberately.  That walk steps the colour
+ * extension by sizeof(ICONBLK) and hands the object library a CICON_NEAR
+ * whose own layout is sizeof(ICONBLK)-based, so the two are coupled and
+ * changing one alone breaks the gate (proved: stepping 38 with a 34-byte
+ * read fails test-m12, and the sizeof pair passes).  The extension's
+ * header IS 38 bytes in the file -- the count reads 1 at +34 and garbage
+ * at +36 -- so that walk and rsc.py's CICON_HDR/CICON_NEAR disagree with
+ * this file somewhere that the gate cannot see.  It wants an hour and a
+ * fixture with TWO colour icons, which is the case that would show it. */
+#define RSZ_OBJECT   24
+#define RSZ_TEDINFO  28
+#define RSZ_ICONBLK  34
+#define RSZ_BITBLK   14
+
+/* A record the compiler makes SMALLER than the file's would mean reading
+ * a field out of the next one, which no test would show as anything but
+ * wrong pixels. */
+typedef char rsz_object_fits[(sizeof(OBJECT)  >= RSZ_OBJECT)  ? 1 : -1];
+typedef char rsz_ted_fits[(sizeof(TEDINFO)    >= RSZ_TEDINFO) ? 1 : -1];
+typedef char rsz_iconblk_fits[(sizeof(ICONBLK) >= RSZ_ICONBLK) ? 1 : -1];
+typedef char rsz_bitblk_fits[(sizeof(BITBLK)  >= RSZ_BITBLK)  ? 1 : -1];
+
 static void *sub_of(const RSHDR *h, UWORD index, UWORD offset, UWORD size)
 {
     return (uint8_t *)h + offset + size * index;
@@ -116,16 +153,16 @@ static void *addr_of(const RSHDR *h, UWORD rtype, UWORD rindex)
     case R_TREE:
         return (void *)(uint16_t)*(uint32_t *)sub_of(h, rindex, h->rsh_trindex, 4);
     case R_OBJECT:
-        offset = h->rsh_object;  size = sizeof(OBJECT);  break;
+        offset = h->rsh_object;  size = RSZ_OBJECT;  break;
     case R_TEDINFO:
     case R_TEPTEXT:
-        offset = h->rsh_tedinfo; size = sizeof(TEDINFO); break;
+        offset = h->rsh_tedinfo; size = RSZ_TEDINFO; break;
     case R_ICONBLK:
     case R_IBPMASK:
-        offset = h->rsh_iconblk; size = sizeof(ICONBLK); break;
+        offset = h->rsh_iconblk; size = RSZ_ICONBLK; break;
     case R_BITBLK:
     case R_BIPDATA:
-        offset = h->rsh_bitblk;  size = sizeof(BITBLK);  break;
+        offset = h->rsh_bitblk;  size = RSZ_BITBLK;  break;
     case R_OBSPEC:
         return &((OBJECT *)addr_of(h, R_OBJECT, rindex))->ob_spec;
     case R_TEPTMPLT:
@@ -166,10 +203,10 @@ void rs_fixit(RSHDR *h)
     WORD i;
 
     swap_words(h, sizeof *h / 2);
-    swap_words(sub_of(h, 0, h->rsh_object, 0),  (UWORD)(h->rsh_nobs * (sizeof(OBJECT) / 2)));
-    swap_words(sub_of(h, 0, h->rsh_tedinfo, 0), (UWORD)(h->rsh_nted * (sizeof(TEDINFO) / 2)));
-    swap_words(sub_of(h, 0, h->rsh_iconblk, 0), (UWORD)(h->rsh_nib * (sizeof(ICONBLK) / 2)));
-    swap_words(sub_of(h, 0, h->rsh_bitblk, 0),  (UWORD)(h->rsh_nbb * (sizeof(BITBLK) / 2)));
+    swap_words(sub_of(h, 0, h->rsh_object, 0),  (UWORD)(h->rsh_nobs * (RSZ_OBJECT / 2)));
+    swap_words(sub_of(h, 0, h->rsh_tedinfo, 0), (UWORD)(h->rsh_nted * (RSZ_TEDINFO / 2)));
+    swap_words(sub_of(h, 0, h->rsh_iconblk, 0), (UWORD)(h->rsh_nib * (RSZ_ICONBLK / 2)));
+    swap_words(sub_of(h, 0, h->rsh_bitblk, 0),  (UWORD)(h->rsh_nbb * (RSZ_BITBLK / 2)));
     swap_words(sub_of(h, 0, h->rsh_frstr, 0),   (UWORD)(h->rsh_nstring * 2));
     swap_words(sub_of(h, 0, h->rsh_frimg, 0),   (UWORD)(h->rsh_nimages * 2));
     swap_words(sub_of(h, 0, h->rsh_trindex, 0), (UWORD)(h->rsh_ntree * 2));
@@ -318,8 +355,8 @@ static void rs_imfar(uint8_t *mem, uint16_t im_off, uint16_t size)
         /* the header as eighteen words: (offset word, count word, size)
          * for each table, and the strings' offset with no count */
         static const uint8_t lay[8][3] = {
-            {1, 10, sizeof(OBJECT)}, {2, 12, sizeof(TEDINFO)},
-            {3, 13, sizeof(ICONBLK)}, {4, 14, sizeof(BITBLK)},
+            {1, 10, RSZ_OBJECT}, {2, 12, RSZ_TEDINFO},
+            {3, 13, RSZ_ICONBLK}, {4, 14, RSZ_BITBLK},
             {5, 15, 4}, {8, 16, 4}, {9, 11, 4}, {6, 10, 0}
         };
         const UWORD *hw = (const UWORD *)rs_hdr;
