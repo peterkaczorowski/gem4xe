@@ -7,7 +7,7 @@ in principle Antonia), and **Ultimate 1MB**.
 The target surface is **640 × 240, 16 colours** — VBXE's HR overlay, 4bpp chunky.
 That is a better GEM surface than the Atari ST's medium resolution.
 
-Current version **0.3** — `VERSION` at the top of the tree is where it
+Current version **0.4** — `VERSION` at the top of the tree is where it
 lives; `make dist` stamps a build with it and the commit, and `make
 release` is the same for the public, without the DOS 2 floppy (its DOS is
 not gem4xe's to give away) and named by the version alone.
