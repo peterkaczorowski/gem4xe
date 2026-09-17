@@ -173,6 +173,19 @@ def main():
                             os.path.join(ROOT, "tools", "ccbug", f"{tag}.c")],
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         crashes[note] = r.returncode != 0 and "internal error" in r.stdout
+    # B17's scan, checked against the shape it exists to find.  A scan
+    # that reports nothing is worthless unless something proves it CAN
+    # report: mscan_b17.s is RetroWP's failing join, and it must give
+    # exactly one hit.
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location(
+        "mscan", os.path.join(ROOT, "tools", "ccbug", "mscan.py"))
+    _mscan = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mscan)
+    _fix = os.path.join(ROOT, "tools", "ccbug", "mscan_b17.s")
+    crashes["B17 the scan finds the join it exists to find"] = (
+        len(_mscan.scan(_fix)) == 1)
+
     # A refusal the compiler should not make: the file compiles the day the
     # bug is fixed, so the bug is "it did not compile".
     for tag, note in REFUSALS.items():

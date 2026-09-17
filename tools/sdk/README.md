@@ -155,6 +155,21 @@ time:
   branches on `__GNUC__` takes its other path here; and a symbol such a
   header defines only under `__GNUC__` or `__PUREC__` (cflib's `_WORD`)
   must come as `-D`, Calypsi having no `-include`.
+- **A stub should answer TRUTHFULLY, not merely link.**  This is the one
+  that has cost ported code the most here, and every instance looks
+  harmless in isolation.  A `Getcookie` that answered "found" with an
+  empty jar would have sent a program off to read the ST's cookie-jar
+  pointer at `$5A0`, which on this machine is whatever happens to live
+  there; answering `C_NOTFOUND` kept it away.  An `appl_xgetinfo` that
+  returns 0 sends a library down a fallback that picks a font height of
+  13 on a machine whose cell is 8.  A `Dpathconf` that claims a case
+  distinction this filesystem cannot honour has the caller comparing
+  filenames on a promise nothing keeps.  A `vq_vgdos` answering anything
+  but -2 loads fonts that are not there.  Four shapes, one mistake: the
+  temptation when porting is to stub the smallest thing that links, and
+  that is exactly what turns a missing answer into a plausible wrong one.
+  Prefer the answer that is true about this machine, even when it is
+  "no".
 - **Files with bytes above 127** -- Atari sources often are -- defeat a
   `grep` without `-a`, including a grep for exactly those bytes.
 

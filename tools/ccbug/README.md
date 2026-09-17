@@ -749,7 +749,27 @@ the BRK is in the same place and the listing reaches the `jsl` narrow
 under both compilers.  Five shapes went in that release; this is not one
 of them, and it must not be marked fixed on their account.
 
-`mscan.py` is the scan, and it is deliberately hard to make lie.  A
+`mscan.py` is the scan.  It is a forward dataflow over the listing, and
+the part that matters is the JOIN: a label's state is the meet of its
+predecessors, so a branch target whose every path agrees is KNOWN.  That
+is not a refinement, it is the whole thing -- RetroWP's failing call sits
+behind exactly such a join (the fall-through arrives narrow, and the
+other path widens for an immediate and narrows again at once), and a scan
+that gives up at every label misses it and reports a clean tree.  Which
+this one did, twice: first because it had no join at all, and then
+because it spelled a label `` `?L340` `` and a branch target `?L340`, so
+no edge was ever recorded and the join it had just grown never ran.  Both
+times the answer was zero and both times zero meant nothing.
+`tools/ccbug/mscan_b17.s` is that shape, and `check-cc` requires it to
+report exactly one call -- because a scan that reports nothing is
+worthless until something proves it CAN report.
+
+**A zero from it is not a clean bill.**  It still declines to guess when
+a join's paths disagree or when any predecessor is unknown, so gem4xe's
+zero means "nothing found by a scan that admits what it cannot follow",
+not "nothing there".
+
+It is otherwise deliberately hard to make lie.  A
 `##` immediate proves the accumulator is wide, so seeing one clears the
 state; any call makes the state unknown, because the callee's exit width
 is its own business; any label that is not a function entry makes it

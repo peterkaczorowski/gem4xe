@@ -45,44 +45,118 @@ CALYPSI = os.environ.get("CALYPSI",
 LABEL = re.compile(r"^([A-Za-z_`?][\w`?.$]*):")
 SEP = re.compile(r"^\s+sep\s+#(0x20|32)\b", re.I)
 REP = re.compile(r"^\s+rep\s+#(0x20|32)\b", re.I)
-JSL = re.compile(r"^\s+(jsl|jsr)\s+(.*)$", re.I)
+CALL = re.compile(r"^\s+(jsl|jsr)\s+(.*)$", re.I)
 WIDE_IMM = re.compile(r"##")        # only assembles when A is 16-bit
 FUNC = re.compile(r"^([A-Za-z_][\w.$]*):")
+BRANCH = re.compile(r"^\s+(bra|beq|bne|bcc|bcs|bmi|bpl|bvc|bvs|brl|jmp)\s+"
+                    r"`?([\w`?.$]+)`?", re.I)
+ALWAYS = ("bra", "brl", "jmp")
 
 NARROW, WIDE, UNKNOWN = "narrow", "wide", "unknown"
 
 
-def scan(path):
-    """[(function, line number, target)] for every call reached narrow."""
-    hits, func, state = [], "?", UNKNOWN
+def meet(a, b):
+    """Two paths into one label.  Agreement is knowledge; anything else
+    is not, and this scan never reports what it does not know."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if a == b else UNKNOWN
+
+
+def parse(path):
+    """The listing as [(kind, text, label_or_target, line_no)]."""
+    out = []
     with open(path, errors="replace") as f:
         for n, line in enumerate(f, 1):
             line = line.rstrip("\n")
-            if line.lstrip().startswith(";"):
+            if line.lstrip().startswith(";") or not line.strip():
                 continue
             m = LABEL.match(line)
             if m:
-                if FUNC.match(line) and not m.group(1).startswith("`"):
-                    func, state = m.group(1), WIDE     # a function entry
-                else:
-                    state = UNKNOWN                    # a branch target
-                continue
+                out.append(("label", line, m.group(1).strip("`"), n))
+                rest = line[m.end():]
+                if not rest.strip():
+                    continue
+                line = rest          # a label with an instruction beside it
             if SEP.match(line):
-                state = NARROW
-                continue
-            if REP.match(line):
-                state = WIDE
-                continue
-            m = JSL.match(line)
-            if m:
-                tgt = m.group(2).strip()
-                named = not re.search(r"`\?L", tgt)
-                if state == NARROW and named:
-                    hits.append((func, n, tgt))
-                state = UNKNOWN        # the callee's exit width is its own
-                continue
-            if WIDE_IMM.search(line):
-                state = WIDE
+                out.append(("sep", line, None, n))
+            elif REP.match(line):
+                out.append(("rep", line, None, n))
+            elif CALL.match(line):
+                out.append(("call", line, CALL.match(line).group(2).strip(), n))
+            else:
+                b = BRANCH.match(line)
+                if b:
+                    out.append(("branch", line, (b.group(1).lower(),
+                                                 b.group(2).strip("`")), n))
+                elif WIDE_IMM.search(line):
+                    out.append(("wide", line, None, n))
+                elif re.match(r"^\s+rtl\b|^\s+rts\b", line, re.I):
+                    out.append(("ret", line, None, n))
+    return out
+
+
+def scan(path):
+    """[(function, line, target)] for every call to a NAMED function that
+    every path reaches with an 8-bit accumulator.
+
+    A forward dataflow over the listing's labels, iterated to a fixed
+    point.  A label's state is the MEET of its predecessors -- the
+    fall-through and every branch that names it -- so a join whose paths
+    all agree is known, which is the case a single pass has to give up on
+    (RetroWP's linebreak.c reaches its failing call through exactly such
+    a join).  Disagreement, or any unknown predecessor, stays unknown and
+    is never reported.
+    """
+    items = parse(path)
+    # entry state of each label
+    state = {}
+    for kind, _, lab, _ in items:
+        if kind == "label":
+            state[lab] = None
+    for kind, _, lab, _ in items:
+        if kind == "label" and FUNC.match(lab + ":") and not lab.startswith("?"):
+            state[lab] = WIDE          # a function is entered 16-bit
+
+    hits = []
+    for _ in range(12):                # small listings converge at once
+        changed = False
+        cur, func = UNKNOWN, "?"
+        hits = []
+        for kind, _, arg, n in items:
+            if kind == "label":
+                if FUNC.match(arg + ":") and not arg.startswith("?"):
+                    func = arg
+                    cur = WIDE
+                else:
+                    new = meet(state.get(arg), cur if cur else None)
+                    if new != state.get(arg):
+                        state[arg] = new
+                        changed = True
+                    cur = state.get(arg) or UNKNOWN
+            elif kind == "sep":
+                cur = NARROW
+            elif kind == "rep" or kind == "wide":
+                cur = WIDE
+            elif kind == "call":
+                if cur == NARROW and not re.search(r"`\?L", arg):
+                    hits.append((func, n, arg))
+                cur = UNKNOWN          # the callee's exit width is its own
+            elif kind == "branch":
+                op, target = arg
+                if target in state:
+                    new = meet(state.get(target), cur)
+                    if new != state.get(target):
+                        state[target] = new
+                        changed = True
+                if op in ALWAYS:
+                    cur = UNKNOWN      # nothing falls through
+            elif kind == "ret":
+                cur = UNKNOWN
+        if not changed:
+            break
     return hits
 
 
