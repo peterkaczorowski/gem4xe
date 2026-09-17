@@ -118,7 +118,12 @@ time:
 - **`evnt_multi` has the ST's shape**: twenty-three arguments, the two
   mouse rectangles flat.  `evnt_multi_moblk` is the same call with the
   rectangles as `MOBLK`s, for a program written here; the AES sees no
-  difference.
+  difference.  **One argument still differs from mintlib's binding**, and
+  it is the timer: the AES takes it as two words, low then high, which is
+  what this kit declares, where mintlib takes one `unsigned long`.  So a
+  ported ST event loop is one argument away from identical rather than a
+  different shape -- which is close enough that an `#ifdef` around the
+  call wants a comment saying so.
 - **`<sys/stat.h>` and `<mint/cookie.h>` are the kit's**, Calypsi's C
   library having neither: `stat()` is one `Fsfirst` (kind, size, one
   stamp for all three times, `ENOENT` for a path that names nothing),
