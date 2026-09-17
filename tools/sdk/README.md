@@ -41,7 +41,12 @@ and parks it inside one function's section, so a `--data-model=large`
 program that calls `Fread` links `clock`, `Tgettimeofday` and `Psystem`
 it never calls -- 352 bytes, and more with every binding added.  With it
 each binding is its own section and costs you 3-13 bytes per binding
-you call, and nothing for the rest.
+you call, and nothing for the rest; two programs that build their own
+bindings measured 1,028 and 1,075 bytes shed, the cluster's passengers
+included.  It pays only under `--data-model=large`: the small model's
+bindings share no tail, so a `--data-model=small` image is the same
+size either way, and the flag is kept there for one rule, not for a
+saving.
 
 ## The shape of a program
 
