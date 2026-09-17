@@ -1,10 +1,18 @@
 # tools/ccbug — the cc65816 bugs gem4xe works around
 
-Sixteen defects in Calypsi cc65816 **5.18** — twelve in code generation,
-two crashes, one in the front end's arithmetic and one in the run-time
-library's division — each reproduced from a shape
+Sixteen defects in Calypsi cc65816, found against **5.18** — twelve in
+code generation, two crashes, one in the front end's arithmetic and one
+in the run-time library's division — each reproduced from a shape
 lifted out of gem4xe or out of the vendor's own C library, each with the
-shape the sources use instead. `make check-cc` builds `bugs.c` with the
+shape the sources use instead.
+
+**Five are fixed upstream and the tree now builds with 5.18.2**, which is
+what `~/dev/toolchains/calypsi-65816` points at: **B1**, both **B5**
+shapes, **B13**, **B14** and **B15** are gone (B15 and B5 in 5.18.1, B13
+and B14 in 5.18.2, after upstream issue #88).  `check-cc` reports them as
+`FIXED upstream` and keeps running their workaround shapes, because the
+README promises "Calypsi 5.18+" and anyone still on 5.18 must get right
+answers.  The workarounds stay in the sources for the same reason. `make check-cc` builds `bugs.c` with the
 vendor's minimal linker script and C library, runs it under `db65816`, and
 reads the results back; `b6.c` and `b11.c`, which the compiler cannot get
 through, are compiled on their own and the outcome read from the compiler,
@@ -18,7 +26,7 @@ listing read:
       B6 indexed direct-page array                       compiles   still present
       B11 near <-> far struct copy over 8 bytes          compiles   still present
       B16 byte spin loop, rep before its back edge         compiles   still present
-    check-cc: PASSED -- every workaround shape is right; 19 of 19 bug shapes still present
+    check-cc: PASSED -- every workaround shape is right; 14 of 20 bug shapes still present
 
 The run **fails only if a workaround shape stops compiling right**, because
 that is what would break gem4xe. A bug that has gone away is reported as
