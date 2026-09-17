@@ -423,6 +423,8 @@ build/fsel.o: src/aes/fsel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/d
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -I build -o $@ $<
 build/shel.o: src/aes/shel.c src/aes/aes.h src/sys/app.h src/sys/cio.h src/sys/dos.h src/sys/farmem.h build/lang_rsc.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -I src -I build -o $@ $<
 build/scrap.o: src/aes/scrap.c src/aes/aes.h src/sys/farmem.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -I src -I build -o $@ $<

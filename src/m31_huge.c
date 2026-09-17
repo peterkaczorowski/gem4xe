@@ -102,6 +102,16 @@ int main(void)
     m31_ran = 1;
     m31_step = 9;
 
+    /* ...and WAIT, as src/m29_big.c does and for the same reason: a
+     * program that returns has its near region given back and the desktop
+     * loaded on top of it (src/sys/app.c, app_free), so results published
+     * and then left behind live about two frames.  The gate sampled every
+     * ten and read them only when the phase happened to suit -- a coin
+     * flip that a 63-byte shift in the system's layout was enough to
+     * lose, with every check then reading the zeroes of somebody else's
+     * memory.  The gate reads the results and then sends a key. */
+    evnt_keybd();
+
     appl_exit();
     return 0;
 }
