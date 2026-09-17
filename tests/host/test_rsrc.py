@@ -9,7 +9,7 @@ reason is not that sizeof is wrong -- it is 34 for an ICONBLK here, as
 the file has it, and the loader was correct before these names existed.
 The reason is that this compiler reports TWO sizes for such a struct: its
 code generator says 34 and its constant-expression evaluator says 36,
-rounding up to the alignment (tools/ccbug, B18).  A stride that reads as
+rounding up to the alignment (tools/ccbug, B7).  A stride that reads as
 `sizeof(ICONBLK)` therefore cannot be checked by any of the usual
 compile-time means, and a project that tried spent an evening chasing a
 bug that was not there.

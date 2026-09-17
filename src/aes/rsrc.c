@@ -117,13 +117,15 @@ static WORD fix_long(const RSHDR *h, uint32_t *p)
  * WHAT IS WRONG IS THE WAY THE STRUCT WAS MEASURED.  The negative-array
  * idiom -- char p[(sizeof(X)==N)?1:-1] -- answers 36 for this struct,
  * because the compiler's CONSTANT-EXPRESSION evaluator rounds a size up
- * to the alignment while its code generator does not (tools/ccbug, B18).
+ * to the alignment while its code generator does not (tools/ccbug, B7 -- whose rule,
+ * written down since long before this, is the one this file broke).
  * On that answer the strides below were read as a live bug, a peer was
  * told the fix mattered to their port, and the gates passed either way
  * for the simple reason that the code was correct to begin with.
  *
- * So these four names buy no behaviour.  They buy the one thing the
- * episode showed is worth buying: a stride that does not depend on a
+ * So these four names buy no behaviour at all.  They buy the one
+ * thing the
+ * episode showed is worth having: a stride that does not depend on a
  * sizeof this compiler reports two different values for, with
  * tools/rsc.py naming the same numbers and tests/host/test_rsrc.py
  * holding the two lists against each other, against the ST's format, and
@@ -134,16 +136,6 @@ static WORD fix_long(const RSHDR *h, uint32_t *p)
 #define RSZ_TEDINFO  28
 #define RSZ_ICONBLK  34
 #define RSZ_BITBLK   14
-
-/* A record the compiler makes SMALLER than the file's would mean reading
- * a field out of the next one, which no test would show as anything but
- * wrong pixels.  These are array bounds, so they are asking the evaluator
- * that rounds UP (B18) -- which makes them safe as a >= floor and useless
- * as an equality, and a floor is all that is wanted. */
-typedef char rsz_object_fits[(sizeof(OBJECT)  >= RSZ_OBJECT)  ? 1 : -1];
-typedef char rsz_ted_fits[(sizeof(TEDINFO)    >= RSZ_TEDINFO) ? 1 : -1];
-typedef char rsz_iconblk_fits[(sizeof(ICONBLK) >= RSZ_ICONBLK) ? 1 : -1];
-typedef char rsz_bitblk_fits[(sizeof(BITBLK)  >= RSZ_BITBLK)  ? 1 : -1];
 
 static void *sub_of(const RSHDR *h, UWORD index, UWORD offset, UWORD size)
 {

@@ -238,8 +238,35 @@ which is how this was found: the BCB overlay in `src/vbxe/vbxe.c` was
 given exactly that assertion as a guard. All `-O` levels.
 
 The sources write the byte count out where a constant is needed
-(`BCB_SIZE`) and `check-cc` reads element 1 of a three-element array
-through both strides.
+(`BCB_SIZE`).  It is checked two independent ways, because one way is
+what let this bug bite the project a second time: `check-cc` reads
+element 1 of a three-element array through both strides -- a RUN, in the
+simulator -- and compiles `b7_bound.c`, which asks for the true size in
+an array bound and must be REFUSED.  The day that file compiles, the bug
+is gone.
+
+**It bit this project again on 2026-09-16, with rule 7 already written
+above.**  `ICONBLK` is 34 bytes (three LONGs and eleven WORDs) and the
+array-bound idiom answers 36, so the resource loader's table strides were
+read as a live defect, a commit said so, and a peer was told the fix
+mattered to their port.  It did not: the loader was correct, and every
+gate passed either way for that reason.  What settled it was the target
+-- MControl's own resource, 22 colour icons, loaded on the machine with
+every record matching the file at a stride of 50, which is 34 + 12 + 4.
+Note HOW the idiom fails, because that is what made it convincing: **it
+refuses the TRUE value**, so it reads as a failed assertion about the
+code rather than a broken instrument.
+
+**Rule 7, in the form that would have prevented both:** measure a struct
+by asking the GENERATED CODE -- a function that returns `sizeof(X)`, read
+out of `--assembly-source` -- and never an array bound, an enum or a
+static assertion.  (`&arr[1] - &arr[0]` is the other obvious way and is
+not available: this compiler answers a pointer difference between struct
+members with `internal error: ScaleIndex.hs`.)  `tests/host/test_sdk.py`
+measures that way, and the tree carries no array-bound use of `sizeof` at
+all -- the four floors that briefly guarded the resource loader were
+removed, because a floor can only give a false pass and a rule-breaking
+construct in the sources is one the next reader copies.
 
 ## B8 — a byte local narrowed on one path is stored from 8-bit mode
 
@@ -507,59 +534,6 @@ eight polls in `bootinfo.c`. The sources now read the byte into a word
 through a helper and compare the word — `while (vcount() < line) ;`, with
 `vcount()` a real call (`jsl`) that costs nothing at 20 MHz — and that
 shape runs in `bugs.c` as `r_b16_fix`. Rule 16.
-
-## B18 — `sizeof` is two different numbers, and the wrong one is in the array bound
-
-    typedef struct { unsigned long a, b, c; short d[11]; } S;   /* 12 + 22 */
-    unsigned long in_an_expression(void) { return sizeof(S); }  /* lda ##34 */
-    char in_an_array_bound[(sizeof(S) == 34) ? 1 : -1];         /* REFUSED  */
-
-A struct whose size is not a multiple of its alignment gets **34 in an
-expression and 36 in a constant expression**. Generated code is right:
-`sizeof` returns 34, `&arr[i]` scales by 34, and an array of them is
-packed at 34. Only the constant-expression evaluator rounds the size up
-to the alignment. So the value the program computes with and the value
-the compiler will accept in an array bound, a `case` label or a static
-assertion disagree, for exactly the structs where it matters.
-
-`b18.c` is the four lines above; `check.py` compiles it and requires the
-refusal, so the day it stops being refused is the day the entry can go.
-
-**What it cost here.** The negative-array idiom —
-`char p[(sizeof(X)==N)?1:-1];` — is how this tree measures a struct
-without running anything, and for `ICONBLK` it answered 36 where the
-machine uses 34. On that answer the resource loader's table strides were
-read as a live bug ("a real ST resource with several icons reads the
-second one two bytes late"), a peer was told the fix was load-bearing for
-their port, and an evening went into a contradiction that could not be
-resolved by reading either side: the file plainly wanted 34, the probe
-plainly said 36, and the gates passed either way because *the code was
-right all along*. What settled it was the target: MControl's own
-resource, 22 colour icons, loaded on the machine with every record's
-geometry and both far addresses matching the file, and a record stride of
-50 — which is 34 + 12 + 4, and cannot be 36 + 12 + 4.
-
-**Rule 18: never measure a struct with an array bound.** Ask the
-generated code — a function that returns `sizeof(X)` — and read the
-immediate out of `--assembly-source`. `tests/host/test_sdk.py` does.
-(`&arr[1] - &arr[0]` would do as well and is the obvious alternative, but
-this compiler answers a pointer difference between struct members with
-`internal error: ScaleIndex.hs`, so it is not available.)
-
-The tree was swept for the idiom afterwards and carries four uses, all in
-`src/aes/rsrc.c` and all `>=`. That is the safe direction: the evaluator
-only ever over-reports, so a floor can give a false pass but never a
-false failure, and a struct that really was too short still fires the
-assertion with at most three bytes of slack. An `==` against a struct
-size is the shape to refuse in review — and note how it fails, because
-that is what made this expensive: it REFUSES THE TRUE VALUE, so it reads
-as a failed assertion about the code rather than a broken instrument.
-
-The peer porting cflib reproduced B18 independently the same day, and
-found that their own confirmation of a layout fix had been produced with
-this idiom. Their numbers held, but only because every struct they
-checked was already a multiple of four and the rounding had nothing to
-change: an unsound method with a lucky result.
 
 ## Reading the map — not a bug, and it gave the wrong answer twice
 

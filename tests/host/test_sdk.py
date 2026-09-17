@@ -69,7 +69,7 @@ class TestTheObjectLayoutIsTheSTs(unittest.TestCase):
     usual trick -- char p[(sizeof(X)==N)?1:-1] -- asks the compiler's
     constant-expression evaluator, and that evaluator rounds a struct's
     size UP to its alignment where the code generator does not
-    (tools/ccbug, B18).  For ICONBLK it answers 36 where every real use
+    (tools/ccbug, B7).  For ICONBLK it answers 36 where every real use
     is 34, and this project spent an evening on a bug that was not there
     before the machine settled it.  So each size here is read back from a
     function that returns it: `lda ##24` is the answer, and nothing else
@@ -107,7 +107,7 @@ class TestTheObjectLayoutIsTheSTs(unittest.TestCase):
     def measure(self, model, exprs):
         """Compile one function per expression and read the immediate the
         compiler put in it.  This is the only honest way to ask this
-        compiler how big a struct is (B18)."""
+        compiler how big a struct is (B7)."""
         src = os.path.join(self.dir, "layout.c")
         with open(src, "w") as f:
             f.write('#include "gem.h"\n')

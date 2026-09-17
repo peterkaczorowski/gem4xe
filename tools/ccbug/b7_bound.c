@@ -1,5 +1,6 @@
-/* B18 -- sizeof is two different numbers, and the wrong one is in the
- * array bound.  See README.md.
+/* B7's second test -- sizeof a struct is padded where a constant
+ * expression is required.  See README.md; bugs.c has the first, which
+ * RUNS the two strides, and this one asks the compiler.
  *
  * S is 34 bytes: three 32-bit fields and eleven 16-bit ones.  Its
  * alignment is 4, so 34 is not a multiple of it -- which is the whole
@@ -13,10 +14,10 @@
  */
 typedef struct { unsigned long a, b, c; short d[11]; } S;
 
-unsigned long b18_in_an_expression(void)
+unsigned long b7_in_an_expression(void)
 {
     return sizeof(S);               /* 34 */
 }
 
 /* ...and this asks the constant-expression evaluator the same question. */
-char b18_in_an_array_bound[(sizeof(S) == 34) ? 1 : -1];
+char b7_in_an_array_bound[(sizeof(S) == 34) ? 1 : -1];

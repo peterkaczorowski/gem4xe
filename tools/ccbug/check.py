@@ -59,12 +59,13 @@ CRASHES = {
     "b6": "B6 indexed direct-page array",
     "b11": "B11 near <-> far struct copy over 8 bytes",
 }
-# file stem: note -- the shapes the compiler REFUSES, wrongly.  B18's file
-# asks for sizeof(S) == 34 in an array bound, which is the number the
-# generated code uses and the number the constant-expression evaluator
-# will not agree to; the refusal IS the bug.
+# file stem: note -- the shapes the compiler REFUSES, wrongly.  This is
+# B7's SECOND test, independent of the one in bugs.c: the file asks for
+# sizeof(S) == 34 in an array bound, which is the number the generated
+# code uses and the number the constant-expression evaluator will not
+# agree to, so the refusal IS the bug.
 REFUSALS = {
-    "b18": "B18 sizeof in an array bound, rounded up to the alignment",
+    "b7_bound": "B7 sizeof in an array bound, padded (second test)",
 }
 # file stem: note -- the shapes that compile to something that cannot be run
 LISTINGS = {
@@ -172,8 +173,8 @@ def main():
                             os.path.join(ROOT, "tools", "ccbug", f"{tag}.c")],
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         crashes[note] = r.returncode != 0 and "internal error" in r.stdout
-    # B18 is a refusal the compiler should not make: the file compiles the
-    # day it is fixed, so the bug is "it did not compile".
+    # A refusal the compiler should not make: the file compiles the day the
+    # bug is fixed, so the bug is "it did not compile".
     for tag, note in REFUSALS.items():
         r = subprocess.run([cc, "--code-model=large", "--data-model=small",
                             f"-O{a.O}", "-o", os.path.join(a.out, f"{tag}.o"),
