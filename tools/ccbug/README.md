@@ -6,10 +6,11 @@ in the run-time library's division — each reproduced from a shape
 lifted out of gem4xe or out of the vendor's own C library, each with the
 shape the sources use instead.
 
-**Five are fixed upstream and the tree now builds with 5.18.2**, which is
-what `~/dev/toolchains/calypsi-65816` points at: **B1**, both **B5**
-shapes, **B13**, **B14** and **B15** are gone (B15 and B5 in 5.18.1, B13
-and B14 in 5.18.2, after upstream issue #88).  `check-cc` reports them as
+**Four are fixed upstream and the tree now builds with 5.18.2**, which is
+what `~/dev/toolchains/calypsi-65816` points at: both **B5** shapes,
+**B13**, **B14** and **B15** are gone (B15 and B5 in 5.18.1, B13 and B14
+in 5.18.2, after upstream issue #88).  **B1 is NOT fixed** -- it read as
+fixed for a day because the reproducer hid it; see its entry.  `check-cc` reports them as
 `FIXED upstream` and keeps running their workaround shapes, because the
 README promises "Calypsi 5.18+" and anyone still on 5.18 must get right
 answers.  The workarounds stay in the sources for the same reason. `make check-cc` builds `bugs.c` with the
@@ -38,6 +39,32 @@ in the conformance suites, then proved by reading the emitted assembly and
 finally by the simulator. Phase 6's lesson still applies: a bug that moves
 with the code layout is self-corruption until proven otherwise, and every
 bug below was proved.
+
+## Which `-O` levels each one needs
+
+Measured on 5.18.2 by running the whole file at each level
+(`python3 tools/ccbug/check.py -O 0|1|2`).  A bug that reproduces at every
+level is a plain code-generation fault; one that needs `-O1` or `-O2` is
+an optimiser fault, and saying which saves a vendor a bisect.
+
+| | -O0 | -O1 | -O2 | note |
+|---|---|---|---|---|
+| B1 | yes | yes | yes | at every level once the shape is not inlined away |
+| B2 | no | no | yes | the entry used to say "-O1 and above"; not on 5.18.2 |
+| B3 | no | yes | yes | it is a defect OF inlining |
+| B4 | yes | yes | yes | |
+| B6 | yes | yes | yes | internal error, every data model too |
+| B7 | yes | yes | yes | front end, not the code generator |
+| B8 | no | no | yes | |
+| B9 | yes | yes | yes | not an inliner fault: -O0 has a real `jsl` |
+| B10 | no | yes | yes | a defect OF inlining |
+| B11 | yes | yes | yes | internal error |
+| B12 | yes | yes | yes | |
+| B16 | no | no | yes | |
+
+`--no-inline` is a useful second axis: it clears B3 and B10, which is
+expected, and it must NOT clear anything else.  It was `--no-inline` that
+exposed B1's reproducer as lying.
 
 ## The rules
 
@@ -111,6 +138,26 @@ is fine.
 
 Found by `make test-m4`: every child object was drawn at its parent's x plus
 garbage.
+
+**THIS ENTRY READ AS "FIXED UPSTREAM" FOR A DAY, AND THE REPRODUCER WAS AT
+FAULT.**  `b1_bug` was `static` and called with literal arguments, so from
+-O1 up it is inlined, `depth` constant-folds, the indexed shape never
+arises and the row reports the right answer.  5.18.1's real fixes (B5,
+B15) were in the same release, so B1 went into an upstream comment as
+fixed alongside them.  It is not fixed: give the function external
+linkage, or compile with `--no-inline`, and it fails at every `-O` level
+on 5.18.2.  `bugs.c` now declares both shapes `extern` for that reason.
+
+The discriminator, which has no uninitialised memory and carries its own
+control, is the version to send upstream:
+
+    WORD x[12], i;  for (i = 0; i < 12; i++) x[i] = 1000 + i;
+    x[depth] = x[depth - 1] + t[this].ob_x;     /* ob_x = 4, depth = 1 */
+
+`x[0] + 4` is 1004; the stack array answers **1002**, which is `x[2]` --
+`ob_x` used as a byte index.  The same function with a *global* array
+answers 1004, and the two sit in one `-O2` listing as `ldy 16,x / lda
+(.tiny _Dp),y` against `lda 16,x / clc / adc g,x`.
 
 ## B2 — `_Div16` / `_Mod16` return with the wrong flags
 
@@ -208,11 +255,26 @@ names; `check-cc` pins this shape as well (`B5 spilled pointer, field - 1`).
     uint8_t f(void) { return tbl[i]; }
 
     internal error: Translator/Target/WDC65816/Compiler/CGHelpers.hs:
-    (662,1)-(663,59): Non-exhaustive patterns in function mem8Reg
+    (661,1)-(662,59): Non-exhaustive patterns in function mem8Reg
 
-Any variable index — a direct-page scalar, a parameter, a plain global —
-into an array placed in the direct page, with 8- or 16-bit elements, at
-every `-O` level. A constant index compiles. Direct-page scalars and
+(The span was `(662,1)-(663,59)` on 5.18; check it against the compiler in
+use before quoting it upstream.)
+
+**The array is incidental.** The trigger is any variable-address load or
+store in the tiny address space, and the smallest form has no array in it
+at all:
+
+    __tiny char x;  char f(int i) { return *(&x + i); }      /* same ICE */
+
+so the one-line reproducer to send is `__tiny char a[1]; char f(int i) {
+return a[i]; }`.  Element width is irrelevant, which makes the name
+`mem8Reg` a red herring: a 32-bit element hits the same pattern match.
+Index type and index source are irrelevant, loads and stores both crash,
+and it is every `-O` level and every data model.  What does NOT crash
+localises it usefully for the vendor: `&tbl[i]` with no dereference
+compiles, and `a[i];` with the value discarded compiles, so the failure is
+in selecting the load or store rather than in the address arithmetic.  A
+constant index compiles. Direct-page scalars and
 direct-page pointers (`lda (.tiny p)`, `sta (.tiny p)`, `inc dp:.tiny p`)
 are what the fast loops want anyway, and an ordinary array indexed by a
 direct-page scalar is one instruction (`ldx dp:.tiny i; lda tbl,x`), so the
@@ -372,6 +434,16 @@ Found by hand-running the desktop (milestone 4, `docs/phase14.md`) and
 dumping its screen tree: two of three icons at impossible coordinates, the
 first one right.
 
+**A REPRODUCER FOR THIS MUST HAVE EXACTLY ONE CALL SITE.**  Add a second
+or third caller as a probe and the `static` function stops being inlined,
+the bug vanishes, and a vendor reading that file will correctly report
+that it does not reproduce.  Reduced to its condition: a `static` function
+that assigns to one of its own parameters under an `if`, inlined into its
+single caller, reads that parameter from a stack slot the function never
+writes.  One clamped parameter is enough; deleting the clamps removes it;
+and the read is unconditional, so it is wrong even when the clamp is not
+taken.
+
 ## B11 — a near ↔ far struct copy over 8 bytes is an internal compiler error
 
     FNODE __far *pf;  FNODE fn;          /* pn_active(), src/desk/deskwin.c */
@@ -379,11 +451,24 @@ first one right.
 
     internal error: labeling failed
 
-Either direction — a near local, a near global or a near pointer target,
-to or from a far pointer target — at every `-O` level and in both the small
-and medium data models. A struct of up to 8 bytes is copied through the
-registers and compiles; from 9 bytes up it is a block move the back end
-cannot label. Near-to-near and far-to-far copies of any size compile, so
+**Any two DIFFERENT address spaces**, not only near and far: tiny to far,
+tiny to near and near to far24 all fail the same way, in either direction,
+at every `-O` level.  Near-to-near and far-to-far compile at any size.
+The 8/9 boundary is exact: a struct of up to 8 bytes is copied through the
+registers and compiles, and from 9 bytes up it is a block move the back
+end cannot label.  A `union` of the same size fails identically.
+
+**The data model claim needs care, and it is a trap for anyone
+reproducing it.**  Written as above, with an unqualified pointer on the
+near side, the file only fails under `--data-model=small`: in medium and
+large the default pointer is already 24 bits, so the copy has degenerated
+into far-to-far and compiles.  With an explicit `__near` on one side it
+fails in all three.  A vendor who tries the reproducer under a non-default
+data model will otherwise report that it does not reproduce.
+
+The error text carries **no internal source location** — no file, no line,
+no function — unlike B6's, which is worth saying when reporting it: it is
+the one thing that would make this cheap to fix. Near-to-near and far-to-far copies of any size compile, so
 the listing's insertion sort slides FNODEs with `*pf = *(pf - 1)` (far to
 far) and puts the new one in through a byte loop.
 
@@ -400,15 +485,28 @@ compiles because it is never translated).
 
 emits three logical shifts and then a sign extension **from the wrong bit** --
 `eor ##4 / and ##7 / sec / sbc ##4`, which keeps three bits and discards the
-rest. So `900 >> 3` is 0 rather than 112, `900 >> 4` is -8 rather than 56,
-and `-900 >> 3` is -1 rather than -113. A shift by ONE emits a plain `lsr`,
-correct only when the value cannot be negative. 32-bit shifts, signed or
-not, are right, and so are unsigned 16-bit ones.
+rest. So `900 >> 3` is 0 rather than 112, and `900 >> 4` is **-8** rather
+than 56, which is the fact to lead with: a non-negative operand cannot
+yield a negative result under any conforming implementation, so there is no
+implementation-defined escape hatch to argue about.
 
-The same compiler emits the correct `cmp ##-32768 / ror a` for the same
-source shape elsewhere in the same file (`nf >> 2` in `raster_1bpp`), so
-reading one listing proves nothing either way -- which is why this one is in
-`bugs.c` and checked in the simulator.
+**The mask is computed from the wrong number.** The idiom is
+`eor ##(1<<(n-1)) / and ##((1<<n)-1) / sec / sbc ##(1<<(n-1))`, which
+sign-extends an *n*-bit field.  For a 16-bit `a >> n` the field is
+`16-n` bits wide, so the constants must come from `16-n`.  They coincide
+only at **n == 8**, which is exactly where the compiler is right.
+
+So the rule is narrower than "a signed 16-bit shift": it is a **constant**
+shift count of **3 or more, other than 8**, on a **16-bit signed** value.
+Correct, and checked on 5.18.2: `>>1` and `>>2` (`cmp ##-32768 / ror a`,
+a real arithmetic shift), `>>8` (`xba / eor ##128 / and ##255 ...`),
+variable shift counts, unsigned shifts and 32-bit shifts.
+
+**An earlier version of this entry said a shift by one emits a plain `lsr`.
+It does not, and reporting that would have had the vendor test `>>1`, see
+it pass and close the ticket.**  Keep `-900 >> 3` out of the report too:
+right-shifting a negative value is implementation-defined, and the bug does
+not need it.
 
     static WORD asr(WORD v, WORD n)     /* src/vdi/vdi.c */
     {
@@ -528,14 +626,28 @@ a three-byte instruction, which swallows the `rep`'s opcode `c2`, so the
 next thing executed is the branch's own operand — `90 f7` and whatever
 follows it. In `src/sys/bootinfo.c` what followed was `20 90 f7`, a `jsr`
 into the middle of `farmem_probe`, whose `rtl` then landed in the OS ROM
-and BRKed out of the boot screen's rainbow. -O0 and -O1 put the `rep`
-after the loop; the first loop is untouched because its label sits before
-the `sep`; and without the `if (p) return 0` both loops compile right,
-which is why a minimal reproducer misses it. `do { vc++; } while (vc <
+and BRKed out of the boot screen's rainbow.
+
+**-O0 and -O1 emit the SAME trailing `rep #32`.** What saves them is a
+`sep #32` at the top of the loop body, which keeps the loop
+width-balanced; -O2 deletes that `sep` as redundant -- true on the
+fall-through path, false on the back edge -- and leaves the `rep`.  An
+earlier version of this entry said -O0 and -O1 put the `rep` after the
+loop, which is wrong and would have had the vendor diff two listings, see
+the same `rep` in both and conclude the report misread the output.
+
+The first loop is untouched because its label sits before the `sep`; and
+without the `if (p) return 0` both loops compile right, which is why a
+minimal reproducer misses it. `do { vc++; } while (vc <
 19);` is the same shape.
 
-The shape cannot be run, so `b16.c` is compiled alone and `check.py`
-reads its listing: a conditional branch backwards, immediately preceded
+The shape CAN be run, and stepping it is much better evidence than the
+listing: single-stepping `b16_bug` in `db65816` shows the back edge
+re-entering the loop with M clear, the `cmp` then assembling as three
+bytes, the program counter landing in the middle of the `rep`, and
+`20 90 f7` executing as `jsr $f790` -- the entry's prediction,
+instruction for instruction.  `check.py` still reads the listing, because
+that needs no harness: a conditional branch backwards, immediately preceded
 by `rep #32`, with no `sep #32` between the label and the branch. The
 same reading over every gem4xe source with its own flags found only the
 eight polls in `bootinfo.c`. The sources now read the byte into a word

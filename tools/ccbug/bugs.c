@@ -26,7 +26,12 @@ OBJ tree[3];
 
 /* `x[depth] = x[depth-1] + tree[this].ob_x` becomes `ldy ob_x; lda (&x),y`
  * -- a load from address &x[depth-1] + ob_x, not an add. */
-static WORD b1_bug(OBJ *t, WORD this, WORD depth, WORD startx)
+/* NOT static, and that is load-bearing.  As a static function called with
+ * literals, -O1 and above inline it, `depth` constant-folds, the indexed
+ * shape never arises and the row reports the bug as FIXED -- which it is
+ * not.  This project told the vendor B1 was fixed in 5.18.1 on exactly
+ * that reading.  External linkage keeps the shape. */
+WORD b1_bug(OBJ *t, WORD this, WORD depth, WORD startx)
 {
     WORD x[12];
     x[0] = startx;
@@ -35,7 +40,7 @@ static WORD b1_bug(OBJ *t, WORD this, WORD depth, WORD startx)
 }
 
 /* The element through a scalar first. */
-static WORD b1_fix(OBJ *t, WORD this, WORD depth, WORD startx)
+WORD b1_fix(OBJ *t, WORD this, WORD depth, WORD startx)
 {
     WORD x[12], prev;
     x[0] = startx;
