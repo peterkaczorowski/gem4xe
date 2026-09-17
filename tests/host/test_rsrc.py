@@ -3,26 +3,22 @@
 names them.
 
 A resource is read as an overlay: the loader points a C struct at the
-file's bytes and steps to the next record by adding a size.  The FIELD
-offsets come out right because the file and the compiler lay out the same
-words in the same order, but the STEP does not -- the compiler aligns a
-32-bit field to four, so an ICONBLK measures 36 where the file gives it
-34 and a BITBLK 16 where the file gives it 14.  OBJECT (24) and TEDINFO
-(28) happen to come out even, which is why `sizeof` as a stride read as
-correct for years: it is correct for the two tables every resource has
-and wrong for the two an icon resource has.
+file's bytes and steps to the next record by adding a size.  Those sizes
+are written out in src/aes/rsrc.c rather than taken from sizeof, and the
+reason is not that sizeof is wrong -- it is 34 for an ICONBLK here, as
+the file has it, and the loader was correct before these names existed.
+The reason is that this compiler reports TWO sizes for such a struct: its
+code generator says 34 and its constant-expression evaluator says 36,
+rounding up to the alignment (tools/ccbug, B18).  A stride that reads as
+`sizeof(ICONBLK)` therefore cannot be checked by any of the usual
+compile-time means, and a project that tried spent an evening chasing a
+bug that was not there.
 
-Nothing catches that at run time.  The first record is always right, so a
-resource with one icon behaves, and the tree's own resources have either
-one or none of each.  A real ST resource with several icons reads the
-second one two bytes late, and what comes back is a plausible-looking
-ICONBLK made of the tail of one record and the head of the next.
-
-So the numbers are pinned here three ways: against the ST's format, which
-is what the file is; against tools/rsc.py, which writes these files;
-and against the tables of the resources this tree actually builds, which
-is the only one of the three that would notice if the writer and the
-format ever drifted together.
+So the numbers are pinned here three ways, none of which asks the
+compiler: against the ST's format, which is what the file is; against
+tools/rsc.py, which writes these files; and against the tables of the
+resources this tree builds, which is the only one of the three that would
+notice if the writer and the format ever drifted together.
 """
 import glob
 import os
@@ -68,9 +64,9 @@ class TestTheFileRecordSizes(unittest.TestCase):
                          "the writer and the format disagree")
 
     def test_no_sizeof_is_used_as_a_stride(self):
-        """The bug this file exists for, in the shape it had: a sizeof
-        standing in for a file record's size.  rs_cicons is the one place
-        left that does it, and says why."""
+        """A file record's size should read as a number, not as a sizeof
+        whose value depends on which half of the compiler is asked.
+        rs_cicons is the one place left that does it, and says why."""
         src = re.sub(r"/\*.*?\*/", "", open(RSRC_C).read(), flags=re.S)
         body = "\n".join(ln for ln in src.split("rs_cicons")[0].splitlines()
                          if "rsz_" not in ln)   # the size assertions, not strides

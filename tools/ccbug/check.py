@@ -59,6 +59,13 @@ CRASHES = {
     "b6": "B6 indexed direct-page array",
     "b11": "B11 near <-> far struct copy over 8 bytes",
 }
+# file stem: note -- the shapes the compiler REFUSES, wrongly.  B18's file
+# asks for sizeof(S) == 34 in an array bound, which is the number the
+# generated code uses and the number the constant-expression evaluator
+# will not agree to; the refusal IS the bug.
+REFUSALS = {
+    "b18": "B18 sizeof in an array bound, rounded up to the alignment",
+}
 # file stem: note -- the shapes that compile to something that cannot be run
 LISTINGS = {
     "b16": "B16 byte spin loop, rep before its back edge",
@@ -165,6 +172,15 @@ def main():
                             os.path.join(ROOT, "tools", "ccbug", f"{tag}.c")],
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         crashes[note] = r.returncode != 0 and "internal error" in r.stdout
+    # B18 is a refusal the compiler should not make: the file compiles the
+    # day it is fixed, so the bug is "it did not compile".
+    for tag, note in REFUSALS.items():
+        r = subprocess.run([cc, "--code-model=large", "--data-model=small",
+                            f"-O{a.O}", "-o", os.path.join(a.out, f"{tag}.o"),
+                            os.path.join(ROOT, "tools", "ccbug", f"{tag}.c")],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True)
+        crashes[note] = r.returncode != 0 and "negative size" in r.stdout
     # B16 compiles, to code that derails on its second pass: compile the
     # file alone and read its listing for the shape
     for tag, note in LISTINGS.items():
@@ -204,7 +220,7 @@ def main():
         print(f"check-cc: FAILED -- {bad} workaround shape(s) miscompile")
         return 1
     print(f"check-cc: PASSED -- every workaround shape is right; "
-          f"{present} of {sum(1 for v in RESULTS.values() if v[1] == 'bug') + len(CRASHES) + len(LISTINGS)} "
+          f"{present} of {sum(1 for v in RESULTS.values() if v[1] == 'bug') + len(CRASHES) + len(LISTINGS) + len(REFUSALS)} "
           f"bug shapes still present")
     return 0
 

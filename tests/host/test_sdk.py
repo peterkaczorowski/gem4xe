@@ -65,27 +65,31 @@ class TestTheObjectLayoutIsTheSTs(unittest.TestCase):
     whole four bytes read as a far pointer whose bank is the high word's
     zero.  Either way a member sees the address the AES put there.
 
-    Checked by compiling, because a size that has gone wrong will not
-    announce itself at run time: it moves every field after ob_spec and
-    the AES and the application then disagree about a tree neither can
-    see the other reading.  Three sizes pin the offset between them --
-    the six words before ob_spec are 12 bytes, ob_spec is 4, the whole
-    is 24 -- which leaves no room for padding anywhere.
+    MEASURED OUT OF THE GENERATED CODE, not out of an array bound.  The
+    usual trick -- char p[(sizeof(X)==N)?1:-1] -- asks the compiler's
+    constant-expression evaluator, and that evaluator rounds a struct's
+    size UP to its alignment where the code generator does not
+    (tools/ccbug, B18).  For ICONBLK it answers 36 where every real use
+    is 34, and this project spent an evening on a bug that was not there
+    before the machine settled it.  So each size here is read back from a
+    function that returns it: `lda ##24` is the answer, and nothing else
+    is.
     """
 
-    CASES = (("the six words before ob_spec are 12 bytes",
-              "sizeof(struct { WORD a, b, c; UWORD d, e, f; }) == 12"),
-             ("ob_spec is four bytes", "sizeof(OBSPEC) == 4"),
-             ("an OBJECT is 24 bytes", "sizeof(OBJECT) == 24"),
-             ("a TEDINFO is the ST's 28", "sizeof(TEDINFO) == 28"),
-             # ICONBLK and BITBLK are the two the compiler PADS: they begin
-             # with LONGs and end on an odd number of WORDs, so 34 and 14 in
-             # the file become 36 and 16 here.  What matters to a program
-             # reading a loaded resource is that the struct is not SHORTER
-             # than the record, and that it never be used as a file stride
-             # (tests/host/test_rsrc.py).
-             ("an ICONBLK covers the file's 34", "sizeof(ICONBLK) >= 34"),
-             ("a BITBLK covers the file's 14", "sizeof(BITBLK) >= 14"))
+    SIZES = (("an OBJECT", "sizeof(OBJECT)", 24),
+             ("ob_spec", "sizeof(OBSPEC)", 4),
+             ("ob_spec's bit-field", "sizeof(OBSPEC_BITS)", 4),
+             ("the six words before ob_spec",
+              "sizeof(struct { WORD a, b, c; UWORD d, e, f; })", 12),
+             ("a TEDINFO", "sizeof(TEDINFO)", 28),
+             ("an ICONBLK", "sizeof(ICONBLK)", 34),
+             ("a BITBLK", "sizeof(BITBLK)", 14),
+             ("the four words after ob_spec",
+              "sizeof(struct { WORD a, b, c, d; })", 8))
+    # ob_spec's OFFSET is pinned by those three between them -- 12 before
+    # it, 4 of it, 8 after, and 24 in all leaves no room for padding
+    # anywhere.  Measured directly it would want a pointer difference, and
+    # this compiler answers that with an internal error.
 
     @classmethod
     def setUpClass(cls):
@@ -100,29 +104,49 @@ class TestTheObjectLayoutIsTheSTs(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.dir, ignore_errors=True)
 
-    def check(self, model, expr, what):
-        """A negative-size array is the assertion: it compiles when the
-        expression holds and cannot when it does not."""
+    def measure(self, model, exprs):
+        """Compile one function per expression and read the immediate the
+        compiler put in it.  This is the only honest way to ask this
+        compiler how big a struct is (B18)."""
         src = os.path.join(self.dir, "layout.c")
         with open(src, "w") as f:
-            f.write('#include "gem.h"\n'
-                    f"char probe[({expr}) ? 1 : -1];\n")
+            f.write('#include "gem.h"\n')
+            for i, e in enumerate(exprs):
+                f.write(f"unsigned long probe{i}(void) "
+                        f"{{ return (unsigned long)({e}); }}\n")
+        asm = os.path.join(self.dir, "layout.s")
         r = subprocess.run(
             [self.cc, "--code-model=large", f"--data-model={model}", "-O2",
              "-I", os.path.join(self.kit, "include"),
+             "--assembly-source", asm, "-c",
              "-o", os.path.join(self.dir, "layout.o"), src],
             capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0,
-                         f"--data-model={model}: {what} is not true "
-                         f"({expr})\n{r.stdout}{r.stderr}")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        text = open(asm).read()
+        out = []
+        for i in range(len(exprs)):
+            m = re.search(rf"^probe{i}:.*?lda\s+##(\d+)", text,
+                          re.S | re.M)
+            self.assertIsNotNone(m, f"probe{i} has no immediate:\n{text[:400]}")
+            out.append(int(m.group(1)))
+        return out
+
+    def layout(self, model):
+        got = self.measure(model, [e for _, e, _ in self.SIZES])
+        bad = [f"{what} is {g} bytes, expected {want}"
+               for (what, _, want), g in zip(self.SIZES, got) if g != want]
+        sizes = dict(zip((w for w, _, _ in self.SIZES), got))
+        if (sizes["the six words before ob_spec"] + sizes["ob_spec"]
+                + sizes["the four words after ob_spec"] != sizes["an OBJECT"]):
+            bad.append("the parts of an OBJECT do not add up to the whole, "
+                       "so something is padded and ob_spec has moved")
+        self.assertEqual(bad, [], f"--data-model={model}: " + "; ".join(bad))
 
     def test_the_layout_holds_in_the_small_data_model(self):
-        for what, expr in self.CASES:
-            self.check("small", expr, what)
+        self.layout("small")
 
     def test_the_layout_holds_in_the_large_data_model(self):
-        for what, expr in self.CASES:
-            self.check("large", expr, what)
+        self.layout("large")
 
     def test_the_bit_field_ends_are_where_the_st_puts_them(self):
         """ob_spec.obspec is declared in the reverse of gemlib's order,
@@ -172,10 +196,12 @@ class TestTheObjectLayoutIsTheSTs(unittest.TestCase):
                       f"bit-field is mirrored:\n{hi}")
 
     def test_a_pointer_is_the_size_the_union_argument_rests_on(self):
-        self.check("small", "sizeof(char *) == 2",
-                   "a small-model pointer is the low word")
-        self.check("large", "sizeof(char *) == 4",
-                   "a large-model pointer is the whole four bytes")
+        small, = self.measure("small", ["sizeof(char *)"])
+        large, = self.measure("large", ["sizeof(char *)"])
+        self.assertEqual((small, large), (2, 4),
+                         "a small-model pointer must be the low word and a "
+                         "large-model one the whole four bytes, or the union "
+                         f"does not overlay ob_spec: got {small} and {large}")
 
 
 class TestManifest(unittest.TestCase):

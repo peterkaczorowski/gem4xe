@@ -101,41 +101,35 @@ static WORD fix_long(const RSHDR *h, uint32_t *p)
     return 1;
 }
 
-/* The sizes these records have IN THE FILE, which are NOT sizeof().  The
- * compiler aligns a 32-bit field to four bytes, so an ICONBLK measures 36
- * and a BITBLK 16 where the file gives them 34 and 14 -- the two that
- * begin with LONGs and end on an odd number of WORDs.  OBJECT and TEDINFO
- * happen to come out at the file's 24 and 28, which is exactly why using
- * sizeof for a stride looked right for years: it is right for the two
- * tables every resource has and wrong for the two an ICON resource has.
+/* The sizes these records have IN THE FILE, written out rather than taken
+ * from sizeof -- and the story behind that is worth the space, because it
+ * cost an evening and very nearly cost a wrong "fix".
  *
- * The FIELD offsets are the file's either way, the padding being at the
- * end, so the structs stay valid overlays on the file's bytes -- only the
- * step from one record to the next has to come from here.  tools/rsc.py
- * names the same four numbers and tests/host/test_rsrc.py holds the two
- * lists against each other, against the ST's format, and against the
- * tables of the resources this tree builds.
+ * sizeof IS RIGHT HERE.  An ICONBLK is 34 bytes in this compiler's
+ * generated code, as the file gives it: a function returning
+ * sizeof(ICONBLK) compiles to `lda ##34`, &arr[i] scales by 34, and
+ * rs_cicons below steps the colour extension correctly.  MControl's own
+ * resource -- 22 colour icons, a real ST file -- loads on the machine
+ * with every record's geometry and both far addresses matching the file,
+ * at a record stride of 50, which is 34 + 12 + 4 and could not be
+ * 36 + 12 + 4.
  *
- * NOT used by rs_cicons below, and that is a QUESTION LEFT OPEN rather
- * than a decision.  Read the file and its header is 38 bytes: the form
- * count reads 1 and 2 at +34 and garbage at +36, and a walk stepping 38
- * lands exactly on the last byte of the extension.  Read the C and the
- * walk steps sizeof(ICONBLK) + 4, which measures 40 in a host probe of
- * this very translation unit.  Those cannot both be true, and the
- * machine says the walk is right: test-m12 now carries TWO colour icons
- * of different geometry and different form counts -- the case where a
- * stride two bytes out reads the second icon's header from the middle of
- * the first icon's data -- and the near records match the model byte for
- * byte with EITHER stride compiled in.  A record that matched at both
- * would be a record whose layout is 50 bytes, which is what tools/rsc.py
- * models and what a 34-byte ICONBLK would give.
+ * WHAT IS WRONG IS THE WAY THE STRUCT WAS MEASURED.  The negative-array
+ * idiom -- char p[(sizeof(X)==N)?1:-1] -- answers 36 for this struct,
+ * because the compiler's CONSTANT-EXPRESSION evaluator rounds a size up
+ * to the alignment while its code generator does not (tools/ccbug, B18).
+ * On that answer the strides below were read as a live bug, a peer was
+ * told the fix mattered to their port, and the gates passed either way
+ * for the simple reason that the code was correct to begin with.
  *
- * So the probe and the machine disagree about sizeof, and the way to
- * settle it is a debugger on the target reading `at` rather than more
- * reading of either side.  Until then this walk stays exactly as it
- * shipped, because that is the version every gate has passed, and the
- * table strides above use the file's sizes, because those ARE measurably
- * wrong at sizeof (DESKTOP.RSC's six icons occupy 204 bytes). */
+ * So these four names buy no behaviour.  They buy the one thing the
+ * episode showed is worth buying: a stride that does not depend on a
+ * sizeof this compiler reports two different values for, with
+ * tools/rsc.py naming the same numbers and tests/host/test_rsrc.py
+ * holding the two lists against each other, against the ST's format, and
+ * against the tables of the resources this tree builds.  rs_cicons below
+ * is deliberately left on sizeof, because it is right and because the
+ * two sides of its near record have to agree with each other. */
 #define RSZ_OBJECT   24
 #define RSZ_TEDINFO  28
 #define RSZ_ICONBLK  34
@@ -143,7 +137,9 @@ static WORD fix_long(const RSHDR *h, uint32_t *p)
 
 /* A record the compiler makes SMALLER than the file's would mean reading
  * a field out of the next one, which no test would show as anything but
- * wrong pixels. */
+ * wrong pixels.  These are array bounds, so they are asking the evaluator
+ * that rounds UP (B18) -- which makes them safe as a >= floor and useless
+ * as an equality, and a floor is all that is wanted. */
 typedef char rsz_object_fits[(sizeof(OBJECT)  >= RSZ_OBJECT)  ? 1 : -1];
 typedef char rsz_ted_fits[(sizeof(TEDINFO)    >= RSZ_TEDINFO) ? 1 : -1];
 typedef char rsz_iconblk_fits[(sizeof(ICONBLK) >= RSZ_ICONBLK) ? 1 : -1];

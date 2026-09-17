@@ -508,6 +508,43 @@ through a helper and compare the word — `while (vcount() < line) ;`, with
 `vcount()` a real call (`jsl`) that costs nothing at 20 MHz — and that
 shape runs in `bugs.c` as `r_b16_fix`. Rule 16.
 
+## B18 — `sizeof` is two different numbers, and the wrong one is in the array bound
+
+    typedef struct { unsigned long a, b, c; short d[11]; } S;   /* 12 + 22 */
+    unsigned long in_an_expression(void) { return sizeof(S); }  /* lda ##34 */
+    char in_an_array_bound[(sizeof(S) == 34) ? 1 : -1];         /* REFUSED  */
+
+A struct whose size is not a multiple of its alignment gets **34 in an
+expression and 36 in a constant expression**. Generated code is right:
+`sizeof` returns 34, `&arr[i]` scales by 34, and an array of them is
+packed at 34. Only the constant-expression evaluator rounds the size up
+to the alignment. So the value the program computes with and the value
+the compiler will accept in an array bound, a `case` label or a static
+assertion disagree, for exactly the structs where it matters.
+
+`b18.c` is the four lines above; `check.py` compiles it and requires the
+refusal, so the day it stops being refused is the day the entry can go.
+
+**What it cost here.** The negative-array idiom —
+`char p[(sizeof(X)==N)?1:-1];` — is how this tree measures a struct
+without running anything, and for `ICONBLK` it answered 36 where the
+machine uses 34. On that answer the resource loader's table strides were
+read as a live bug ("a real ST resource with several icons reads the
+second one two bytes late"), a peer was told the fix was load-bearing for
+their port, and an evening went into a contradiction that could not be
+resolved by reading either side: the file plainly wanted 34, the probe
+plainly said 36, and the gates passed either way because *the code was
+right all along*. What settled it was the target: MControl's own
+resource, 22 colour icons, loaded on the machine with every record's
+geometry and both far addresses matching the file, and a record stride of
+50 — which is 34 + 12 + 4, and cannot be 36 + 12 + 4.
+
+**Rule 18: never measure a struct with an array bound.** Ask the
+generated code — a function that returns `sizeof(X)`, or one that takes
+`&arr[1] - &arr[0]` — and read the immediate out of
+`--assembly-source`. `tools/ccbug/check.py` does it that way, and so does
+`tests/host/test_sdk.py`.
+
 ## Reading the map — not a bug, and it gave the wrong answer twice
 
 `clock()` turned up in a program that never calls it, 275 bytes together
