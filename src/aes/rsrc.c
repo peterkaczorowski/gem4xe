@@ -116,15 +116,26 @@ static WORD fix_long(const RSHDR *h, uint32_t *p)
  * lists against each other, against the ST's format, and against the
  * tables of the resources this tree builds.
  *
- * NOT used by rs_cicons below, deliberately.  That walk steps the colour
- * extension by sizeof(ICONBLK) and hands the object library a CICON_NEAR
- * whose own layout is sizeof(ICONBLK)-based, so the two are coupled and
- * changing one alone breaks the gate (proved: stepping 38 with a 34-byte
- * read fails test-m12, and the sizeof pair passes).  The extension's
- * header IS 38 bytes in the file -- the count reads 1 at +34 and garbage
- * at +36 -- so that walk and rsc.py's CICON_HDR/CICON_NEAR disagree with
- * this file somewhere that the gate cannot see.  It wants an hour and a
- * fixture with TWO colour icons, which is the case that would show it. */
+ * NOT used by rs_cicons below, and that is a QUESTION LEFT OPEN rather
+ * than a decision.  Read the file and its header is 38 bytes: the form
+ * count reads 1 and 2 at +34 and garbage at +36, and a walk stepping 38
+ * lands exactly on the last byte of the extension.  Read the C and the
+ * walk steps sizeof(ICONBLK) + 4, which measures 40 in a host probe of
+ * this very translation unit.  Those cannot both be true, and the
+ * machine says the walk is right: test-m12 now carries TWO colour icons
+ * of different geometry and different form counts -- the case where a
+ * stride two bytes out reads the second icon's header from the middle of
+ * the first icon's data -- and the near records match the model byte for
+ * byte with EITHER stride compiled in.  A record that matched at both
+ * would be a record whose layout is 50 bytes, which is what tools/rsc.py
+ * models and what a 34-byte ICONBLK would give.
+ *
+ * So the probe and the machine disagree about sizeof, and the way to
+ * settle it is a debugger on the target reading `at` rather than more
+ * reading of either side.  Until then this walk stays exactly as it
+ * shipped, because that is the version every gate has passed, and the
+ * table strides above use the file's sizes, because those ARE measurably
+ * wrong at sizeof (DESKTOP.RSC's six icons occupy 204 bytes). */
 #define RSZ_OBJECT   24
 #define RSZ_TEDINFO  28
 #define RSZ_ICONBLK  34

@@ -81,10 +81,23 @@ def build():
                     forms=[(4, bytes(ICON_ROWS) * 4, bytes(ICON_MASK))],
                     char=0x2043, xchar=2, ychar=3, xicon=4, yicon=5,
                     xtext=6, ytext=7, wtext=8, htext=9)
+    # A SECOND ONE, because one proves nothing about the walk.  Every
+    # CICONBLK is read by stepping over the one before it -- its header,
+    # its two mono planes, its text and each colour form -- so a stride
+    # that is wrong by two bytes leaves the FIRST icon perfect and every
+    # one after it built out of the tail of its neighbour.  This one is a
+    # different size and carries two forms rather than one, so a stride
+    # taken from the wrong icon is wrong twice over.
+    cicon2 = r.cicon(ICON_MASK[:24], ICON_ROWS[:24], "SECOND", 32, 6,
+                     forms=[(4, bytes(ICON_ROWS[:24]) * 4, bytes(ICON_MASK[:24])),
+                            (1, bytes(ICON_ROWS[:24]), bytes(ICON_MASK[:24]))],
+                     char=0x3044, xchar=3, ychar=4, xicon=5, yicon=6,
+                     xtext=7, ytext=8, wtext=9, htext=10)
     r.tree([
-        (NIL, 1, 2, G_BOX, 0, 0, 0x00FF1100, ch(0), ch(0), ch(10), ch(5)),
+        (NIL, 1, 3, G_BOX, 0, 0, 0x00FF1100, ch(0), ch(0), ch(10), ch(5)),
         (2, NIL, NIL, G_ICON, 0, 0, icon, ch(1), ch(1), ch(4), ch(3)),
-        (0, NIL, NIL, G_CICON, LASTOB, 0, cicon, ch(5), ch(1), ch(4), ch(3)),
+        (3, NIL, NIL, G_CICON, 0, 0, cicon, ch(5), ch(1), ch(4), ch(3)),
+        (0, NIL, NIL, G_CICON, LASTOB, 0, cicon2, ch(5), ch(3), ch(4), ch(2)),
     ])
     r.free_string("Free string one")
     r.free_string("Second free string, longer")

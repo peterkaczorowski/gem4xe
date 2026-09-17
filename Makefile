@@ -43,6 +43,13 @@ CFLAGS    = --code-model=large --data-model=small -O2 -I src
 LDFLAGS   = --rtattr exit=simplified --override _Div16 --override _Mod16
 
 # What the compiler said each object opened, last time it was compiled.
+# The FIRST target make sees is its default goal, and an included file's
+# targets count -- so once build/*.d exist, the first of them (build/abi.o
+# and its header list) became the goal of a bare `make`, which then built
+# one object and stopped, silently and successfully.  `all` is named here
+# rather than moving the include, so the answer does not depend on where
+# in this file the include happens to sit.
+.DEFAULT_GOAL := all
 -include $(wildcard build/*.d)
 
 SRC_DOS  ?= $(shell python3 -c "import tomllib;print(tomllib.load(open('fixtures.toml','rb'))['dos']['sd_dos2'])" 2>/dev/null)
