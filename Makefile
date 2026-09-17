@@ -1173,7 +1173,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-boot test-install
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-boot test-install
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -1428,6 +1428,14 @@ test-m29: build/m29-boot.atr
 test-m32: build/m32-boot.atr build/m32_con.sym
 	python3 tests/emu/m32_con.py
 
+# The same program on an NTSC machine -- the only gate that runs one.  The
+# frame is 16.7 ms there, and vex_timv says so (src/vdi/vdi.c); a tick of
+# 20 ms assumed on it made every evnt_timer a fifth short, which the timer
+# case's floor on evnt_timer(500) is placed to catch.  The screens are
+# not compared: the models are laid out on a PAL frame.
+test-m32n: build/m32-boot.atr build/m32_con.sym
+	python3 tests/emu/m32_con.py --ntsc
+
 # An application bigger than a bank, loaded and run.  tests/host/test_g4a.py
 # proves the FILE -- that applying its fixups reproduces the linker's own
 # shifted link, byte for byte -- and this proves the LOADER, which is the
@@ -1576,4 +1584,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-boot test-install test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-boot test-install test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean

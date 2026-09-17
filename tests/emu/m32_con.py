@@ -99,6 +99,7 @@ TO_FILE = b"to file\r\n!abc"
 
 def main(argv):
     keep = "--shot" in argv
+    ntsc = "--ntsc" in argv                  # test-m32n: the same on an NTSC machine
     fails = []
 
     def check(cond, msg):
@@ -118,13 +119,19 @@ def main(argv):
     def same(b, name, rgb, what):
         p = os.path.join(SHOTDIR, f"m32-{name}.png")
         b.screenshot(p)
+        if ntsc:                            # the models are laid out on a PAL
+            print(f"  {what:<58s} not compared on NTSC")   # frame: 262 lines, not 312
+            if not keep:
+                os.remove(p)
+            return
         bad, shown = vbxeref.compare_to_shot(rgb, p)
         check(not bad, f"{what}: {bad} px differ from the model; first {shown[:3]}")
         print(f"  {what:<58s} {'ok' if not bad else 'FAIL'}")
         if not keep and not bad:
             os.remove(p)
 
-    emu = launch(tag="m32", memsize="1088K", extra_args=["--disk", DISK])
+    emu = launch(tag="m32n" if ntsc else "m32", memsize="1088K", extra_args=["--disk", DISK],
+                 pal=not ntsc)
     b = emu.bridge
     try:
         t, st = boot(b)
@@ -236,8 +243,11 @@ def main(argv):
         # -- the clock: Tgettimeofday and clock() across evnt_timer(500) ----
         # Seconds since 1970 from the RTC read once, microseconds from the
         # ~4 kHz timer (src/sys/irq.c, irq_clock).  The wait is measured in
-        # frames -- 25 of 20 ms on this PAL machine -- so the span is 500 ms
-        # give or take a frame each side and the poll's own slack; the
+        # frames -- 25 of 20 ms on a PAL machine, 30 of 16.7 on NTSC, where
+        # vex_timv says 17 (src/vdi/vdi.c): a tick of 20 assumed there gave
+        # 25 frames, 417 ms, which the floor below is placed to catch -- so
+        # the span is 500 ms give or take a frame each side and the poll's
+        # own slack; the
         # microseconds must be a real fraction of a second, and time must
         # not run backwards.  clock() reports the same span in the units
         # its header names, which the program hands back beside it.
@@ -255,7 +265,8 @@ def main(argv):
         check(cps > 0 and abs(cms - span) <= 40,
               f"clock() saw {cspan} ticks at {cps}/s = {cms} ms, Tgettimeofday {span} ms")
         print(f"  Tgettimeofday: {a_s}.{a_us:06d} -> {b_s}.{b_us:06d}, {span} ms across "
-              f"evnt_timer(500); clock() {cspan} ticks at {cps}/s ({cms} ms)")
+              f"evnt_timer(500) on {'NTSC' if ntsc else 'PAL'}; clock() {cspan} ticks "
+              f"at {cps}/s ({cms} ms)")
         line = b.memdump(at("m32_line"), 5)
         text = b.memdump(at("m32_text"), 5)
 
@@ -381,7 +392,7 @@ def main(argv):
     finally:
         emu.stop()
 
-    print(f"gem4xe-m32: {'PASS' if not fails else 'FAIL'} -- GEMDOS's console, "
+    print(f"gem4xe-m32{'n' if ntsc else ''}: {'PASS' if not fails else 'FAIL'} -- GEMDOS's console, "
           f"handles, memory, Pexec and Pterm, {len(fails)} problem(s)")
     return 1 if fails else 0
 

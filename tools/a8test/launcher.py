@@ -63,7 +63,12 @@ XLROM = os.environ.get("ATARIXL_ROM", "/opt/altirra/roms/ATARIXL.ROM")
 # boot at all, where under "generic" it is up in 400 frames.  So the gates
 # say what they have always actually run, and a 92 KB load costs its five
 # thousand frames.
-BASE_ARGS = ["--pal", "--hardware", "800xl", "--kernel", "xl", "--nobasic",
+# The video standard is not here: launch() puts --pal or --ntsc in front of
+# these by its `pal` argument.  Every gate ran PAL until the NTSC one
+# (test-m32n), because the frame is what evnt_timer and the double-click
+# window are measured in and a 20 ms tick assumed on a 16.7 ms machine is
+# a fifth short (src/vdi/vdi.c vdi_vex_timv).
+BASE_ARGS = ["--hardware", "800xl", "--kernel", "xl", "--nobasic",
              "--diskemu", "generic", "--siopatch", "--nofastboot",
              "--noultimate1mb"]
 VBXE_DEVICE = "vbxe,version=126,alt_page=false,shared_mem=false"
@@ -171,7 +176,7 @@ def check_patched(bridge, exe=None):
 
 def launch(tag="run", extra_args=(), vbxe=True, rapidus=True, memsize="1088K",
            timeout=60, require_real_rom=True,
-           require_patched=True):
+           require_patched=True, pal=True):
     run_dir = os.path.join(ROOT, "build", "emu", f"{tag}-{os.getpid()}")
     sock = os.path.join(run_dir, "bridge.sock")
     check_socket_path(sock)             # before anything is made or started
@@ -183,7 +188,8 @@ def launch(tag="run", extra_args=(), vbxe=True, rapidus=True, memsize="1088K",
     if blacklist:
         env["SDL_JOYSTICK_BLACKLIST_DEVICES"] = blacklist
     exe = altirra()
-    args = [exe, f"--bridge=unix:{sock}", *BASE_ARGS, "--memsize", memsize, "--cleardevices"]
+    args = [exe, f"--bridge=unix:{sock}", "--pal" if pal else "--ntsc", *BASE_ARGS,
+            "--memsize", memsize, "--cleardevices"]
     if vbxe:
         args += ["--adddevice", VBXE_DEVICE]
     if rapidus:
