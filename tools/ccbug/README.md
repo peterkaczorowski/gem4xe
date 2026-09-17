@@ -507,3 +507,62 @@ eight polls in `bootinfo.c`. The sources now read the byte into a word
 through a helper and compare the word — `while (vcount() < line) ;`, with
 `vcount()` a real call (`jsl`) that costs nothing at 20 MHz — and that
 shape runs in `bugs.c` as `r_b16_fix`. Rule 16.
+
+## Reading the map — not a bug, and it gave the wrong answer twice
+
+`clock()` turned up in a program that never calls it, 275 bytes together
+with `Tgettimeofday`, and `ln65816 --list-file` showed both as sections
+with no referrer. That was read, twice on the same day, as a dead-section
+bug in the linker: an unreachable cycle (`clock` calls `Tgettimeofday`;
+`Tgettimeofday`'s section branches into `clock`'s) that the mark had
+failed to drop. It was neither unreachable nor a bug.
+
+**The map lists a section's referrers by symbol, and a local label is not
+a symbol it prints.** At -O2 cc65816 shares an identical tail across the
+functions of one translation unit — the `dl()`/`dos()` epilogue of the
+GEMDOS bindings in `src/app/gemlib.c` — and parks it inside one
+function's section, so every other function reaches it through a
+`?Lnnnn` label. In the map every one of those references is invisible,
+and `clock` and `Frename` both read as referrer-less while live. The
+chain, from the object file:
+
+    Fread, Fwrite, Fseek   ->  Frename's section        via ?L1473
+    Frename, Fdatime       ->  Tgettimeofday's section  via ?L1466
+    Tgettimeofday, Fforce, Pexec, Ptermres, Mshrink
+                           ->  clock's section          via ?L1462
+
+so any GEMDOS file binding brings `clock` in; twelve bindings reach it
+within three hops.
+
+**It happens only under `--data-model=large`.** The same `gemlib.c`
+compiled `--data-model=small` — the kit's default, and every program in
+this tree — shares no tails at all, and only `Tgettimeofday` reaches
+`clock`. A large-model program pays the 275 bytes the moment it touches a
+file; a small-model one never does.
+
+The tool is `objchain.py`. It walks an object's relocations backwards
+from a symbol's section — `readelf -SW` for the sections and, for each
+`.relocations` section, its file offset and the section it applies to;
+`-rW` for the entries, matched to their target by that offset; `-sW` for
+every symbol's section, local labels included — and names every global
+function that transitively keeps the symbol alive:
+
+    python3 tools/ccbug/objchain.py build/appld/gemlib.o clock --hops 3
+    12 global function(s) bring clock in within 3 hop(s):
+      Fattrib Fdatime Fforce Fread Frename Fseek Fwrite Mshrink Mxalloc Pexec Ptermres Tgettimeofday
+
+    python3 tools/ccbug/objchain.py build/app/gemlib.o clock --hops 3
+    1 global function(s) bring clock in within 3 hop(s):
+      Tgettimeofday
+
+Three things to keep from it. The map is a summary of the relocations,
+not the relocations: when the question is "what references this", read
+the object. A `\b` in a regex cannot match a symbol that begins with `?`,
+which is how the first scan for `?L1466` found nothing and confirmed the
+wrong theory. And the tail-sharing is sound code — the observation is
+only that parking a shared tail inside one function's section makes
+dead-section elimination all-or-nothing for everything that branches in,
+a size cost and not a correctness one, and the sources do not work around
+it. The evidence — both sessions' maps, objects, readelf dumps, and the
+scripts that produced the wrong answer and then the right one — is kept
+outside the tree at `build/ccbug-clock-cycle/`, not committed.
