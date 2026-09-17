@@ -36,7 +36,7 @@ import sys
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from a8test.launcher import launch          # noqa: E402
+from a8test.launcher import launch, config_dir_for   # noqa: E402
 import atr                                  # noqa: E402
 import devref                               # noqa: E402
 import emitref as E                         # noqa: E402
@@ -44,7 +44,7 @@ import vdiref                               # noqa: E402
 from vdiref import (V_OPNWK, V_GTEXT, V_PLINE, VR_RECFL, VSF_COLOR,  # noqa: E402
                     VSF_INTERIOR, VSL_COLOR, VST_COLOR, VSWR_MODE, WORK_IN)
 from m14_sparta import type_line, wait_prompt, screen    # noqa: E402
-from m19_files import CONFIG_DIR            # noqa: E402
+CONFIG_DIR = config_dir_for("m30")          # this run's own (see m19)
 
 SRC_DISK = os.path.abspath(os.path.join(ROOT, "build", "m30-boot.atr"))
 DISK = os.path.abspath(os.path.join(ROOT, "build", "m30-run.atr"))

@@ -143,3 +143,49 @@ file's first target becomes the default goal.  The comment above `all`
 says a plain `make` should leave no disk behind its sources, precisely so
 a gate run by hand cannot boot a stale image; that protection had been
 off for as long as the `.d` files had existed.
+
+## A second machine, and a gate that read a buffer nobody had filled
+
+drac030 pointed out that the Rapidus is one way to get a 65C816 with
+linear RAM and not the only one, so testing only against it proves less
+than it looks.  Altirra's core has always carried a CPU model and a
+high-bank count of its own, independent of any accelerator device; only
+the SDL front end could not reach them.  This tree's fork now can
+(`--cpu`, `--highbanks`), so `make test-m5p` runs the same probe on a
+bare 65C816 with fifteen high banks -- the shape of an Antonia.  It
+reports `FARMEM_UNKNOWN`, which is the right answer rather than a
+shortcoming: linear RAM found, board not identified.
+
+**The gate failed for two hours while a byte-for-byte scratch probe of
+the same machine passed.**  It was not the machine.  `m5` polled `$0600`
+until the runner published `VD` and a ready flag, and then read the
+results whether or not that flag had ever come up.  On the slower machine
+the runner was still walking banks, so the gate read a zeroed buffer and
+announced *"no linear RAM found -- gem4xe cannot run on this machine"*
+about a machine with twelve banks of it.  All seven failures it printed
+were facts about an empty buffer.
+
+The poll now decides.  Not ready is a failure, named as one, and nothing
+below it is called an answer.  Proved by running the gate with the wait
+cut to a single iteration: it says *"runner never published a result"*,
+which is what it should have said all along.  That is
+`probe-poll-for-completion` for the third time in this project, and the
+shape is always the same -- the check exists, its verdict is discarded.
+
+## The worse bug the fix exposed
+
+The emulator **saves its machine settings on exit**, and every gate shared
+`~/.config/altirra`.  So an AltirraSDL build with no `--cpu` switch at all
+**passed** the new plain-65C816 gate, because an earlier run had persisted
+`"CPU: Chip type = 2"` and it was simply still sitting there.  A gate that
+can pass on a build lacking the very feature it tests is measuring the
+config file.
+
+Each run now gets a config directory of its own, seeded from the user's
+`settings.ini` with the chip type and high-bank count zeroed: every caller
+states the machine it wants, so a remembered one can only ever disagree
+silently.  With that in place the pre-patch build fails, as it must.  And
+`launch()` asks the CPU what it is whenever a plain 65C816 was requested,
+because an emulator that does not know `--cpu` logs the switch and carries
+on as a 6502 -- and the gate would have reported that as a finding about
+gem4xe rather than about the emulator.

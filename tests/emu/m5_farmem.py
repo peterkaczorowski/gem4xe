@@ -26,7 +26,7 @@ STATUS = 0x0600
 KINDS = {0: "NONE", 1: "RAPIDUS", 2: "UNKNOWN"}
 
 
-def main():
+def main(argv=()):
     # Where the far CODE is, so the gate can insist the far HEAP starts above
     # it.  This is the regression that motivates the check: the first version
     # probed and allocated from bank $01, which is where the code lives, and
@@ -38,23 +38,44 @@ def main():
     print(f"far code   : ${far[0][0]:06X}-${code_top:06X}  "
           f"-> heap must start at bank ${want_first:02X}")
 
-    emu = launch(tag="m5", memsize="1088K", extra_args=["--disk", DISK])
+    # --plain816 is the SECOND MACHINE: a bare 65C816 with high banks and
+    # no accelerator at all, which is the shape of an Antonia and is what
+    # proves nothing here depends on the Rapidus.  Altirra's core always
+    # had the CPU model and the bank count as its own settings; only the
+    # SDL front end could not reach them, and this tree's fork now can
+    # (tools/altirra/altirra-sdl-cpu-highbanks.patch).
+    plain = "--plain816" in argv
+    emu = launch(tag="m5p" if plain else "m5", memsize="1088K",
+                 rapidus=not plain, cpu816=15 if plain else 0,
+                 extra_args=["--disk", DISK])
     b = emu.bridge
     fails = []
     try:
         b.frames(300)
-        b.poke(0xD1FF, 0x01)
-        b.poke(0xD191, 0x00)
-        b.frames(500)
+        if not plain:
+            b.poke(0xD1FF, 0x01)    # the Rapidus switches itself; a plain
+            b.poke(0xD191, 0x00)    # 65C816 is already one
+            b.frames(500)           # ...and takes a reset to settle
         for k in ("L", "M", "3", "RETURN"):
             b.key(k)
             b.frames(10)
         b.frames(250)
-        for _ in range(200):            # ready, not merely alive
+        # Ready, not merely alive -- and the ANSWER to that question is
+        # what decides the gate.  An earlier version polled for readiness
+        # and then read the buffer regardless, so a runner still probing
+        # banks published a zeroed result and the gate announced "no
+        # linear RAM found" about a machine that has 12 banks of it.  A
+        # buffer that is not ready holds nothing; say so instead.
+        ready = False
+        for _ in range(400):
             st = bytes(b.memdump(STATUS, 3))
             if st[:2] == b"VD" and st[2] == 1:
+                ready = True
                 break
             b.frames(4)
+        if not ready:
+            print(f"runner     : NOT READY after the wait ({st!r})")
+            fails.append("runner never published a result -- nothing below is its answer")
         s = bytes(b.memdump(STATUS, 24))
         kind, first, last, banks = s[16], s[17], s[18], s[19]
         mb = (s[20] | (s[21] << 8)) / 16.0
@@ -63,19 +84,26 @@ def main():
               f"({banks} banks, {mb:.1f} MB)")
         print(f"alloc test : {'PASS' if s[22] else 'FAIL'} (4K at bank ${s[23]:02X})")
 
-        if s[:2] != b"VD":
-            fails.append("runner did not come up")
         if kind == 0:
             fails.append("no linear RAM found -- gem4xe cannot run on this machine")
-        if kind != 1:
-            fails.append(f"expected the probe to name Rapidus, got {KINDS.get(kind)}")
-        if banks < 64:
-            fails.append(f"only {banks} banks found; expected a megabyte-class board")
+        if plain:
+            # A bare 65C816 is not a board the probe can name, and saying
+            # so is the right answer rather than a shortcoming: FARMEM_
+            # UNKNOWN means "linear RAM found, board not identified".
+            if kind != 2:
+                fails.append(f"expected an unidentified board, got {KINDS.get(kind)}")
+            if banks < 8:
+                fails.append(f"only {banks} banks found above the code")
+        else:
+            if kind != 1:
+                fails.append(f"expected the probe to name Rapidus, got {KINDS.get(kind)}")
+            if banks < 64:
+                fails.append(f"only {banks} banks found; expected a megabyte-class board")
         # Rapidus: SRAM in the low banks is contiguous with the SDRAM above
         # it, so the probe sees one unbroken run reaching to bank $EF.
         # Hardcoding the documented "14.5 MB at $080000" would have missed the
         # first 448 KB.
-        if last != 0xEF:
+        if not plain and last != 0xEF:
             fails.append(f"run ends at bank ${last:02X}, expected $EF")
         # ...and it must begin ABOVE the far code, or the program allocates
         # its own text.  Both numbers come from where the linker actually put
@@ -95,13 +123,14 @@ def main():
 
     print()
     if fails:
-        print("gem4xe-m5: FAILED")
+        print(f"gem4xe-m5{'p' if plain else ''}: FAILED")
         for f in fails:
             print("   FAIL:", f)
         return 1
-    print("gem4xe-m5: PASSED -- linear RAM discovered and usable")
+    print(f"gem4xe-m5{'p' if plain else ''}: PASSED -- linear RAM discovered and usable on "
+          f"{'a plain 65C816' if plain else 'a Rapidus'}")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

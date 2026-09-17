@@ -43,7 +43,7 @@ import sys
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from a8test.launcher import launch          # noqa: E402
+from a8test.launcher import launch, config_dir_for   # noqa: E402
 import aesref, vdiref, vbxeref, symfile, atr    # noqa: E402
 import deskref                              # noqa: E402
 from deskref import Desktop, DROOT, GLOBES_SIZE, LEN_ZPATH  # noqa: E402
@@ -73,9 +73,12 @@ DISK = os.path.abspath(os.path.join(ROOT, "build", "m19-run.atr"))
 # starts, and reads the working copy afterwards; the emulator's log says
 # which configuration directory it chose, and the gate checks it against
 # this one rather than trusting it.
-CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME",
-                                         os.path.expanduser("~/.config")),
-                          "altirra")
+# ...and that directory is this RUN's own, not the user's: the emulator
+# writes its machine settings back on exit, so a shared one lets each gate
+# inherit the last one's CPU and RAM (tools/a8test/launcher.py,
+# private_config).  The gate still checks the emulator's log against it
+# rather than trusting the arrangement.
+CONFIG_DIR = config_dir_for("m19")
 INF_NAME = "DESKTOP.INF"                    # what Save desktop writes
 NEWDIR = "NEWDIR"                           # the folder the gate makes
 KILLDIR = "SUB"                             # ...and the tree it deletes

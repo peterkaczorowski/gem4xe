@@ -1200,7 +1200,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-boot test-install
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m5p test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-boot test-install
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -1310,6 +1310,13 @@ test-m3: build/m3-boot.atr
 
 test-m4: build/m3-boot.atr
 	python3 tests/emu/m4_aes.py
+
+# The same probe on a SECOND MACHINE: a bare 65C816 with high banks and
+# no accelerator, which is what an Antonia is and what proves nothing here
+# depends on the Rapidus.  Needs this tree's AltirraSDL fork for --cpu and
+# --highbanks (tools/altirra/altirra-sdl-cpu-highbanks.patch).
+test-m5p: build/m3-boot.atr
+	python3 tests/emu/m5_farmem.py --plain816
 
 test-m5: build/m3-boot.atr
 	python3 tests/emu/m5_farmem.py
@@ -1619,4 +1626,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc mscan test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-boot test-install test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc mscan test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m5p test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-boot test-install test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean

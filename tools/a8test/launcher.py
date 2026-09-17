@@ -27,6 +27,8 @@ joystick devices from sysfs and hands SDL their ids as a blacklist.
 """
 import glob
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
@@ -49,11 +51,14 @@ def altirra():
 ALTIRRA = altirra()     # as found at import, for anything that names it
 XLROM = os.environ.get("ATARIXL_ROM", "/opt/altirra/roms/ATARIXL.ROM")
 
-# --noultimate1mb: the emulator saves its profile to ~/.config/altirra on
-# exit, U1MB state included, so a run that switched it on (--u1mbrom) would
-# leave it on for every run after.  Pinned off here; an extra_args
-# --u1mbrom comes later on the line and wins.  Only the patched emulator
-# (tools/altirra/) knows the switch; the installed one logs it and goes on.
+# --noultimate1mb: the emulator saves its profile on exit, U1MB state
+# included, so a run that switched it on (--u1mbrom) would leave it on for
+# every run after.  Each run now gets a config directory of its own
+# (private_config), so that particular leak is closed at the source, but
+# the machine is still stated rather than inherited.  Pinned off here; an
+# extra_args --u1mbrom comes later on the line and wins.  Only the patched
+# emulator (tools/altirra/) knows the switch; the installed one logs it
+# and goes on.
 #
 # --diskemu generic: the drive the gates run.  This said "fastestpossible"
 # for thirteen phases, which is not one of the emulator's names for a mode
@@ -174,16 +179,66 @@ def check_patched(bridge, exe=None):
             "ALTIRRASDL=/path/to/patched/AltirraSDL")
 
 
+def run_dir_for(tag):
+    """Where launch(tag=...) will put this run's files.  Derived, not
+    remembered, so a gate that needs to know before it launches -- m19 and
+    m30 drop the emulator's working copy of their disk -- asks the same
+    function launch() uses instead of rebuilding the path itself."""
+    return os.path.join(ROOT, "build", "emu", f"{tag}-{os.getpid()}")
+
+
+def config_dir_for(tag):
+    """The emulator's configuration directory for that run.  It is the
+    run's own (see private_config), not the user's ~/.config/altirra, and
+    disk_state lives under it."""
+    return os.path.join(run_dir_for(tag), "config", "altirra")
+
+
+def private_config(run_dir):
+    """A config directory of this run's own, seeded from the user's.
+
+    The emulator SAVES its machine settings on exit -- CPU type, high
+    banks, memory mode, U1MB -- so with a shared ~/.config/altirra each
+    gate inherits whatever the last one left behind, and a switch that
+    was never honoured can be covered for by a profile that remembers it.
+    That is not hypothetical: an emulator build with no --cpu switch at
+    all PASSED the plain-65C816 gate here, because an earlier run had
+    persisted "CPU: Chip type = 2" and it was simply still there.
+
+    Only settings.ini is copied.  The rest of the directory is a game
+    library, thumbnails and disk state -- 85 MB of it, and nothing a
+    headless gate reads.
+    """
+    cfg = os.path.join(run_dir, "config")
+    os.makedirs(os.path.join(cfg, "altirra"), exist_ok=True)
+    src = os.path.join(os.environ.get("XDG_CONFIG_HOME",
+                                      os.path.expanduser("~/.config")),
+                       "altirra", "settings.ini")
+    if os.path.exists(src):
+        with open(src, errors="ignore") as f:
+            ini = f.read()
+        # ...and the CPU is never inherited.  Every caller states the
+        # machine it wants -- a Rapidus device, --cpu/--highbanks, or the
+        # 6502 that is the default -- so a remembered chip type can only
+        # ever disagree with the one that was asked for, silently.
+        ini = re.sub(r'("CPU: Chip type"|"Memory: High banks") = -?\d+',
+                     r"\1 = 0", ini)
+        with open(os.path.join(cfg, "altirra", "settings.ini"), "w") as f:
+            f.write(ini)
+    return cfg
+
+
 def launch(tag="run", extra_args=(), vbxe=True, rapidus=True, memsize="1088K",
            timeout=60, require_real_rom=True,
-           require_patched=True, pal=True):
-    run_dir = os.path.join(ROOT, "build", "emu", f"{tag}-{os.getpid()}")
+           require_patched=True, pal=True, cpu816=0):
+    run_dir = run_dir_for(tag)
     sock = os.path.join(run_dir, "bridge.sock")
     check_socket_path(sock)             # before anything is made or started
     os.makedirs(run_dir, exist_ok=True)
     if os.path.exists(sock):
         os.remove(sock)
     env = dict(os.environ, SDL_VIDEODRIVER="offscreen", SDL_AUDIODRIVER="dummy", TMPDIR=run_dir)
+    env["XDG_CONFIG_HOME"] = private_config(run_dir)
     blacklist = host_joystick_ids()
     if blacklist:
         env["SDL_JOYSTICK_BLACKLIST_DEVICES"] = blacklist
@@ -194,6 +249,14 @@ def launch(tag="run", extra_args=(), vbxe=True, rapidus=True, memsize="1088K",
         args += ["--adddevice", VBXE_DEVICE]
     if rapidus:
         args += ["--adddevice", RAPIDUS_DEVICE]
+    elif cpu816:
+        # A PLAIN 65C816, no accelerator: the machine an Antonia is, and
+        # the one that proves nothing here depends on the Rapidus.  The
+        # CPU and its high banks are the simulator's own settings, which
+        # only this fork's front end can reach (--cpu, --highbanks).
+        # cpu816 is the bank count; 15 is a megabyte above bank $00,
+        # which is where gem4xe wants its far code anyway.
+        args += ["--cpu", "65c816", "--highbanks", str(cpu816)]
     args += list(extra_args)
 
     logf = open(os.path.join(run_dir, "altirra.log"), "w")
@@ -214,6 +277,17 @@ def launch(tag="run", extra_args=(), vbxe=True, rapidus=True, memsize="1088K",
         except BridgeError:
             emu.stop()
             raise
+    if cpu816 and not rapidus:
+        # --cpu is THIS tree's patch, not upstream's, and an emulator that
+        # does not know the switch logs it and carries on as a 6502 -- so
+        # the caller would get a machine with no linear RAM and a gate
+        # would report that as a finding about gem4xe.  Ask the CPU.
+        mode = b.ok("REGS").get("mode")
+        if mode != "65C816":
+            emu.stop()
+            raise BridgeError(
+                f"asked for a plain 65C816 and got a {mode}: this build has no "
+                "--cpu switch (tools/altirra/altirra-sdl-cpu-highbanks.patch)")
     if vbxe and not b.cmd("DEVICE_GET vbxe").get("ok"):
         b.ok("DEVICE_SET vbxe on version=126 base=d600")
     if verify_kernel(b) is False and require_real_rom:
