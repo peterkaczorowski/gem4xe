@@ -582,3 +582,16 @@ then finds no function that brings `clock` in. The tree's
 a program that builds the bindings itself to do the same. Re-run
 `objchain.py` after adding a binding rather than assuming a chain is
 stable — that is what it is for.
+
+Measured on GACS the same day, the flag shed **1,028 bytes** of a
+138,190-byte image (far 114,210→113,470; bank fixups 7,025→6,929), not
+the 352 the cluster accounts for: placed sections went 1,662→1,639, so
+twenty-three passengers left, not three — the same mechanism had been
+dragging others in. Two details a consumer will meet. The flag belongs
+on `gemlib.c` **only**: `clib.c` compiled with it gave the same section
+count and 15 bytes more, because a program uses nearly all of `clib.c`
+and there is nothing for cross-jumping to waste — this is an
+optimisation for a library a program uses a fraction of. And `make`
+tracks a rule's sources, not its recipe: adding the flag to an existing
+rule rebuilds nothing, the gate re-runs the old image and reports the
+old number — delete the object or make the Makefile a prerequisite.
