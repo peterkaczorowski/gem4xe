@@ -389,6 +389,13 @@ typedef struct {
 #define WM_ONTOP    31  /* AES sends neither -- it is single-application */
 #define AC_OPEN     40
 #define AC_CLOSE    41
+/* MultiTOS's shutdown handshake (MESSAGE.H).  Declared so a port that
+ * switches on a message code compiles and so a shell can send AP_TERM
+ * some day; this AES sends none of them, having one application and no
+ * process to ask anything of. */
+#define AP_TERM     50
+#define AP_TFAIL    51
+#define AP_TSUCCESS 52
 
 /* wind_create kinds, wind_get / wind_set fields, wind_update codes */
 #define NAME    0x0001
@@ -794,6 +801,8 @@ WORD objc_draw_grect(OBJECT *tree, WORD start, WORD depth, const GRECT *r);
 #define FA_VOLUME  0x08
 #define FA_SUBDIR  0x10
 #define FA_ARCHIVE 0x20
+#define FA_CHANGED 0x20         /* the same bit, spelled as Pure C and
+                                 * gemlib spell it */
 
 typedef struct {                /* the ST's, 44 bytes */
     char  d_reserved[21];
