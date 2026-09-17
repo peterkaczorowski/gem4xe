@@ -540,10 +540,26 @@ geometry and both far addresses matching the file, and a record stride of
 50 — which is 34 + 12 + 4, and cannot be 36 + 12 + 4.
 
 **Rule 18: never measure a struct with an array bound.** Ask the
-generated code — a function that returns `sizeof(X)`, or one that takes
-`&arr[1] - &arr[0]` — and read the immediate out of
-`--assembly-source`. `tools/ccbug/check.py` does it that way, and so does
-`tests/host/test_sdk.py`.
+generated code — a function that returns `sizeof(X)` — and read the
+immediate out of `--assembly-source`. `tests/host/test_sdk.py` does.
+(`&arr[1] - &arr[0]` would do as well and is the obvious alternative, but
+this compiler answers a pointer difference between struct members with
+`internal error: ScaleIndex.hs`, so it is not available.)
+
+The tree was swept for the idiom afterwards and carries four uses, all in
+`src/aes/rsrc.c` and all `>=`. That is the safe direction: the evaluator
+only ever over-reports, so a floor can give a false pass but never a
+false failure, and a struct that really was too short still fires the
+assertion with at most three bytes of slack. An `==` against a struct
+size is the shape to refuse in review — and note how it fails, because
+that is what made this expensive: it REFUSES THE TRUE VALUE, so it reads
+as a failed assertion about the code rather than a broken instrument.
+
+The peer porting cflib reproduced B18 independently the same day, and
+found that their own confirmation of a layout fix had been produced with
+this idiom. Their numbers held, but only because every struct they
+checked was already a multiple of four and the rounding had nothing to
+change: an unsound method with a lucky result.
 
 ## Reading the map — not a bug, and it gave the wrong answer twice
 
