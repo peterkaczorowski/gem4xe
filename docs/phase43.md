@@ -86,3 +86,9 @@ reads no memory above `$FFFF`; the title comes from `gl_nbuf`, where the
 AES put it to draw it.  `tools/deskref.py` learned the one call
 `cmd_init` adds -- the probe -- and `aesref` answers it by a `psystem`
 flag the boot gate sets from the DOS it booted.
+
+And one gate the timer commit had been owed: `test-m32n` runs the
+GEMDOS program on an **NTSC** machine -- the first gate that does --
+and `evnt_timer(500)` spans 488 ms there, thirty frames of 16.7,
+where a tick of 20 ms assumed on that frame gave 417; `clock()`
+agrees to the millisecond, which is `irq.pal` read off the GTIA.
