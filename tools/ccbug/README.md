@@ -562,7 +562,23 @@ which is how the first scan for `?L1466` found nothing and confirmed the
 wrong theory. And the tail-sharing is sound code — the observation is
 only that parking a shared tail inside one function's section makes
 dead-section elimination all-or-nothing for everything that branches in,
-a size cost and not a correctness one, and the sources do not work around
-it. The evidence — both sessions' maps, objects, readelf dumps, and the
-scripts that produced the wrong answer and then the right one — is kept
-outside the tree at `build/ccbug-clock-cycle/`, not committed.
+a size cost and not a correctness one. The evidence — both sessions'
+maps, objects, readelf dumps, and the scripts that produced the wrong
+answer and then the right one — is kept outside the tree at
+`build/ccbug-clock-cycle/`, not committed.
+
+**The cluster grows, and there is a switch.** The day `Psystem` went
+into `gemlib.c` the GACS session measured it joining the cluster
+unasked — 352 bytes now, `clock` 215 + `Tgettimeofday` 60 + `Psystem`
+77, for any large-model program that touches a file binding, and one
+member more each time a binding is added in that neighbourhood.
+`cc65816 --no-interprocedural-cross-jump` is the sharing by name.
+Compiling `gemlib.c` with it, in the large model, leaves the library 594
+bytes bigger as a whole and every binding its own section, so a program
+pays 3–13 bytes more for each binding it *calls* (Fread 39→52, Frename
+43→46, Malloc 13→14) and nothing for the ones it does not; `objchain.py`
+then finds no function that brings `clock` in. The tree's
+`build/appld/gemlib.o` rule carries the flag, and the kit's README tells
+a program that builds the bindings itself to do the same. Re-run
+`objchain.py` after adding a binding rather than assuming a chain is
+stable — that is what it is for.

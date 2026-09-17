@@ -34,7 +34,14 @@ the packer.
 
 The library is source, not an object, so that it is built by *your*
 compiler with *your* flags -- and so that you can read what a call
-actually does.
+actually does.  One flag to keep: `lib/gemlib.c` is compiled with
+`--no-interprocedural-cross-jump`, as this kit's Makefile does.  Without
+it, at `-O2`, the compiler shares one tail across the GEMDOS bindings
+and parks it inside one function's section, so a `--data-model=large`
+program that calls `Fread` links `clock`, `Tgettimeofday` and `Psystem`
+it never calls -- 352 bytes, and more with every binding added.  With it
+each binding is its own section and costs you 3-13 bytes per binding
+you call, and nothing for the rest.
 
 ## The shape of a program
 

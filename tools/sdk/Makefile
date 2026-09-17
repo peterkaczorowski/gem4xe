@@ -71,6 +71,16 @@ build/%.o: lib/%.s | build
 build/%.o: lib/%.c include/gem.h | build
 	$(CC) $(CFLAGS) -o $@ $<
 
+# The bindings without interprocedural cross-jumping.  At -O2 the compiler
+# shares one identical tail across the GEMDOS bindings and parks it inside
+# one function's section, so under --data-model=large a program that calls
+# Fread links clock, Tgettimeofday and Psystem it never calls -- 352 bytes,
+# and more with every binding added.  Without the sharing each binding is
+# its own section: 3-13 bytes more per binding you CALL, nothing for the
+# rest.  Keep this flag if you build the bindings with your own rules.
+build/gemlib.o: lib/gemlib.c include/gem.h | build
+	$(CC) $(CFLAGS) --no-interprocedural-cross-jump -o $@ $<
+
 build/$(NAME).o: $(APP) include/gem.h | build
 	$(CC) $(CFLAGS) -o $@ $<
 

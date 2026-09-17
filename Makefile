@@ -465,6 +465,18 @@ build/appld/%.o: src/app/%.s
 build/appld/%.o: src/app/%.c src/app/gem.h
 	@mkdir -p build/appld
 	$(CC) --code-model=large --data-model=large -O2 -I src -I src/app -o $@ $<
+# The bindings without interprocedural cross-jumping.  At -O2 in the large
+# model the compiler shares one identical tail across the GEMDOS bindings
+# and parks it inside one function's section, so a program that calls
+# Fread links clock, Tgettimeofday and Psystem it never calls -- 352 bytes,
+# and one more binding every time one is added (tools/ccbug/README.md,
+# "Reading the map").  Without the sharing each binding is its own
+# section and costs a program 3-13 bytes more per binding it CALLS;
+# tools/ccbug/objchain.py then finds nothing that brings clock in.
+build/appld/gemlib.o: src/app/gemlib.c src/app/gem.h
+	@mkdir -p build/appld
+	$(CC) --code-model=large --data-model=large -O2 --no-interprocedural-cross-jump \
+	    -I src -I src/app -o $@ $<
 # $(8), when given, is the runtime library: a --data-model=large program
 # needs clib-lc-ld.a and the large-data half of the application library,
 # because the linker refuses to mix runtime models.
