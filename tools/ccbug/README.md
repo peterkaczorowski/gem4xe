@@ -835,7 +835,8 @@ the compiler, so `HANGS` in `check.py` compiles the file under a timeout and
 "still present" means the timeout fired. At `-O0` it compiles at once and
 reads `FIXED upstream`, which the matrix above records deliberately.
 
-Not yet reported upstream.
+Reported as [Calypsi #90](https://github.com/hth313/Calypsi-tool-chains/issues/90)
+on 2026-09-18, with the reproducer inline and the matrix above.
 
 ## Another project's ledger: MicroPython on the SNES
 
