@@ -28,12 +28,17 @@ listing read:
       B6 indexed direct-page array                       compiles   still present
       B11 near <-> far struct copy over 8 bytes          compiles   still present
       B16 byte spin loop, rep before its back edge         compiles   still present
-    check-cc: PASSED -- every workaround shape is right; 14 of 20 bug shapes still present
+    check-cc: PASSED -- every workaround shape is right; 16 of 20 bug shapes still present
 
 The run **fails only if a workaround shape stops compiling right**, because
 that is what would break gem4xe. A bug that has gone away is reported as
 `FIXED upstream`, which is the cue to remove its workaround. `make test`
 includes it.
+
+A second project's ledger is summarised at the end — **MicroPython on the
+SNES**, 23 findings against 5.17, filed upstream as Calypsi #86. It is their
+evidence, kept separate from the numbered entries for that reason, and it
+says which of the twenty-three gem4xe is and is not exposed to.
 
 Every one of these was first seen as a wrong pixel or a wrong returned value
 in the conformance suites, then proved by reading the emitted assembly and
@@ -784,6 +789,88 @@ of that and reported 61 calls, every one of them safe -- the compiler
 calls an outlined fragment while narrow and the fragment widens before it
 returns.  Rule 17: do not spin a scan's output into a bug without reading
 one hit all the way through.
+
+## Another project's ledger: MicroPython on the SNES
+
+Fabian Kuebler ported **MicroPython v1.28.0 to the SNES** -- 65816, HiROM,
+large memory model, Calypsi **5.17** -- and it passes 91.9% of MicroPython's
+own `tests/basics` on the console. Probably the largest C codebase this
+toolchain has carried. Along the way he root-caused **23 codegen findings**,
+filed as [Calypsi #86](https://github.com/hth313/Calypsi-tool-chains/issues/86)
+with the five broadest as their own issues.
+
+    repo      github.com/FabianKuebler/micropython-snes
+    ledger    DECISIONS.md          -- all 23, dated, with listings
+    repros    bugs/                 -- three ready-to-compile cases
+    scanner   tools/check_neg_index.py
+
+**THIS SECTION IS THEIR EVIDENCE, NOT OURS**, the same standing B17 has.
+Nothing below was met in gem4xe unless it says so.
+
+| upstream | finding |
+|---|---|
+| #81 | `__attribute__((aligned))` silently ignored on struct members and types |
+| #82 | negative constant index on a **far** pointer compiles to unsigned Y-indexing; the access lands one bank away |
+| #83 | the **third** pointer parameter loses its bank byte in call marshalling |
+| #84 | assign-and-test in a loop condition stores an OR-mangled value (accumulator clobber) |
+| #85 | `volatile` stores to stack locals dropped inside functions containing `setjmp` |
+
+And from the ledger, not separately filed: a variadic function whose **last
+named parameter is 16-bit** has it destroyed by `tsc` in the frame setup
+before it is saved (pointer and 32-bit last parameters go in pseudo
+registers and are safe); flexible-array-member initializers silently
+dropped; `--cross-call` corrupting indirect-call arguments; `!(k >= k) ||
+f()` folding to constant TRUE; and an ICE, "unable to label".
+
+### What it costs gem4xe
+
+Checked, rather than assumed:
+
+- **#85 is not reachable here.** gem4xe uses no `setjmp`/`longjmp` at all.
+- **#81 is not reachable here.** No `aligned` attribute in the tree.
+- **The varargs bug is not reachable here.** gem4xe has no `va_start` of its
+  own, and the vendor `printf` the kit stubs takes `const char *fmt` as its
+  last named parameter -- the shape their note explicitly calls safe.
+- **#82 is the family B13/B14 belong to**, which is the interesting one.
+  Ours was a NEAR `WORD *pt` in `draw_arrow`, where `pt[-2]` "came back as
+  neither point"; theirs is the FAR `[dp],y` form, where Y is added to a
+  24-bit base as unsigned 16 bits so the access lands in the next bank.
+  B13/B14 are fixed in 5.18.2. Theirs was found on 5.17.
+
+**#82 does not reproduce here, and that is worth almost nothing.** On 5.18.2
+at `-O2`, `--code-model=large --data-model=large`, `sp[-2]` through a
+`__far` pointer compiles to the safe form -- adjust the base with `sbc ##4`,
+then a non-indexed `[_Dp]` -- and a scan of 50 of gem4xe's 71 sources finds
+zero `ldy ##<negative>` followed by long-indexed addressing. But **their own
+note says which form the compiler picks is register-pressure roulette, per
+compilation**, so a four-function file and a clean tree are exactly the
+evidence B1 taught us to distrust: a shape that compiles correctly today is
+not a shape that is fixed.
+
+### The scan, and the lesson it repeated within the hour
+
+Their `check_neg_index.py` scans generated listings for the bad pattern and
+fails the build -- independently the same idea as `mscan.py`, arrived at for
+the same reason: a defect the compiler chooses at random cannot be caught by
+testing, only by looking at what came out.
+
+Writing our version of that scan reproduced
+[[make-a-silent-check-fail-first]] immediately. The first version reported
+**zero** over the whole tree and **one** of the two sites in a deliberately
+bad fixture -- because Calypsi puts the first instruction of a function on
+the same line as its label (`below2:     sec`), and the pattern required
+leading whitespace. Every negative-Y at a function's first instruction was
+invisible. The tree's zero was meaningless until the fixture said two.
+
+### Do not mine the patch; mine the ledger
+
+`patches/0001-compiler-workarounds.patch` is 2,351 lines over 56 files and
+is **not** a list of compiler bugs. Much of it is 16-bit-`int` portability --
+`((size_t)x + (size_t)y * (size_t)fb->stride)` -- which is correct C that
+MicroPython's own code had assumed a 32-bit `int` for. Taking entries from
+the patch would put "bugs" in this catalogue that are the language working
+as specified. `DECISIONS.md` is where he separates the two, and it is the
+file to read.
 
 ## Reading the map — not a bug, and it gave the wrong answer twice
 
