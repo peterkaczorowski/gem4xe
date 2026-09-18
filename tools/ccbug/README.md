@@ -180,8 +180,12 @@ takes the callee's flags. One of the two is wrong whatever the intended
 contract, and neither `assembly-interface.html` nor `efficient-coding.html`
 documents a condition-code contract for the runtime helpers.
 
-**-O2 only.** An earlier version of this entry, and the comment in
-`src/sys/div16.s`, both said "-O1 and above". They were wrong.
+**-O2 only.** An earlier version of this entry, the comment in
+`src/sys/div16.s`, and the comment on the reproducer in `bugs.c` all said
+"-O1 and above". They were wrong. The sweep fixed the first; the other two
+were found later, by asking what a stale background job from that day had
+been measuring — a reminder that correcting the catalogue is not the same
+as correcting every place the claim was written down.
 
 **An earlier version also claimed "over 365 test pairs the library's flags
 are right 236 times".  No such sweep has ever existed in this repository**

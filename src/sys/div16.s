@@ -3,8 +3,10 @@
 ;;;
 ;;; WHY THIS EXISTS
 ;;;
-;;; At -O1 and above, cc65816 5.18 branches on the flags a runtime divide
-;;; leaves behind: `if (a / b)` compiles to `jsl _Div16; beq`.  The library's
+;;; At -O2, cc65816 branches on the flags a runtime divide leaves behind:
+;;; `if (a / b)` compiles to `jsl _Div16; beq`.  (This said "-O1 and above"
+;;; until the sweep measured every level on 5.18.2 and found -O1 clean; the
+;;; matrix is in tools/ccbug/README.md.)  The library's
 ;;; _Div16 ends, for a non-negative result, with `plx; bpl; rtl` -- so N and Z
 ;;; are those of the sign word (dividend ^ divisor), not of the quotient.
 ;;; `8 / 8` therefore tests as zero and `7 / 8` as non-zero; `_Mod16` is the

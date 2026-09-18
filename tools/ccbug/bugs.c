@@ -53,7 +53,7 @@ WORD b3_len(const char *s) { WORD n = 0; while (*s++) n++; return n; }
 
 /* ---- B2: the flags after _Div16 / _Mod16 are not the result's ---------- */
 
-/* At -O1 and above `if (a / b)` is `jsl _Div16; beq`.  The library leaves N
+/* At -O2 `if (a / b)` is `jsl _Div16; beq`.  The library leaves N
  * and Z from the sign word (dividend ^ divisor) on the non-negative path, so
  * 8/8 tests as zero and 7/8 as non-zero; _Mod16 likewise tests the dividend.
  * The fix is a replacement _Div16/_Mod16 (src/sys/div16.s, linked with
