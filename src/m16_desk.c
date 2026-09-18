@@ -17,6 +17,9 @@
  *         format-2 loader path (tests/emu/m31_huge.py)
  *     T   run M32.G4A, a TOS program in all but name: GEMDOS's console,
  *         its standard handles and Pterm (tests/emu/m32_con.py)
+ *     F   run M33.G4A, whose resource does not fit the pool and is loaded
+ *         FAR; G runs M33S.G4A, the same program compiled small-data,
+ *         which must be refused (tests/emu/m33_farrsc.py)
  *     X   ask for NOPE.G4A, which is not there: the shell's alert, then
  *         the desktop again
  *     Q   shut GEM down and return to DOS
@@ -67,6 +70,14 @@ int main(void)
          * MEMORY MODEL, not the path. */
         if (k == 'b' || k == 'B') {
             shel_write(SHW_EXEC, 1, 0, "M29.G4A", "\0");
+            break;
+        }
+        if (k == 'f' || k == 'F') {
+            shel_write(SHW_EXEC, 1, 0, "M33.G4A", "\0");
+            break;
+        }
+        if (k == 'g' || k == 'G') {
+            shel_write(SHW_EXEC, 1, 0, "M33S.G4A", "\0");
             break;
         }
         /* H: the one whose far IMAGE crosses a bank (src/m31_huge.c).

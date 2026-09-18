@@ -584,13 +584,21 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
      * addresses are bank $00, so the high words are 0. */
     case 110: {                     /* rsrc_load: name */
         const char *name = near_str(addr_in[0]);
-        ret = name ? rs_load(name) : 0;
+        /* int_in[0] bit 0: the caller takes far addresses.  aes_entry
+         * zeroes int_in and copies only control[1] of them, so a kit that
+         * passes none -- the small-data one -- can never set this by
+         * accident (docs/far-trees.md). */
+        ret = name ? rs_load(name, (WORD)(int_in[0] & 1)) : 0;
         if (ret) {
-            global[5] = (WORD)((uint16_t)rs_loaded() + rs_loaded()->rsh_trindex);
-            global[6] = 0;
-            global[7] = (WORD)(uint16_t)rs_loaded();
-            global[8] = 0;
-            global[9] = (WORD)rs_loaded()->rsh_rssize;
+            RSHDR h;
+            uint32_t b = rs_loaded(), tr;
+            rs_header(&h);
+            tr = b + h.rsh_trindex;
+            global[5] = (WORD)(tr & 0xFFFF);        /* ap_ptree */
+            global[6] = (WORD)(tr >> 16);
+            global[7] = (WORD)(b & 0xFFFF);         /* the header */
+            global[8] = (WORD)(b >> 16);
+            global[9] = (WORD)h.rsh_rssize;
         }
         break;
     }

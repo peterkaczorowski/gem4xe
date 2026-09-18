@@ -1088,7 +1088,18 @@ WORD graf_mkstate(WORD *mx, WORD *my, WORD *mb, WORD *ks)
 WORD rsrc_load(const char *name)
 {
     addr_in[0] = (LONG)(uint32_t)(const char FAR *)name;
+#ifdef __CALYPSI_DATA_MODEL_LARGE__
+    /* This program holds 32-bit pointers, so it can take a resource in far
+     * memory: int_in[0] bit 0 says so, and the AES goes far only when the
+     * file will not fit the pool AND this is set (docs/far-trees.md).  The
+     * small-data build below passes no int_in at all, and aes_entry zeroes
+     * them, so it can never ask by accident -- and a 16-bit program handed
+     * a far resource would have its pointers truncated with no error. */
+    int_in[0] = 1;
+    return aes(110, 1, 1, 1, 0);
+#else
     return aes(110, 0, 1, 1, 0);
+#endif
 }
 
 WORD rsrc_free(void)
@@ -1102,7 +1113,11 @@ WORD rsrc_gaddr(WORD type, WORD index, void **addr)
     int_in[0] = type;
     int_in[1] = index;
     r = aes(112, 2, 1, 0, 1);
-    *addr = (void *)(uint16_t)addr_out[0];
+#ifdef __CALYPSI_DATA_MODEL_LARGE__
+    *addr = (void *)(uint32_t)addr_out[0];  /* all 24 bits: it may be far */
+#else
+    *addr = (void *)(uint16_t)addr_out[0];  /* a pool resource: bank $00 */
+#endif
     return r;
 }
 

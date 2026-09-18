@@ -862,6 +862,25 @@ build/appld/m29_big.o: src/m29_big.c src/app/gem.h
 BIG_OBJS = $(G4A_LIB_LD) build/appld/m29_big.o
 $(eval $(call g4a,m29_big,$(BIG_OBJS),1024,256,384,,,$(LIB_LD)))
 
+# The far-resource gate application (src/m33_farrsc.c), built TWICE from
+# one source: --data-model=large, whose kit asks for far addresses, and
+# --data-model=small, whose kit does not.  FARRSC.RSC is 42 KB against a
+# 14 KB pool (tools/farrsc.py), so the first loads it far and the second
+# must be refused (docs/far-trees.md).
+build/farrsc.rsc build/farrsc.h: tools/farrsc.py tools/rsc.py tools/aesref.py
+	@mkdir -p build
+	python3 tools/farrsc.py build/farrsc.rsc build/farrsc.h
+build/appld/m33_farrsc.o: src/m33_farrsc.c src/app/gem.h build/farrsc.h
+	@mkdir -p build/appld
+	$(CC) --code-model=large --data-model=large -O2 -I src -I src/app -I build -o $@ $<
+build/app/m33_farrsc.o: src/m33_farrsc.c src/app/gem.h build/farrsc.h
+	@mkdir -p build/app
+	$(CC) $(CFLAGS) -I src/app -I build -o $@ $<
+FARRSC_OBJS  = $(G4A_LIB_LD) build/appld/m33_farrsc.o
+FARRSCS_OBJS = $(G4A_LIB) build/app/m33_farrsc.o
+$(eval $(call g4a,m33_farrsc,$(FARRSC_OBJS),1024,256,384,,,$(LIB_LD)))
+$(eval $(call g4a,m33s_farrsc,$(FARRSCS_OBJS),1024,256,384))
+
 # The console gate application (src/m32_con.c): GEMDOS's character calls,
 # its standard handles and Pterm, run through the shell loop by
 # tests/emu/m32_con.py.  A small-data program like the first one, so its
@@ -1120,6 +1139,15 @@ build/m29-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt 
 	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(SHELL_FILES) \
 	    --add build/m29_big.g4a M29.G4A
 
+# The far-resource gate's disk (test-m33): the stand-in desktop, the two
+# builds of the one program, and the resource neither could load before.
+build/m33-boot.atr: build/m3.xex tests/fixtures/test.txt tests/fixtures/out.txt build/test.rsc $(SHELL_DEPS) build/m33_farrsc.g4a build/m33s_farrsc.g4a build/farrsc.rsc tools/mkspdisk.py tools/atr.py
+	@test -n "$(SRC_SP32)" || { echo "no SpartaDOS fixture: set [spartados].disk_32 in fixtures.toml"; exit 1; }
+	@rm -f $@
+	python3 tools/mkspdisk.py "$(SRC_SP32)" $< $@ $(SP_SECTORS) --tree $(DISK_FILES) $(SHELL_FILES) \
+	    --add build/m33_farrsc.g4a M33.G4A --add build/m33s_farrsc.g4a M33S.G4A \
+	    --add build/farrsc.rsc FARRSC.RSC
+
 # And the same again for the application whose far IMAGE crosses a bank
 # (src/m31_huge.c).  Its own disk for the reason m29's is its own: a file
 # added to a fixture moves every pool and directory number the gates on it
@@ -1200,7 +1228,7 @@ build/hello-boot.atr: build/hello.xex
 	@rm -f $@
 	python3 tools/mkdisk.py "$(SRC_DOS)" $< $@ HELLO.COM $(DISK_DENSITY)
 
-test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m5p test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-boot test-install
+test: test-host check-cc test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m5p test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m15 test-m15x test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-m33 test-boot test-install
 
 # GACS's engine on the 65816 -- the application gem4xe exists for, asked
 # whether it still compiles, links and computes there (docs/gacs.md).
@@ -1475,6 +1503,11 @@ test-m28: build/m28-boot.atr
 test-m29: build/m29-boot.atr
 	python3 tests/emu/m29_big.py
 
+# A resource in far memory, and the same file refused to a program that
+# cannot hold a far address (docs/far-trees.md, step 2).
+test-m33: build/m33-boot.atr
+	python3 tests/emu/m33_farrsc.py
+
 # GEMDOS's console, standard handles, memory calls and Pterm, from a
 # program that never calls the AES (docs/phase42.md).
 test-m32: build/m32-boot.atr build/m32_con.sym
@@ -1636,4 +1669,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc mscan negyscan test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m5p test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-boot test-install test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc mscan negyscan test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m5p test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-m33 test-boot test-install test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean

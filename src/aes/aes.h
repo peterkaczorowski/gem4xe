@@ -646,19 +646,20 @@ void wm_calc(WORD wtype, UWORD kind, WORD x, WORD y, WORD w, WORD h,
 /* The RUNNING process's loaded resource, or 0 (src/aes/rsrc.c): a macro
  * over its process record, not a global, so that an accessory holding one
  * does not stop an application loading one. */
-RSHDR *rs_loaded(void);
+uint32_t rs_loaded(void);           /* the resource's base: bank $00 or far; 0 if none */
+void rs_header(RSHDR *h);           /* its header, copied out */
 /* Where the loaded resource's icon bitmaps went, and how many bytes:
  * base 0 when they stayed in the pool.  See src/aes/rsrc.c. */
 void rs_imaddr(uint32_t *base, uint16_t *len);
 /* ...and where a new-format resource's colour-icon extension went: base 0
  * when the file had none.  The mono headers are near (rs_cicons). */
 void rs_ciaddr(uint32_t *base, uint16_t *len);
-WORD rs_load(const char *name);
+WORD rs_load(const char *name, WORD wants_far);   /* wants_far: the caller takes far addresses */
 WORD rs_free(void);
 WORD rs_gaddr(UWORD rtype, UWORD rindex, uint32_t *paddr);
 WORD rs_saddr(UWORD rtype, UWORD rindex, uint32_t addr);
 void rs_obfix(OBJECT FAR *tree, WORD obj);
-void rs_fixit(RSHDR *h);            /* the loader's fix-up, on any image */
+void rs_fixit(uint32_t base);       /* the loader's fix-up, on any image, at any base */
 
 /* ---- what the system says: LANG.RSC (src/aes/lang.c) ------------------ */
 /* The file a translator replaces, looked for where the program was

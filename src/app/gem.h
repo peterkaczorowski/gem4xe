@@ -764,8 +764,12 @@ WORD wind_calc(WORD type, WORD kind, WORD x, WORD y, WORD w, WORD h,
 #define wind_newdesk(tree, root) \
     wind_set(0, WF_NEWDESK, 0, (WORD)(uint16_t)(tree), (root), 0)
 
-/* rsrc_load takes the resource from gem4xe's application pool; the name
- * is a near string.  rsrc_gaddr answers a bank-$00 address. */
+/* rsrc_load takes the resource from gem4xe's application pool when it
+ * fits, and -- for a program compiled --data-model=large, whose binding
+ * says it can take one -- from far memory when it does not
+ * (docs/far-trees.md).  rsrc_gaddr answers a bank-$00 address to a
+ * small-data program, which is all such a program can hold, and a 24-bit
+ * one to a large-data program. */
 WORD rsrc_load(const char *name);
 WORD rsrc_free(void);
 WORD rsrc_gaddr(WORD type, WORD index, void **addr);

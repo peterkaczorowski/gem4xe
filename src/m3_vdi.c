@@ -788,11 +788,15 @@ static void run_script(void)
              * come back so the gate can read the fixed-up image out of
              * bank $00 and compare it with the host's, whole. */
             case 110:                       /* rsrc_load: name */
-                intout[0] = rs_load((const char *)(uint16_t)contrl[7]);
-                intout[1] = (WORD)(uint16_t)rs_loaded();
-                intout[2] = rs_loaded() ? (WORD)rs_loaded()->rsh_rssize : 0;
-                intout[3] = (WORD)pool_room();
-                intout[4] = rs_loaded() ? (WORD)((uint16_t)rs_loaded() + rs_loaded()->rsh_trindex) : 0;
+                {
+                    RSHDR h;
+                    intout[0] = rs_load((const char *)(uint16_t)contrl[7], 0);
+                    rs_header(&h);
+                    intout[1] = (WORD)(uint16_t)rs_loaded();
+                    intout[2] = rs_loaded() ? (WORD)h.rsh_rssize : 0;
+                    intout[3] = (WORD)pool_room();
+                    intout[4] = rs_loaded() ? (WORD)((uint16_t)rs_loaded() + h.rsh_trindex) : 0;
+                }
                 c4 = 5;
                 break;
             case 111:                       /* rsrc_free */

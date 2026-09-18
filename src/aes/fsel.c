@@ -547,7 +547,7 @@ WORD fs_input(char *pipath, char *pisel, WORD *pbutton, const char *pilabel)
     mask = locold + LEN_FSPATH;
 
     far_get((uint8_t *)h, (uint32_t)(const uint8_t FAR *)fs_rsc, FS_RSC_SIZE);
-    rs_fixit(h);
+    rs_fixit((uint32_t)(uint16_t)h);   /* a bank-zero base: the pool */
     tree = (OBJECT FAR *)(uint16_t)*(uint32_t *)((uint8_t *)h + h->rsh_trindex);
 
     /* the donor's fs_start: centred, and the scroll bar the width of a

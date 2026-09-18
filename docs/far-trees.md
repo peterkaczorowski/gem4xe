@@ -1,8 +1,10 @@
 # Object trees in far memory
 
-Status: **step 1 built and measured, 2026-09-18** -- every tree the AES
-touches is addressed as a FAR pointer, no far resource exists yet, and the
-oracle says nothing moved. Designed the same day from measurements of the
+Status: **steps 1 and 2 built and gated, 2026-09-18** -- every tree the
+AES touches is addressed as a FAR pointer, and a resource that does not
+fit the pool loads into far memory for a program that has said it can
+take a far address, and is refused for one that has not (`test-m33`).
+Step 3, QED, is next. Designed the same day from measurements of the
 tree as it was, so the argument rests on what the code does rather than
 on what it is remembered to do.
 
@@ -36,6 +38,75 @@ far memory this design adds later will want that shape. The port that motivates 
 (`docs/qed.md` when it exists; the numbers are below), but the change
 serves every application whose resource or object trees outgrow bank `$00`
 -- RetroWP's included -- and it is the shape a multitasking AES needs.
+
+## Step 2, as it went
+
+**Stage A -- one fixup, on any base.** `rsrc.c` addressed a loaded
+resource through a near `RSHDR *` and fixed it up in place: word-swapping
+whole tables, adding a 16-bit base to every offset, `strlen` over near
+strings. It now addresses a resource through a **32-bit base**, and a
+resource in the pool is one whose base has bank zero -- the same rule
+step 1 gave trees. The fixup reads each record into a scratch through
+`far_get`, swaps and fixes it there, and writes it back with `far_put`; the
+header is copied out wherever a function needs its counts; `rsrc_gaddr`
+and `rsrc_saddr` compute addresses rather than dereference pointers; the
+process record's two resource slots are 32-bit bases with a far mark
+beside each pool mark. `rs_imfar` and the colour-icon path are pool-only
+by construction and say so.
+
+This was done first, with **no far resource existing**, precisely so the
+existing gates could judge the shared path: m4, m7, m9, m12 (the file
+layer, which loads and frees resources), m13 (alerts and icons -- the
+image-bits-to-far path), m17 (the desktop, 320 frames after GO as
+before), m22 and m23 (accessories with resources of their own), and m28
+(an accessory beside the desktop: two resource slots live at once). **All
+nine identical.** Bank `$00` unchanged: LoRAM 264 free, Near 323.
+
+**Stage B -- the far path and who may take it.** `rs_load` takes the
+file into the pool when it fits, as before; when it does not, and the
+caller has set bit 0 of `int_in[0]`, it takes one `far_alloc` (so the
+whole file is inside one bank and `tree[obj]` is safe to index), streams
+the file up through a 128-byte buffer, and fixes it up with the far base
+through the same code. Otherwise it returns 0. The opt-in is safe because
+`aes_entry` zeroes `int_in[]` and copies only `control[1]` words: the
+large-data kit's `rsrc_load` passes one word set to 1 and keeps all 24
+bits of `rsrc_gaddr`'s answer; the small-data kit passes none, so it can
+neither ask nor be handed a far address. `global[5..8]` carry `ap_ptree`
+and the header as 32-bit addresses now, as the ST's do. Colour icons
+(`NEW_FORMAT_RSC`) stay a pool-only feature; a far-path request for one
+is refused.
+
+**Stage C -- a resource that cannot fit.** `tools/farrsc.py` builds
+`FARRSC.RSC`: **42,364 bytes, 702 objects in 28 trees** -- three times the
+pool and inside one bank. `src/m33_farrsc.c` is built twice from one
+source: `--data-model=large` as `M33.G4A`, which loads it far, draws tree
+0 from there, hit-tests it, reads a free string through the address it
+was handed and frees it; and `--data-model=small` as `M33S.G4A`, which
+must be refused with nothing else happening. `make test-m33` runs both
+under the stand-in desktop (keys F and G) and reads every result out of
+the program's near variables. On its first run the resource landed at
+**`$070000`** -- bank 7, not the pool -- with tree 0 at `$076338` inside
+it, `form_center` placed the 40x28 dialog, and `objc_find` inside the OK
+button, a walk through 27 far objects, answered 24: the right one. The
+dialog's rectangle on the screen held 12,400 dark pixels where an empty
+box holds none; free string 0 read as `'F'` through the address
+`rsrc_gaddr` handed back; `rsrc_free` answered 1. `M33S.G4A`, from the
+same source, got 0 from `rsrc_load` and reached its wait with nothing
+else touched. `make test-m33` passes.
+
+The oracle for the whole step, after m33: the full suite -- 41 gates and
+205 host tests, every one green, `build/fartrees-suite2.log` -- then
+`make sdk`, and GACS and RetroWP rebuilt against the rebuilt kit and run
+end to end. Both pass: neither asks for a far resource, and their
+resources load into the pool through the one fixup that now serves both.
+
+Two of the first gate's failures were the gate's own, recorded because
+they will recur in any gate that reads a program's variables: **a
+program's near region is the shell's again the instant the program
+exits**, so a result read after exit is the desktop's variable, not the
+program's -- both builds now wait at step 9 until they have been read;
+and `sh_runs` counts the desktop's return as a run, so the small build
+is run 4, not 3.
 
 ## Why
 

@@ -37,17 +37,38 @@
 
 /* The running process's resource and the pool mark before it: see
  * src/aes/proc.h for why these belong to a process and not to this file.
- * rs_hdr stays the name the rest of the engine knows it by. */
-#define rs_1        (*(RSHDR **)&rlr->p_rsc)
-#define rs_1mark    (rlr->p_rscmark)
-#define rs_2        (*(RSHDR **)&rlr->p_rsc2)
+ * rs_cur is the one a call acts on; rs_loaded() hands its base out. */
+#define rs_1        (rlr->p_rsc)        /* the resident resource's BASE, 0 if none */
+#define rs_1mark    (rlr->p_rscmark)    /* the pool before its load */
+#define rs_1far     (rlr->p_rscfar)     /* the far heap before its load, when it went far; 0 in the pool */
+#define rs_2        (rlr->p_rsc2)
 #define rs_2mark    (rlr->p_rscmark2)
+#define rs_2far     (rlr->p_rscfar2)
 /* The resource a call ACTS ON: the nested one while it is up, so that a
  * dialog loaded over a resident resource answers rsrc_gaddr and is what
  * rsrc_free takes away.  Read-only -- the two slots are assigned by
- * name. */
-#define rs_hdr      (rs_2 ? rs_2 : rs_1)
+ * name.
+ *
+ * A BASE IS A 32-BIT ADDRESS, AND A RESOURCE IN THE POOL IS ONE WHOSE
+ * BANK IS ZERO (docs/far-trees.md).  Everything below reaches the file's
+ * bytes through far_get/far_put at base + offset, whether the base is in
+ * bank $00 or above it, so there is one fixup and one rsrc_gaddr rather
+ * than a near one and a far one.  The header is copied out into a local
+ * RSHDR where a function needs its counts. */
+#define rs_cur      (rs_2 ? rs_2 : rs_1)
 #define rs_mark     (rlr->p_rscmark)
+
+static void hdr_get(uint32_t base, RSHDR *h)
+{
+    far_get((uint8_t *)h, base, sizeof *h);
+}
+
+static void hdr_put(uint32_t base, const RSHDR *h)
+{
+    far_put(base, (const uint8_t *)h, sizeof *h);
+}
+
+static uint32_t rd_long(uint32_t far);  /* a 68000 LONG from far memory: defined with the colour icons below */
 
 static void swap_words(void *p, uint16_t n)
 {
@@ -94,11 +115,11 @@ void rs_obfix(OBJECT FAR *tree, WORD obj)
 }
 
 /* An offset from the start of the file made an address; -1 stays -1. */
-static WORD fix_long(const RSHDR *h, uint32_t *p)
+static WORD fix_long(uint32_t base, uint32_t *p)
 {
     if (*p == 0xFFFFFFFFUL)
         return 0;
-    *p += (uint16_t)h;
+    *p += base;
     return 1;
 }
 
@@ -138,20 +159,38 @@ static WORD fix_long(const RSHDR *h, uint32_t *p)
 #define RSZ_ICONBLK  34
 #define RSZ_BITBLK   14
 
-static void *sub_of(const RSHDR *h, UWORD index, UWORD offset, UWORD size)
+static uint32_t sub_at(uint32_t base, UWORD index, UWORD offset, UWORD size)
 {
-    return (uint8_t *)h + offset + size * index;
+    return base + offset + (uint32_t)size * index;
 }
 
-/* The donor's get_addr: (void *)-1 for a type it does not know.  Every
- * address it hands out is bank $00, so a 16-bit one. */
-static void *addr_of(const RSHDR *h, UWORD rtype, UWORD rindex)
+/* A fixed-up LONG -- native order, as rs_fixit leaves it -- at a far
+ * address, and the same written back. */
+static uint32_t rd_native(uint32_t at)
+{
+    uint8_t b[4];
+    far_get(b, at, 4);
+    return (uint32_t)b[0] | ((uint32_t)b[1] << 8)
+         | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+}
+
+static void wr_native(uint32_t at, uint32_t v)
+{
+    uint8_t b[4];
+    b[0] = (uint8_t)v;  b[1] = (uint8_t)(v >> 8);
+    b[2] = (uint8_t)(v >> 16);  b[3] = (uint8_t)(v >> 24);
+    far_put(at, b, 4);
+}
+
+/* The donor's get_addr, as a 32-bit address: 0xFFFFFFFF for a type it
+ * does not know.  `h` is a native-order copy of the header at `base`. */
+static uint32_t addr_at(const RSHDR *h, uint32_t base, UWORD rtype, UWORD rindex)
 {
     UWORD offset, size;
 
     switch (rtype) {
     case R_TREE:
-        return (void *)(uint16_t)*(uint32_t *)sub_of(h, rindex, h->rsh_trindex, 4);
+        return rd_native(sub_at(base, rindex, h->rsh_trindex, 4));
     case R_OBJECT:
         offset = h->rsh_object;  size = RSZ_OBJECT;  break;
     case R_TEDINFO:
@@ -163,112 +202,96 @@ static void *addr_of(const RSHDR *h, UWORD rtype, UWORD rindex)
     case R_BITBLK:
     case R_BIPDATA:
         offset = h->rsh_bitblk;  size = RSZ_BITBLK;  break;
-    case R_OBSPEC:
-        return &((OBJECT *)addr_of(h, R_OBJECT, rindex))->ob_spec;
+    case R_OBSPEC:                      /* the field offsets are the file's */
+        return addr_at(h, base, R_OBJECT, rindex) + 12;
     case R_TEPTMPLT:
-        return &((TEDINFO *)addr_of(h, R_TEDINFO, rindex))->te_ptmplt;
+        return addr_at(h, base, R_TEDINFO, rindex) + 4;
     case R_TEPVALID:
-        return &((TEDINFO *)addr_of(h, R_TEDINFO, rindex))->te_pvalid;
+        return addr_at(h, base, R_TEDINFO, rindex) + 8;
     case R_IBPDATA:
-        return &((ICONBLK *)addr_of(h, R_ICONBLK, rindex))->ib_pdata;
+        return addr_at(h, base, R_ICONBLK, rindex) + 4;
     case R_IBPTEXT:
-        return &((ICONBLK *)addr_of(h, R_ICONBLK, rindex))->ib_ptext;
+        return addr_at(h, base, R_ICONBLK, rindex) + 8;
     case R_STRING:
-        return (void *)(uint16_t)*(uint32_t *)sub_of(h, rindex, h->rsh_frstr, 4);
+        return rd_native(sub_at(base, rindex, h->rsh_frstr, 4));
     case R_IMAGEDATA:
-        return (void *)(uint16_t)*(uint32_t *)sub_of(h, rindex, h->rsh_frimg, 4);
+        return rd_native(sub_at(base, rindex, h->rsh_frimg, 4));
     case R_FRSTR:
         offset = h->rsh_frstr;   size = 4; break;
     case R_FRIMG:
         offset = h->rsh_frimg;   size = 4; break;
     default:
-        return (void *)0xFFFF;
+        return 0xFFFFFFFFUL;
     }
-    return sub_of(h, rindex, offset, size);
+    return sub_at(base, rindex, offset, size);
 }
 
-static void fix_nptrs(const RSHDR *h, WORD cnt, WORD type)
+/* The same as a near pointer, for the two paths that only ever run on a
+ * resource IN THE POOL (rs_imfar, rs_cicons): `base` is the pool address
+ * the header was read from. */
+static void *addr_of(const RSHDR *h, uint32_t base, UWORD rtype, UWORD rindex)
 {
-    WORD i;
-    for (i = 0; i < cnt; i++)
-        fix_long(h, addr_of(h, type, i));
+    return (void *)(uint16_t)addr_at(h, base, rtype, rindex);
+}
+
+static void swap_long(uint16_t *p)      /* a 68000 LONG: its two words swapped too */
+{
+    uint16_t t = p[0]; p[0] = p[1]; p[1] = t;
+}
+
+static uint16_t far_slen(uint32_t a)    /* strlen through a far address */
+{
+    uint16_t n = 0;
+    while (far_read8(a + n))            /* not `*s++` narrowed in one expression: B18 */
+        n++;
+    return n;
 }
 
 /* Everything the donor does in rs_readit and rs_fixit: `h` is the file's
  * bytes, whole and as the file has them, at the address they will be
  * used from.  The header's words are swapped first, then every table it
  * counts. */
-void rs_fixit(RSHDR *h)
+void rs_fixit(uint32_t base)
 {
+    RSHDR h;
     WORD i;
+    union {                             /* the largest record, as bytes */
+        OBJECT  o;
+        TEDINFO t;
+        ICONBLK ib;
+        BITBLK  bb;
+        uint8_t raw[RSZ_ICONBLK];
+    } r;
 
-    swap_words(h, sizeof *h / 2);
-    swap_words(sub_of(h, 0, h->rsh_object, 0),  (UWORD)(h->rsh_nobs * (RSZ_OBJECT / 2)));
-    swap_words(sub_of(h, 0, h->rsh_tedinfo, 0), (UWORD)(h->rsh_nted * (RSZ_TEDINFO / 2)));
-    swap_words(sub_of(h, 0, h->rsh_iconblk, 0), (UWORD)(h->rsh_nib * (RSZ_ICONBLK / 2)));
-    swap_words(sub_of(h, 0, h->rsh_bitblk, 0),  (UWORD)(h->rsh_nbb * (RSZ_BITBLK / 2)));
-    swap_words(sub_of(h, 0, h->rsh_frstr, 0),   (UWORD)(h->rsh_nstring * 2));
-    swap_words(sub_of(h, 0, h->rsh_frimg, 0),   (UWORD)(h->rsh_nimages * 2));
-    swap_words(sub_of(h, 0, h->rsh_trindex, 0), (UWORD)(h->rsh_ntree * 2));
-    /* A 68000 LONG is its two words swapped as well as each word */
-    for (i = 0; i < h->rsh_ntree; i++) {
-        uint16_t *p = sub_of(h, i, h->rsh_trindex, 4);
-        uint16_t t = p[0]; p[0] = p[1]; p[1] = t;
-    }
-    for (i = 0; i < h->rsh_nstring; i++) {
-        uint16_t *p = sub_of(h, i, h->rsh_frstr, 4);
-        uint16_t t = p[0]; p[0] = p[1]; p[1] = t;
-    }
-    for (i = 0; i < h->rsh_nimages; i++) {
-        uint16_t *p = sub_of(h, i, h->rsh_frimg, 4);
-        uint16_t t = p[0]; p[0] = p[1]; p[1] = t;
-    }
-    for (i = 0; i < h->rsh_nobs; i++) {
-        uint16_t *p = (uint16_t *)&((OBJECT *)addr_of(h, R_OBJECT, i))->ob_spec;
-        uint16_t t = p[0]; p[0] = p[1]; p[1] = t;
-    }
-    for (i = 0; i < h->rsh_nted; i++) {
-        uint16_t *p = (uint16_t *)addr_of(h, R_TEDINFO, i);
-        uint16_t t;
-        t = p[0]; p[0] = p[1]; p[1] = t;
-        t = p[2]; p[2] = p[3]; p[3] = t;
-        t = p[4]; p[4] = p[5]; p[5] = t;
-    }
-    for (i = 0; i < h->rsh_nib; i++) {
-        uint16_t *p = (uint16_t *)addr_of(h, R_ICONBLK, i);
-        uint16_t t;
-        t = p[0]; p[0] = p[1]; p[1] = t;
-        t = p[2]; p[2] = p[3]; p[3] = t;
-        t = p[4]; p[4] = p[5]; p[5] = t;
-    }
-    for (i = 0; i < h->rsh_nbb; i++) {
-        uint16_t *p = (uint16_t *)addr_of(h, R_BITBLK, i);
-        uint16_t t = p[0]; p[0] = p[1]; p[1] = t;
-    }
+    hdr_get(base, &h);
+    swap_words(&h, sizeof h / 2);
+    hdr_put(base, &h);
 
-    /* fix_trindex */
-    for (i = 0; i < h->rsh_ntree; i++)
-        fix_long(h, sub_of(h, i, h->rsh_trindex, 4));
-    /* fix_tedinfo_std */
-    for (i = 0; i < h->rsh_nted; i++) {
-        TEDINFO *ted = addr_of(h, R_TEDINFO, i);
-        if (fix_long(h, &ted->te_ptext))
-            ted->te_txtlen = (WORD)(strlen((const char *)(uint16_t)ted->te_ptext) + 1);
-        if (fix_long(h, &ted->te_ptmplt))
-            ted->te_tmplen = (WORD)(strlen((const char *)(uint16_t)ted->te_ptmplt) + 1);
-        fix_long(h, &ted->te_pvalid);
+    /* the three tables of longs: each a 68000 LONG, made native, then an
+     * offset made an address (the donor's fix_trindex and fix_nptrs) */
+    for (i = 0; i < h.rsh_ntree; i++) {
+        uint32_t at = sub_at(base, i, h.rsh_trindex, 4), v = rd_long(at);
+        fix_long(base, &v);
+        wr_native(at, v);
     }
-    fix_nptrs(h, h->rsh_nib, R_IBPMASK);
-    fix_nptrs(h, h->rsh_nib, R_IBPDATA);
-    fix_nptrs(h, h->rsh_nib, R_IBPTEXT);
-    fix_nptrs(h, h->rsh_nbb, R_BIPDATA);
-    fix_nptrs(h, h->rsh_nstring, R_FRSTR);
-    fix_nptrs(h, h->rsh_nimages, R_FRIMG);
+    for (i = 0; i < h.rsh_nstring; i++) {
+        uint32_t at = sub_at(base, i, h.rsh_frstr, 4), v = rd_long(at);
+        fix_long(base, &v);
+        wr_native(at, v);
+    }
+    for (i = 0; i < h.rsh_nimages; i++) {
+        uint32_t at = sub_at(base, i, h.rsh_frimg, 4), v = rd_long(at);
+        fix_long(base, &v);
+        wr_native(at, v);
+    }
     /* fix_objects */
-    for (i = 0; i < h->rsh_nobs; i++) {
-        OBJECT *obj = addr_of(h, R_OBJECT, i);
-        rs_obfix(obj, 0);
-        switch (obj->ob_type & 0xFF) {
+    for (i = 0; i < h.rsh_nobs; i++) {
+        uint32_t at = sub_at(base, i, h.rsh_object, RSZ_OBJECT);
+        far_get(r.raw, at, RSZ_OBJECT);
+        swap_words(r.raw, RSZ_OBJECT / 2);
+        swap_long((uint16_t *)&r.o.ob_spec);
+        rs_obfix(&r.o, 0);              /* the near copy: a bank-zero tree */
+        switch (r.o.ob_type & 0xFF) {
         case G_BOX:
         case G_IBOX:
         case G_BOXCHAR:
@@ -278,9 +301,45 @@ void rs_fixit(RSHDR *h)
              * made an address by rs_cicons once the table is placed */
             break;
         default:
-            fix_long(h, &obj->ob_spec);
+            fix_long(base, &r.o.ob_spec);
             break;
         }
+        far_put(at, r.raw, RSZ_OBJECT);
+    }
+    /* fix_tedinfo_std */
+    for (i = 0; i < h.rsh_nted; i++) {
+        uint32_t at = sub_at(base, i, h.rsh_tedinfo, RSZ_TEDINFO);
+        far_get(r.raw, at, RSZ_TEDINFO);
+        swap_words(r.raw, RSZ_TEDINFO / 2);
+        swap_long((uint16_t *)&r.t.te_ptext);
+        swap_long((uint16_t *)&r.t.te_ptmplt);
+        swap_long((uint16_t *)&r.t.te_pvalid);
+        if (fix_long(base, &r.t.te_ptext))
+            r.t.te_txtlen = (WORD)(far_slen(r.t.te_ptext) + 1);
+        if (fix_long(base, &r.t.te_ptmplt))
+            r.t.te_tmplen = (WORD)(far_slen(r.t.te_ptmplt) + 1);
+        fix_long(base, &r.t.te_pvalid);
+        far_put(at, r.raw, RSZ_TEDINFO);
+    }
+    for (i = 0; i < h.rsh_nib; i++) {
+        uint32_t at = sub_at(base, i, h.rsh_iconblk, RSZ_ICONBLK);
+        far_get(r.raw, at, RSZ_ICONBLK);
+        swap_words(r.raw, RSZ_ICONBLK / 2);
+        swap_long((uint16_t *)&r.ib.ib_pmask);
+        swap_long((uint16_t *)&r.ib.ib_pdata);
+        swap_long((uint16_t *)&r.ib.ib_ptext);
+        fix_long(base, &r.ib.ib_pmask);
+        fix_long(base, &r.ib.ib_pdata);
+        fix_long(base, &r.ib.ib_ptext);
+        far_put(at, r.raw, RSZ_ICONBLK);
+    }
+    for (i = 0; i < h.rsh_nbb; i++) {
+        uint32_t at = sub_at(base, i, h.rsh_bitblk, RSZ_BITBLK);
+        far_get(r.raw, at, RSZ_BITBLK);
+        swap_words(r.raw, RSZ_BITBLK / 2);
+        swap_long((uint16_t *)&r.bb.bi_pdata);
+        fix_long(base, &r.bb.bi_pdata);
+        far_put(at, r.raw, RSZ_BITBLK);
     }
 }
 
@@ -338,7 +397,10 @@ static void rs_imfar(uint8_t *mem, uint16_t im_off, uint16_t size)
     uint32_t base, mark;
     WORD i;
 
-    if (!im_len || rs_hdr->rsh_nbb || rs_hdr->rsh_nimages)
+    RSHDR h;
+
+    hdr_get(rs_cur, &h);                /* the pool copy, fixed up: bank $00 */
+    if (!im_len || h.rsh_nbb || h.rsh_nimages)
         return;                         /* see the note: not provably safe --
                                          * and nothing moved, so a resource
                                          * NESTED over another leaves the
@@ -359,7 +421,7 @@ static void rs_imfar(uint8_t *mem, uint16_t im_off, uint16_t size)
             {3, 13, RSZ_ICONBLK}, {4, 14, RSZ_BITBLK},
             {5, 15, 4}, {8, 16, 4}, {9, 11, 4}, {6, 10, 0}
         };
-        const UWORD *hw = (const UWORD *)rs_hdr;
+        const UWORD *hw = (const UWORD *)&h;
         for (i = 0; i < 8; i++)
             if ((uint16_t)(hw[lay[i][0]] + hw[lay[i][1]] * lay[i][2]) > im_off)
                 return;
@@ -378,8 +440,8 @@ static void rs_imfar(uint8_t *mem, uint16_t im_off, uint16_t size)
     }
     im_near = (uint16_t)((uint16_t)mem + im_off);
     far_put(base, (const uint8_t *)im_near, im_len);
-    for (i = 0; i < rs_hdr->rsh_nib; i++) {
-        ICONBLK *ib = addr_of(rs_hdr, R_ICONBLK, i);
+    for (i = 0; i < h.rsh_nib; i++) {
+        ICONBLK *ib = addr_of(&h, (uint32_t)(uint16_t)mem, R_ICONBLK, i);
         ib->ib_pmask = base + (ib->ib_pmask - im_near);
         ib->ib_pdata = base + (ib->ib_pdata - im_near);
     }
@@ -550,7 +612,7 @@ static WORD rs_cicons(int16_t fd, RSHDR *h, uint16_t size)
 
     /* the objects: an index becomes the near record's address */
     for (i = 0; i < h->rsh_nobs; i++) {
-        OBJECT *obj = addr_of(h, R_OBJECT, i);
+        OBJECT *obj = addr_of(h, (uint32_t)(uint16_t)h, R_OBJECT, i);
         if ((obj->ob_type & 0xFF) == G_CICON) {
             if (obj->ob_spec >= n)
                 return 0;
@@ -568,14 +630,15 @@ void rs_ciaddr(uint32_t *base, uint16_t *len)
     *len = rs_cisize;
 }
 
-WORD rs_load(const char *name)
+WORD rs_load(const char *name, WORD wants_far)
 {
     RSHDR hdr, raw;
     char cio[CIO_NAME_MAX + 1];
     uint16_t got, size, mark;
     int16_t fd;
     uint8_t *mem;
-    WORD ok;
+    uint32_t base, fmark = 0;
+    WORD ok, far = 0;
 
     if (rs_1 && rs_2)               /* one resident and one nested is all */
         return 0;
@@ -595,33 +658,71 @@ WORD rs_load(const char *name)
         return 0;
     }
     mark = pool_mark();
-    if (rs_1)
-        rs_2mark = mark;
-    else
-        rs_1mark = mark;
     mem = pool_alloc(size, 2);
-    if (!mem) {
+    if (mem) {
+        base = (uint32_t)(uint16_t)mem;
+        memcpy(mem, &raw, sizeof raw);  /* rs_fixit takes the file as it is */
+        {
+            uint8_t st = cio_read(fd, mem + sizeof raw, (uint16_t)(size - sizeof raw), &got);
+            if ((st != CIO_OK && st != CIO_OK_EOF) || got != size - sizeof raw) {
+                cio_close(fd);
+                pool_release(mark);
+                return 0;
+            }
+        }
+    } else if (wants_far && !(hdr.rsh_vrsn & NEW_FORMAT_RSC)) {
+        /* THE FAR PATH.  The file does not fit the pool, and the caller has
+         * said it can take a far address (docs/far-trees.md, "who may
+         * receive a far address": a small-data program never gets here,
+         * because its kit passes no int_in and aes_entry zeroes them).
+         * One far_alloc, so the whole resource is inside one bank and
+         * tree[obj] is safe to index; streamed up through a small buffer
+         * because the pool it could not fit is also where a big one would
+         * have gone.  Colour icons stay a pool-only feature for now. */
+        uint8_t buf[128];
+        uint16_t left, n, off;
+
+        fmark = farmem.brk;
+        base = far_alloc(size);
+        if (!base) {
+            cio_close(fd);
+            return 0;
+        }
+        far_put(base, (const uint8_t *)&raw, sizeof raw);
+        off = sizeof raw;
+        left = (uint16_t)(size - sizeof raw);
+        while (left) {
+            uint8_t st;
+            n = left < sizeof buf ? left : (uint16_t)sizeof buf;
+            st = cio_read(fd, buf, n, &got);
+            if ((st != CIO_OK && st != CIO_OK_EOF) || got != n) {
+                cio_close(fd);
+                far_release(fmark);
+                return 0;
+            }
+            far_put(base + off, buf, n);
+            off = (uint16_t)(off + n);
+            left = (uint16_t)(left - n);
+        }
+        far = 1;
+    } else {
         cio_close(fd);
         return 0;
     }
-    memcpy(mem, &raw, sizeof raw);  /* rs_fixit takes the file as it is */
-    {
-        uint8_t st = cio_read(fd, mem + sizeof raw, (uint16_t)(size - sizeof raw), &got);
-        if ((st != CIO_OK && st != CIO_OK_EOF) || got != size - sizeof raw) {
-            cio_close(fd);
-            pool_release(mark);
-            return 0;
-        }
+    if (rs_1) {                     /* nested: rs_cur now answers with it */
+        rs_2 = base;  rs_2mark = mark;  rs_2far = far ? fmark : 0;
+    } else {
+        rs_1 = base;  rs_1mark = mark;  rs_1far = far ? fmark : 0;
     }
-    if (rs_1)
-        rs_2 = (RSHDR *)mem;    /* nested: rs_hdr now answers with it */
-    else
-        rs_1 = (RSHDR *)mem;
-    rs_fixit(rs_hdr);
-    rs_imfar(mem, hdr.rsh_imdata, size);
-    /* the colour icons, if the file has the extension for them: the fd
-     * is still positioned just past the rsh_rssize bytes */
-    ok = (hdr.rsh_vrsn & NEW_FORMAT_RSC) ? rs_cicons(fd, rs_hdr, size) : 1;
+    rs_fixit(base);
+    ok = 1;
+    if (!far) {
+        rs_imfar(mem, hdr.rsh_imdata, size);
+        /* the colour icons, if the file has the extension for them: the
+         * fd is still positioned just past the rsh_rssize bytes */
+        if (hdr.rsh_vrsn & NEW_FORMAT_RSC)
+            ok = rs_cicons(fd, (RSHDR *)mem, size);
+    }
     cio_close(fd);
     if (!ok) {                      /* refused whole: nothing half-loaded */
         WORD slot = rs_2 ? 2 : 1;
@@ -636,45 +737,65 @@ WORD rs_load(const char *name)
     return 1;
 }
 
-RSHDR *rs_loaded(void)
+uint32_t rs_loaded(void)
 {
-    return rs_hdr;
+    return rs_cur;
+}
+
+void rs_header(RSHDR *h)
+{
+    if (rs_cur)
+        hdr_get(rs_cur, h);
+    else
+        memset(h, 0, sizeof *h);
 }
 
 WORD rs_free(void)
 {
     if (rs_2) {                     /* the nested one first: LIFO */
-        pool_release(rs_2mark);
+        if (rs_2far)
+            far_release(rs_2far);
+        else
+            pool_release(rs_2mark);
         rs_2 = 0;
+        rs_2far = 0;
         rs_farback(2);
         return 1;
     }
     if (!rs_1)
         return 0;
-    pool_release(rs_1mark);
+    if (rs_1far)
+        far_release(rs_1far);
+    else
+        pool_release(rs_1mark);
     rs_1 = 0;
+    rs_1far = 0;
     rs_farback(1);
     return 1;
 }
 
 WORD rs_gaddr(UWORD rtype, UWORD rindex, uint32_t *paddr)
 {
-    void *p;
-    if (!rs_hdr)
+    RSHDR h;
+    uint32_t a;
+    if (!rs_cur)
         return 0;
-    p = addr_of(rs_hdr, rtype, rindex);
-    *paddr = (uint16_t)p;
-    return (uint16_t)p != 0xFFFF;
+    hdr_get(rs_cur, &h);
+    a = addr_at(&h, rs_cur, rtype, rindex);
+    *paddr = a;
+    return a != 0xFFFFFFFFUL;
 }
 
 WORD rs_saddr(UWORD rtype, UWORD rindex, uint32_t addr)
 {
-    uint32_t *p;
-    if (!rs_hdr)
+    RSHDR h;
+    uint32_t a;
+    if (!rs_cur)
         return 0;
-    p = addr_of(rs_hdr, rtype, rindex);
-    if ((uint16_t)p == 0xFFFF)
+    hdr_get(rs_cur, &h);
+    a = addr_at(&h, rs_cur, rtype, rindex);
+    if (a == 0xFFFFFFFFUL)
         return 0;
-    *p = addr;
+    wr_native(a, addr);
     return 1;
 }
