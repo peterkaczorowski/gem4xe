@@ -37,8 +37,10 @@ includes it.
 
 A second project's ledger is summarised at the end — **MicroPython on the
 SNES**, 23 findings against 5.17, filed upstream as Calypsi #86. It is their
-evidence, kept separate from the numbered entries for that reason, and it
-says which of the twenty-three gem4xe is and is not exposed to.
+evidence, kept separate from the numbered entries for that reason. **Nearly
+all of it was fixed in 5.18**, so for this tree it is history rather than a
+hazard list; it is kept for the shapes, and for what it says about how
+quickly the vendor answers a well-made report.
 
 Every one of these was first seen as a wrong pixel or a wrong returned value
 in the conformance suites, then proved by reading the emitted assembly and
@@ -807,20 +809,32 @@ with the five broadest as their own issues.
 **THIS SECTION IS THEIR EVIDENCE, NOT OURS**, the same standing B17 has.
 Nothing below was met in gem4xe unless it says so.
 
-| upstream | finding |
-|---|---|
-| #81 | `__attribute__((aligned))` silently ignored on struct members and types |
-| #82 | negative constant index on a **far** pointer compiles to unsigned Y-indexing; the access lands one bank away |
-| #83 | the **third** pointer parameter loses its bank byte in call marshalling |
-| #84 | assign-and-test in a loop condition stores an OR-mangled value (accumulator clobber) |
-| #85 | `volatile` stores to stack locals dropped inside functions containing `setjmp` |
+**READ THE STATUS COLUMN FIRST. They were found on 5.17 and hth313 fixed
+them for 5.18**, which is the floor this project already requires — so for
+anyone on 5.18.2 this table is history, not a hazard list. It is kept
+because the *shapes* are worth knowing and because the ledger is a good
+account of what a large C program meets on this toolchain.
+
+| upstream | finding | status |
+|---|---|---|
+| #81 | `__attribute__((aligned))` silently ignored on struct members and types | fixed for 5.18 |
+| #82 | negative constant index on a **far** pointer compiles to unsigned Y-indexing; the access lands one bank away | fixed for 5.18 |
+| #83 | the **third** pointer parameter loses its bank byte in call marshalling | CLOSED; he fixed the varargs case and could not reproduce the rest |
+| #84 | assign-and-test in a loop condition stores an OR-mangled value (accumulator clobber) | fixed for 5.18 |
+| #85 | `volatile` stores to stack locals dropped inside functions containing `setjmp` | fixed for 5.18 |
 
 And from the ledger, not separately filed: a variadic function whose **last
 named parameter is 16-bit** has it destroyed by `tsc` in the frame setup
 before it is saved (pointer and 32-bit last parameters go in pseudo
-registers and are safe); flexible-array-member initializers silently
-dropped; `--cross-call` corrupting indirect-call arguments; `!(k >= k) ||
-f()` folding to constant TRUE; and an ICE, "unable to label".
+registers and are safe — **fixed**); flexible-array-member initializers
+silently dropped (**fixed for 5.18**); `--cross-call` corrupting
+indirect-call arguments; `!(k >= k) || f()` folding to constant TRUE; and an
+ICE, "unable to label". The last three were not filed individually and their
+status is unknown.
+
+That response is worth recording on its own: twenty-three findings from one
+outside project, five filed individually, and all five answered and fixed in
+a single release.
 
 ### What it costs gem4xe
 
@@ -837,15 +851,18 @@ Checked, rather than assumed:
   24-bit base as unsigned 16 bits so the access lands in the next bank.
   B13/B14 are fixed in 5.18.2. Theirs was found on 5.17.
 
-**#82 does not reproduce here, and that is worth almost nothing.** On 5.18.2
-at `-O2`, `--code-model=large --data-model=large`, `sp[-2]` through a
-`__far` pointer compiles to the safe form -- adjust the base with `sbc ##4`,
-then a non-indexed `[_Dp]` -- and a scan of 50 of gem4xe's 71 sources finds
-zero `ldy ##<negative>` followed by long-indexed addressing. But **their own
-note says which form the compiler picks is register-pressure roulette, per
+**#82 does not reproduce on 5.18.2, and hth313 says he fixed it for 5.18.**
+Measured here at `-O2`, `--code-model=large --data-model=large`: `sp[-2]`
+through a `__far` pointer compiles to the safe form -- adjust the base with
+`sbc ##4`, then a non-indexed `[_Dp]` -- and a scan of 50 of gem4xe's 71
+sources finds zero `ldy ##<negative>` followed by long-indexed addressing.
+
+Those two facts corroborate each other, which is the only reason either is
+worth much. On its own the measurement would not have been: **their note
+says which form the compiler picks is register-pressure roulette, per
 compilation**, so a four-function file and a clean tree are exactly the
-evidence B1 taught us to distrust: a shape that compiles correctly today is
-not a shape that is fixed.
+evidence B1 taught us to distrust. A clean scan still cannot prove absence
+in code nobody has compiled yet -- it says this tree, at these flags, today.
 
 ### The scan, and the lesson it repeated within the hour
 
