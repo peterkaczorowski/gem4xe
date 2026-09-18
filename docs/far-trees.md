@@ -1,0 +1,233 @@
+# Object trees in far memory
+
+Status: **designed, not started.** Written 2026-09-18 from measurements of
+the tree as it is, so the argument rests on what the code does rather than
+on what it is remembered to do. The port that motivates it is QED
+(`docs/qed.md` when it exists; the numbers are below), but the change
+serves every application whose resource or object trees outgrow bank `$00`
+-- RetroWP's included -- and it is the shape a multitasking AES needs.
+
+## Why
+
+The AES addresses every object tree with a bank-`$00` pointer. `OBJECT
+*tree` is the parameter in `objc_draw`, `objc_find`, `form_do`, `mn_bar`,
+`fm_do` -- 117 sites across nine files -- and the ABI narrows the address an
+application passes with `near_of()`, which refuses anything above `$FFFF`.
+A resource loads into the application pool, **14 KB of bank `$00`**
+(`rsrc.c:288`); only icon bits are sent far.
+
+That fits everything that exists today. The desktop's resource is 6,226
+bytes, GACS's is 2,792, and RetroWP avoided the question by building its
+menu tree in code inside its 11.5 KB near region. It does not fit QED:
+
+    qed.rsc   34,026 bytes   682 objects   32 trees   118 TEDINFOs   44 strings
+
+The OBJECT array alone is 16,368 bytes -- larger than the pool before a
+single string -- and it is one resource, loaded once, reached through 33
+`rsrc_gaddr` sites. Bank `$00` has **1,794 bytes free** with the desktop up
+and 258 while a resource is loading (`tools/memreport.py`), so the pool
+cannot grow and nothing large can be bounced down.
+
+So a tree has to be usable where it lies, in far memory, by the AES that
+draws it, finds in it, edits it and hangs a menu from it.
+
+## What the data already says
+
+The structures were never 16-bit. The `.RSC` format is 68000-native, and
+gem4xe kept its layout byte for byte:
+
+- `OBJECT.ob_spec` is `uint32_t` (aes.h:37): a 32-bit GEM address, or a
+  packed colour word for the box types.
+- `TEDINFO.te_ptext`, `te_ptmplt`, `te_pvalid` are `uint32_t` (aes.h:307).
+- `ICONBLK` names its mask and image in 32-bit fields, and `gsx_blt` has
+  taken a 32-bit address since phase 2 -- which is why icon bits already go
+  far and nothing notices.
+- The kit's application-side `OBSPEC` union (`gem.h:116`) is declared so
+  that "the whole long reads as a far pointer whose bank is the high word's
+  zero -- bank `$00`". It is already a far pointer. Its bank is just always
+  zero today.
+
+Only the AES's *reading* of these fields is 16-bit, and that reading is
+concentrated:
+
+| where | what narrows |
+|---|---|
+| `objc.c:58` | `#define SPEC_PTR(spec) ((void *)(uint16_t)(spec))`, and `ob_getspec()` for `INDIRECT` |
+| `rsrc.c:96` | `fix_long()` adds `(uint16_t)h`, a 16-bit base, to every file offset |
+| `abi.c:256` | one `switch` turns `addr_in[0]` into `OBJECT *` through `near_of()` for opcodes 30-34, 40-47, 50, 54-56, 75, 114 |
+| five raw casts | `(TEDINFO *)`, `(ICONBLK *)`, `(char *)tree...` outside the helper |
+| four globals | `gl_mntree`, `gl_wtree`, `gl_awind`, `gl_newdesk` are `OBJECT *` |
+
+## The design: one path, and near is bank zero
+
+**Every tree is addressed through a FAR pointer, and a tree in bank `$00`
+is a far pointer whose bank byte is zero.** There is no second path and no
+branch per access. A `[dp],y` long-indexed load with bank `$00` in the
+pointer reads bank `$00` RAM correctly on the 65816, so the pool trees the
+desktop, GACS and RetroWP use today are served by the same code that
+serves a far one -- unchanged in storage, changed only in how they are
+named.
+
+Concretely:
+
+1. `OBJECT *` becomes `OBJECT FAR *` at every one of the 117 sites, the
+   four globals included. `TEDINFO FAR *`, `ICONBLK FAR *`, `BITBLK FAR *`
+   likewise.
+2. `SPEC_PTR(spec)` becomes `(void FAR *)(spec)` -- the whole long, no
+   truncation -- and the five raw casts go through it.
+3. `fix_long()` adds a **32-bit** base. For a resource in the pool that base
+   is still a bank-`$00` address and every fixed-up field is what it is
+   today; for a far resource it carries the bank.
+4. The ABI's `near_of()` in the tree `switch` becomes `far_of()`: accept the
+   24-bit address, refuse nothing. (`near_of` stays for the opcodes that
+   take a *string*; see "strings" below for why those are different.)
+5. `rsrc_load` gains a far path: read the file whole into far memory
+   (`far_read_file` exists), fix it up in place with the far base, hand
+   back far addresses. It takes that path **only when the file will not fit
+   the pool and the application has said it can take a far answer** --
+   see "who may receive a far address".
+
+This is what `wind.c` already did for its one large structure: `ORECT FAR
+*gl_olist`, the rectangle pool, walked directly by the AES since phase 8.
+The precedent exists and has been green for thirty-six phases.
+
+### The cost, measured
+
+The same object walk -- follow `ob_next`, sum two rectangle fields --
+compiled `--data-model=small -O2` both ways:
+
+    near_walk   74 instructions
+    far_walk    93 instructions       (+26 %; the far form spills its
+                                        pointer to the stack around the
+                                        loop: pei/pha/lda 1,s)
+
+That is the price for *every* tree, including the desktop's, because there
+is one path. It is paid in the object walkers -- `everyobj`, `objc_find`,
+`ob_get_par` -- which are not where a redraw's time goes; a redraw's time
+goes to the blitter, which is unchanged. It is a real cost and it will be
+**measured, not assumed**: VCOUNT ticks around `objc_draw` of the desktop
+before and after, with a budget of +30 % on the walk and 0 on the pixels.
+
+### Strings: the one place the VDI is involved
+
+An object's text is read by `gr_gtext`, and the VDI takes its text as
+`intin` words, not as a pointer into the caller's memory. So the far change
+is local to `gr_gtext`: read the bytes through a far pointer into `intin`
+instead of through a near one. No bounce, no scratch, no cap. (If
+`gr_gtext` turns out to hand the pointer further down rather than copying
+into `intin`, the loop moves one level; the shape does not change. That is
+implementation step 0, to look rather than to remember.)
+
+Editable fields are the other direction: `objc_edit` and `form_do` write
+`te_ptext` in place. Those become far writes -- `far_write8`, or a FAR
+`char *` -- at the sites that store a character or move the cursor.
+
+The far-title bounce in `wind.c:123` stays. A window title is a TEDINFO
+the *VDI* re-reads at every redraw through `te_ptext`, and the reasoning
+there -- copy at draw time because the application may edit it in place --
+is unchanged by any of this. It could later be replaced by the same far
+read, which would lift its forty-character cap; that is a follow-up, not
+part of this.
+
+### Who may receive a far address
+
+A small-data-model application holds `OBJECT *` as sixteen bits. Hand it a
+far resource and `rsrc_gaddr` writes a truncated pointer **silently** --
+the exact failure class this project has spent a week hunting in the
+compiler. And the AES cannot tell the two models apart: the `APP` record
+(`src/sys/app.h:60`) carries near and far regions and sizes, and *both* a
+small-data GACS and a large-data RetroWP have a far region, because both
+have far code.
+
+So the application says. The kit is already built once per data model
+("the same three for an application compiled `--data-model=large`",
+Makefile:453), so the large-model kit's `rsrc_load` binding sets a word in
+`int_in` that the ST's `rsrc_load` never used -- "I take far addresses" --
+and the small-model kit leaves it zero. The AES's `rsrc_load` then decides:
+
+    fits the pool                     -> the pool, as today, for everyone
+    does not fit, flag set            -> far memory
+    does not fit, flag clear          -> refused, with an error the
+                                         application can show
+
+A small-model application therefore **never** receives a far address, and
+a large-model one receives them only for a resource that could not have
+loaded before. Nothing that loads today loads differently.
+
+### Limits, stated
+
+- **A tree lives in one bank.** Calypsi's far pointer arithmetic is 16-bit
+  (`farmem.h:49`), and `far_alloc` never crosses a bank -- it skips to the
+  next -- so a resource is bank-contained by construction and indexing
+  `tree[obj]` within it is safe. That caps a resource at 64 KB. QED's is
+  34 KB; anything larger is refused with the same error as above, which is
+  an honest answer for a machine class where a resource that size would be
+  unusual.
+- **`rsrc_gaddr` answers a far address for a far resource**, and the
+  application must be the one that asked for that (above).
+- **Colour icons are still not loaded** (`rsrc.c:2`, "less the colour
+  icons"). QED's `icons.rsc` is a separate, 6 KB, version-4 file; it is not
+  part of this.
+
+## The compiler bugs this walks into
+
+Every one is catalogued, and every one bites *exactly* this shape:
+
+- **B11** -- a near <-> far struct copy over 8 bytes is an internal error.
+  An `OBJECT` is 24 bytes. No `OBJECT tmp = tree[i]`, no `*dst = *src`
+  between near and far; field by field, or `far_get`/`far_put`.
+- **B1 / B13 / B15** -- two elements of one array in one expression, a
+  negative index from a pointer into an array's middle, `p->a = p->b OP e`
+  through a spilled pointer. The rules in `tools/ccbug/README.md` already
+  forbid the shapes; a far array makes them more likely, not less.
+- **#82 (negative Y with long addressing)** -- fixed in the 5.18 this tree
+  requires, and `make negyscan` now guards the shape; a far tree walk is
+  precisely the code that would produce it.
+- **B17** -- `make mscan`.
+
+`make check-cc` runs before and after, and both scans are part of the
+gate.
+
+## Verification
+
+1. **Nothing existing changes.** Every gate that draws a tree -- m4, m7,
+   m8, m9, m17-m19, m26, GACS `g4a-check`, RetroWP `gem4xe-check` -- stays
+   **pixel-identical**. Their trees are pool trees addressed as bank-zero
+   far pointers; the images must not move by a byte.
+2. **A far resource, drawn against the model.** `tools/rsc.py` builds a
+   resource from a description and `tools/aesref.py` draws the same
+   description on the host. A fixture of ~700 objects across several trees
+   -- too big for the pool by construction -- loaded by a large-model gate
+   application, drawn with `objc_draw`, hit-tested with `objc_find`, run
+   through `form_do` with an editable field, and hung as a menu bar, each
+   compared with the model. This is `make test-m4` again, with the tree
+   where it could not be before.
+3. **The refusals are exercised.** The same fixture loaded by a
+   *small-model* application must be refused, with the error code, and
+   nothing written; a resource over 64 KB likewise.
+4. **Cost.** VCOUNT around the desktop's `objc_draw`, before and after.
+5. **Bank `$00`.** `tools/memreport.py` before and after: four globals gain
+   a bank byte; nothing else may grow.
+
+## Order of work
+
+1. The type change, `SPEC_PTR`, `gr_gtext`, the four globals, `far_of` in
+   the ABI -- **with no far resource yet.** Every tree is still in the pool;
+   every gate must pass unchanged. This proves the one-path claim before
+   anything depends on it.
+2. `rsrc_load`'s far path, the kit's flag, the refusals, the fixture, the
+   new gate.
+3. QED.
+
+Step 1 is the risky one and it is the one with a complete oracle already
+in place: forty gates that draw trees and compare pixels.
+
+## What this is not
+
+It is not a way to make the pool bigger, and it is not a bounce. Both were
+considered. A bounce cannot hold a 34 KB resource in 1,794 free bytes; the
+pool cannot grow because the LoRAM/Near boundary is the one boundary in
+bank `$00` that fails at link time rather than at run time
+(`gem4xe-bank00-which-boundary-to-move`). Keeping the OBJECT array near and
+only the strings far was also considered and rejected on the same number:
+QED's objects alone are 16 KB.
