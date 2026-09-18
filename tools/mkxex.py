@@ -25,11 +25,20 @@ bank $00, followed by a two-byte segment that writes INITAD, which makes DOS
 call the loader.  The loader unpacks the chunk to its real home and returns,
 and by the time DOS reaches the run vector the far image is assembled.
 
-Writing INITAD after every chunk rather than once at the start is deliberate.
-DOSes disagree about whether INITAD is called after EVERY segment or only after
-one that writes to it; rewriting it per chunk is correct under both readings,
-and the loader zeroes its own count field so a spurious extra call does
-nothing.
+Writing INITAD after every chunk rather than once at the start is REQUIRED,
+and the reason was measured rather than assumed (2026-09-18, after a reader on
+AtariAge corrected an earlier account of it here).  The DOS calls INITAD after
+every segment -- AND POINTS IT AT AN RTS ONCE IT HAS.  So it fires only for the
+segment that just set it, and a loader that wrote INITAD once would unpack its
+first chunk and silently skip every chunk after it.
+
+Measured on DOS II+/D 6.4 with a seven-segment probe: INITAD set once, two
+plain segments after it, the vector's routine counting its own calls.  It ran
+ONCE, and afterwards $02E2 read $1507, where the byte is $60.  This file used
+to say "DOSes disagree about whether INITAD fires after every segment or only
+after one that writes to it" -- they do not disagree; one mechanism looks like
+both.  The loader still zeroes its own count field, which is now belt and
+braces rather than the reason.
 
 THE CHUNKS ARE PACKED.  The far image is two thirds of a double-density
 floppy and most of a minute of a 1050's reading, and it is code and tables,
