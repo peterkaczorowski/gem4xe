@@ -68,7 +68,7 @@ static uint32_t al_icon(WORD n)
 /* The donor has these in util/; here they are one line each. */
 static WORD al_max(WORD a, WORD b) { return a > b ? a : b; }
 
-static void ob_setxywh(OBJECT *tree, WORD obj, const GRECT *pt)
+static void ob_setxywh(OBJECT FAR *tree, WORD obj, const GRECT *pt)
 {
     tree[obj].ob_x = pt->g_x;
     tree[obj].ob_y = pt->g_y;
@@ -82,7 +82,7 @@ static void ob_setxywh(OBJECT *tree, WORD obj, const GRECT *pt)
 /* The donor's fm_strbrk: break the string at | and ], writing each piece
  * into the buffer the object already points at.  A doubled || or ]] is a
  * literal one, as Atari TOS and PC GEM both have it. */
-static const char *fm_strbrk(OBJECT *tree, WORD start, WORD maxnum,
+static const char *fm_strbrk(OBJECT FAR *tree, WORD start, WORD maxnum,
                              WORD maxlen, const char *alert,
                              WORD *pnum, WORD *plen)
 {
@@ -122,7 +122,7 @@ static const char *fm_strbrk(OBJECT *tree, WORD start, WORD maxnum,
 }
 
 /* [icon][line|line][button|button] -> the pieces, in the tree. */
-static void fm_parse(OBJECT *tree, const char *palstr, WORD *picnum,
+static void fm_parse(OBJECT FAR *tree, const char *palstr, WORD *picnum,
                      WORD *pnummsg, WORD *plenmsg, WORD *pnumbut, WORD *plenbut)
 {
     const char *alert = palstr;
@@ -136,12 +136,12 @@ static void fm_parse(OBJECT *tree, const char *palstr, WORD *picnum,
 
 /* The donor's fm_build, in character cells: the icon at the left, the
  * message lines beside it, the buttons under whichever is taller. */
-static void fm_build(OBJECT *tree, WORD iconnum, WORD nummsg, WORD mlenmsg,
+static void fm_build(OBJECT FAR *tree, WORD iconnum, WORD nummsg, WORD mlenmsg,
                      WORD numbut, WORD mlenbut)
 {
     WORD i, hicon, allbut;
     GRECT al, ic, bt, ms;
-    OBJECT *obj;
+    OBJECT FAR *obj;
 
     r_set(&al, 0, 0, 1, 1);
     r_set(&ms, 1, 1, mlenmsg, 1);
@@ -196,9 +196,9 @@ static void fm_build(OBJECT *tree, WORD iconnum, WORD nummsg, WORD mlenmsg,
 
 /* The tree an alert is made of, in the pool: ten objects, then the
  * strings they point at.  0 when the pool has not the room. */
-static OBJECT *al_tree(void)
+static OBJECT FAR *al_tree(void)
 {
-    OBJECT *tree = pool_alloc(NUM_ALOBJS * (uint16_t)sizeof(OBJECT), 2);
+    OBJECT FAR *tree = pool_alloc(NUM_ALOBJS * (uint16_t)sizeof(OBJECT), 2);
     char *str = pool_alloc(ALSTR_SIZE, 2);
     WORD i;
 
@@ -235,10 +235,10 @@ static OBJECT *al_tree(void)
 WORD fm_alert(WORD defbut, const char *palstr)
 {
     WORD i, icnum, nummsg, mlenmsg, numbut, mlenbut;
-    OBJECT *tree;
+    OBJECT FAR *tree;
     GRECT d, t;
     uint16_t mark;
-    BITBLK *bi;
+    BITBLK FAR *bi;
     uint8_t *icon;
 
     mark = pool_mark();

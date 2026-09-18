@@ -7,6 +7,7 @@
  * screen is left exactly as it was found.  What is left is the animation:
  * a box that walks from the icon to the dialog's centre and grows.
  */
+#include "portab.h"
 #include "aes.h"
 #include "gemdata.h"
 
@@ -154,7 +155,7 @@ void gr_shrinkbox(const GRECT *po, const GRECT *pt)
  * the pointer was inside at the release: `out` is flipped before each
  * wait to say which crossing to watch for next, so when the release ends
  * the loop it holds the opposite of where the pointer was. */
-WORD gr_watchbox(OBJECT *tree, WORD obj, WORD instate, WORD outstate)
+WORD gr_watchbox(OBJECT FAR *tree, WORD obj, WORD instate, WORD outstate)
 {
     WORD  out, state;
     GRECT t;
@@ -321,7 +322,7 @@ void gr_dragbox(WORD w, WORD h, WORD sx, WORD sy, const GRECT *pc,
 
 /* Drag the elevator obj along its bar parent; the result is where it was
  * left, in thousandths of the bar's travel. */
-WORD gr_slidebox(OBJECT *tree, WORD parent, WORD obj, WORD isvert)
+WORD gr_slidebox(OBJECT FAR *tree, WORD parent, WORD obj, WORD isvert)
 {
     GRECT t, c;
     WORD  divnd, divis;

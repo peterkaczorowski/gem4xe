@@ -31,6 +31,7 @@
  * the screen (vro_cpyfm, source-clipped), so the cost is a stripe left
  * unrestored, not a crash.
  */
+#include "portab.h"
 #include "aes.h"
 #include "proc.h"
 
@@ -52,7 +53,7 @@ WORD        gl_dafirst;
 #define INITEM_STATE    3       /* on an item */
 #define OUTSIDE_STATE   4       /* off the bar and the items, menu down */
 
-OBJECT *gl_mntree;              /* the menu bar showing, or 0 */
+OBJECT FAR *gl_mntree;              /* the menu bar showing, or 0 */
 MOBLK   gl_ctwait;              /* the rectangle that wakes the menu: the
                                  * active bar while there is one, else
                                  * gl_rmenu (which nothing enters, as a
@@ -61,7 +62,7 @@ MOBLK   gl_ctwait;              /* the rectangle that wakes the menu: the
 
 /* The drop-down for a title: the titles and the drop-downs are children
  * of THEACTIVE and of the box after the bar, in the same order. */
-static WORD menu_sub(OBJECT *tree, WORD ititle)
+static WORD menu_sub(OBJECT FAR *tree, WORD ititle)
 {
     WORD themenus, imenu, i;
 
@@ -88,7 +89,7 @@ static WORD menu_sub(OBJECT *tree, WORD ititle)
  * which is what turns a click into a menu id (ctrl.c). */
 static void menu_fixup(void)
 {
-    OBJECT *tree = gl_mntree;
+    OBJECT FAR *tree = gl_mntree;
     WORD themenus, dabox, cnt, i, slot, ob, height;
 
     if (tree == 0)
@@ -118,7 +119,7 @@ static void menu_fixup(void)
 }
 
 /* A mouse rectangle wait on an object: leave it if x, else enter it. */
-static void rect_change(OBJECT *tree, MOBLK *prmob, WORD iob, WORD x)
+static void rect_change(OBJECT FAR *tree, MOBLK *prmob, WORD iob, WORD x)
 {
     ob_actxywh(tree, iob, &prmob->m_gr);
     prmob->m_out = x;
@@ -127,7 +128,7 @@ static void rect_change(OBJECT *tree, MOBLK *prmob, WORD iob, WORD x)
 /* Set or clear a state bit on an object, redrawing it with the clip off
  * if dodraw; FALSE, and nothing done, when chkdisabled and the object is
  * disabled.  The menu_icheck/ienable/tnormal calls come here directly. */
-WORD do_chg(OBJECT *tree, WORD iitem, UWORD chgvalue, WORD dochg,
+WORD do_chg(OBJECT FAR *tree, WORD iitem, UWORD chgvalue, WORD dochg,
             WORD dodraw, WORD chkdisabled)
 {
     UWORD curr_state;
@@ -157,7 +158,7 @@ static WORD item_changed(WORD last_item, WORD cur_item)
 /* Select or deselect last_item, if it is something and not cur_item.
  * Called with the two swapped to select the new one: then it is "the new
  * one, if it is something and not the old one". */
-static WORD menu_select(OBJECT *tree, WORD last_item, WORD cur_item,
+static WORD menu_select(OBJECT FAR *tree, WORD last_item, WORD cur_item,
                         WORD setit)
 {
     if (item_changed(last_item, cur_item))
@@ -167,7 +168,7 @@ static WORD menu_select(OBJECT *tree, WORD last_item, WORD cur_item,
 
 /* Save or restore what is under a drop-down, one pixel of frame
  * included on the left, right and bottom. */
-static void menu_sr(WORD saveit, OBJECT *tree, WORD imenu)
+static void menu_sr(WORD saveit, OBJECT FAR *tree, WORD imenu)
 {
     GRECT t;
 
@@ -185,7 +186,7 @@ static void menu_sr(WORD saveit, OBJECT *tree, WORD imenu)
 /* Pull a title's menu down: the title selected, the screen under the
  * drop-down saved, the drop-down drawn.  A disabled title gets none of
  * it.  Returns the drop-down's object. */
-static WORD menu_down(OBJECT *tree, WORD ititle)
+static WORD menu_down(OBJECT FAR *tree, WORD ititle)
 {
     WORD imenu;
 
@@ -327,7 +328,7 @@ WORD mn_do(WORD *ptitle, WORD *pitem)
  * bar object stretched to the right edge, drawn with the clip off, and
  * the line under it drawn black in replace mode whatever the tree says
  * -- or hide it, which is only to forget it: the application redraws. */
-void mn_bar(OBJECT *tree, WORD showit)
+void mn_bar(OBJECT FAR *tree, WORD showit)
 {
     if (showit) {
         gl_mntree = tree;
@@ -346,7 +347,7 @@ void mn_bar(OBJECT *tree, WORD showit)
 
 /* menu_text: a new string for an item, copied over the old one, which
  * the caller made long enough. */
-void mn_text(OBJECT *tree, WORD item, const char *text)
+void mn_text(OBJECT FAR *tree, WORD item, const char *text)
 {
     char *d = (char *)(uint16_t)tree[item].ob_spec;
 

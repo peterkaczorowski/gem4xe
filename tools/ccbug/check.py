@@ -71,6 +71,14 @@ REFUSALS = {
 LISTINGS = {
     "b16": "B16 byte spin loop, rep before its back edge",
 }
+# file stem: note -- the shapes the compiler NEVER FINISHES compiling.  The
+# only report a bug of this kind can make is the timeout that kills it, so
+# each is compiled under one, and "still present" means the compiler was
+# killed rather than that it produced anything.
+HANGS = {
+    "b18_farloop": "B18 far byte loop, cast and ++ in one expression",
+}
+HANG_SECONDS = 20                   # a clean compile of any of these is < 1 s
 BRANCHES = ("bcc", "bcs", "beq", "bne", "bmi", "bpl", "bvc", "bvs")
 
 
@@ -214,6 +222,20 @@ def main():
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                            text=True)
         crashes[note] = r.returncode != 0 and "negative size" in r.stdout
+    # A compile that never finishes.  "still present" is the timeout firing;
+    # anything the compiler manages to say is not this bug, and at -O0 (and
+    # in the large data model) it compiles at once and reports FIXED, which
+    # the -O matrix in the README records on purpose.
+    for tag, note in HANGS.items():
+        try:
+            subprocess.run([cc, "--code-model=large", "--data-model=small",
+                            f"-O{a.O}", "-c", "-o", os.path.join(a.out, f"{tag}.o"),
+                            os.path.join(ROOT, "tools", "ccbug", f"{tag}.c")],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True, timeout=HANG_SECONDS)
+            crashes[note] = False
+        except subprocess.TimeoutExpired:
+            crashes[note] = True
     # B16 compiles, to code that derails on its second pass: compile the
     # file alone and read its listing for the shape
     for tag, note in LISTINGS.items():
@@ -245,7 +267,10 @@ def main():
         print(f"  {'B2 with src/sys/div16.s':42s} want {want:5d} got {got:5d}   "
               f"{'ok' if got == want else 'BROKEN'}")
     for note, here in crashes.items():
-        print(f"  {note:42s} {'compiles':>16s}   "
+        # A hang did not compile; saying "compiles" of it would be the one
+        # untrue word in this report.
+        how = "killed" if here and note in HANGS.values() else "compiles"
+        print(f"  {note:42s} {how:>16s}   "
               f"{'still present' if here else 'FIXED upstream'}")
         present += here
     blind = 0
@@ -263,7 +288,7 @@ def main():
                   "they exist to find, so their silence means nothing")
         return 1
     print(f"check-cc: PASSED -- every workaround shape is right; "
-          f"{present} of {sum(1 for v in RESULTS.values() if v[1] == 'bug') + len(CRASHES) + len(LISTINGS) + len(REFUSALS)} "
+          f"{present} of {sum(1 for v in RESULTS.values() if v[1] == 'bug') + len(CRASHES) + len(LISTINGS) + len(REFUSALS) + len(HANGS)} "
           f"bug shapes still present")
     return 0
 

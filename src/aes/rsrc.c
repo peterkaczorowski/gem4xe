@@ -28,6 +28,7 @@
  * parameter, rs_fixit(), rather than the one resource the library holds.
  */
 #include <string.h>
+#include "portab.h"
 #include "aes/aes.h"
 #include "aes/proc.h"
 #include "sys/app.h"
@@ -84,7 +85,7 @@ static void fix_chpos(WORD *pfix, WORD which)
     *pfix = cpos;
 }
 
-void rs_obfix(OBJECT *tree, WORD obj)
+void rs_obfix(OBJECT FAR *tree, WORD obj)
 {
     WORD *p = &tree[obj].ob_x;
     WORD k;

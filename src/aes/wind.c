@@ -148,7 +148,7 @@ static char gl_ibuf[W_TEXTMAX + 1];
 /* Point a frame TEDINFO at the string `addr` names.  A near address is
  * used where it lies, so the application's own edits show; a far one is
  * copied into `buf` first.  Either way te_ptext is bank $00. */
-static void w_ptext(TEDINFO *pt, char *buf, uint32_t addr)
+static void w_ptext(TEDINFO FAR *pt, char *buf, uint32_t addr)
 {
     if (addr >> 16) {
         far_strget(buf, addr, W_TEXTMAX + 1);
@@ -158,10 +158,10 @@ static void w_ptext(TEDINFO *pt, char *buf, uint32_t addr)
     }
 }
 
-OBJECT *gl_wtree;
-OBJECT *gl_awind;
+OBJECT FAR *gl_wtree;
+OBJECT FAR *gl_awind;
 WORD    gl_wtop;
-OBJECT *gl_newdesk;
+OBJECT FAR *gl_newdesk;
 WORD    gl_newroot;
 GRECT   gl_rzero;
 
@@ -294,7 +294,7 @@ static ORECT FAR *brkrct(const ORECT FAR *new, ORECT FAR *r,
 }
 
 /* Break every rectangle in window wh's list around gl_mkrect. */
-static void mkrect(OBJECT *tree, WORD wh, WORD sx, WORD sy)
+static void mkrect(OBJECT FAR *tree, WORD wh, WORD sx, WORD sy)
 {
     WINDOW *pwin = &gl_win[wh];
     ORECT FAR *p, *r;
@@ -332,7 +332,7 @@ static void mkrect(OBJECT *tree, WORD wh, WORD sx, WORD sy)
  * every window from the desktop up to wh loses what wh now covers; wh's
  * own list becomes its whole true rectangle (its own occluders are broken
  * out of it by the windows above it calling this in turn). */
-static void newrect(OBJECT *tree, WORD wh, WORD sx, WORD sy)
+static void newrect(OBJECT FAR *tree, WORD wh, WORD sx, WORD sy)
 {
     WINDOW *pwin = &gl_win[wh];
     ORECT FAR *r, *new;
@@ -426,7 +426,7 @@ static void w_adjust(WORD parent, WORD obj, WORD x, WORD y, WORD w, WORD h)
 
 /* Draw obj of tree, depth deep, once per rectangle of window wh's list
  * that meets pc (the screen if NULL), with the clip set to the piece. */
-static void do_walk(WORD wh, OBJECT *tree, WORD obj, WORD depth, GRECT *pc)
+static void do_walk(WORD wh, OBJECT FAR *tree, WORD obj, WORD depth, GRECT *pc)
 {
     ORECT FAR *po;
     GRECT t;
@@ -467,7 +467,7 @@ static void w_setactive(void)
  * through the desktop's rectangle list. */
 void w_drawdesk(const GRECT *pc)
 {
-    OBJECT *tree;
+    OBJECT FAR *tree;
     WORD depth, root;
     GRECT c;
 
@@ -1189,7 +1189,7 @@ WORD wm_set(WORD w_handle, WORD w_field, WORD *pinwds)
             wm_mktop(w_handle);
         break;
     case WF_NEWDESK:
-        gl_newdesk = (OBJECT *)(uint16_t)pinwds[1];
+        gl_newdesk = (OBJECT FAR *)(uint16_t)pinwds[1];
         gl_newroot = pinwds[2];
         break;
     case WF_HSLSIZ:

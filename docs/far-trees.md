@@ -1,8 +1,38 @@
 # Object trees in far memory
 
-Status: **designed, not started.** Written 2026-09-18 from measurements of
-the tree as it is, so the argument rests on what the code does rather than
-on what it is remembered to do. The port that motivates it is QED
+Status: **step 1 built and measured, 2026-09-18** -- every tree the AES
+touches is addressed as a FAR pointer, no far resource exists yet, and the
+oracle says nothing moved. Designed the same day from measurements of the
+tree as it was, so the argument rests on what the code does rather than
+on what it is remembered to do.
+
+## Step 1, as it went
+
+The type change was mechanical (124 sites, `OBJECT`/`TEDINFO`/`ICONBLK`/
+`BITBLK` pointers in nine files), the seams were the four named below, and
+the three whole-struct reads out of a tree -- a `TEDINFO` twice, an
+`ICONBLK` once -- became `far_get` so that B11 never got the chance.
+`rsrc.c` was left near on purpose except `rs_obfix`: its pool pointers are
+step 2's business.
+
+| what the design promised | what was measured |
+|---|---|
+| pixel-identical on every gate that draws a tree | m4 15/15, m7 10/10, m8 12/12, m9 4/4, m17 -- identical; the full suite and both applications are in `build/fartrees-suite1.log` |
+| the desktop's `objc_draw` within +30 % | **320 frames after GO before, 320 after** -- the +26 % on the walk is invisible at frame granularity, because a redraw's time goes to the blitter |
+| four globals gain a bank byte, nothing else grows | `zdata` grew by exactly 8 bytes (two per global); LoRAM fell to 248 free against a floor of 256 and `memreport` said so; the LoRAM/Near boundary moved 16 bytes, the one boundary that can, and LoRAM is at 264 |
+| stack | low-water 1,389 -> 1,396 bytes: seven bytes of far pointers on the AES's stack |
+| `check-cc`, `mscan`, `negyscan` before and after | all clean -- and `check-cc` gained an entry, below |
+
+**What it found: B18.** `expand_string` -- the one place the VDI reads an
+object's text -- was given a FAR string, and the natural loop,
+`dst[n++] = (uint8_t)*s++;`, **never finishes compiling** at `-O1` or
+`-O2` in the small data model. The compiler prints nothing; the host's
+memory guard killed `make` twice before the file was bisected. The trigger
+is the combination of a post-increment far read and a `(uint8_t)` cast in
+one expression inside a loop; reading the byte into a local first is the
+fix, and the reproducer, the matrix and a timeout-based `check-cc` entry
+are in `tools/ccbug/` (`b18_farloop.c`, rule 17). Any byte copy out of
+far memory this design adds later will want that shape. The port that motivates it is QED
 (`docs/qed.md` when it exists; the numbers are below), but the change
 serves every application whose resource or object trees outgrow bank `$00`
 -- RetroWP's included -- and it is the shape a multitasking AES needs.

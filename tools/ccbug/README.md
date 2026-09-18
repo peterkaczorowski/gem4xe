@@ -1,9 +1,10 @@
 # tools/ccbug — the cc65816 bugs gem4xe works around
 
-Seventeen defects in Calypsi cc65816, sixteen found against **5.18**
+Eighteen defects in Calypsi cc65816, seventeen found against **5.18**
 here and one (B17) reported from another project — twelve in
-code generation, two crashes, one in the front end's arithmetic and one
-in the run-time library's division — each reproduced from a shape
+code generation, two crashes, one compile that never finishes (B18), one
+in the front end's arithmetic and one in the run-time library's division
+— each reproduced from a shape
 lifted out of gem4xe or out of the vendor's own C library, each with the
 shape the sources use instead.
 
@@ -69,6 +70,7 @@ an optimiser fault, and saying which saves a vendor a bisect.
 | B11 | yes | yes | yes | internal error |
 | B12 | yes | yes | yes | |
 | B16 | no | no | yes | |
+| B18 | no | yes | yes | the compiler never finishes; `--data-model=large` is clean at every level |
 
 `--no-inline` is a useful second axis: it clears B3 and B10, which is
 expected, and it must NOT clear anything else.  It was `--no-inline` that
@@ -132,6 +134,11 @@ What the sources do, in one line each. The reasons follow.
     compare is a 16-bit one. At -O2 the byte compare's width switch can
     land before the loop's back edge, and the second pass runs 8-bit code
     as 16-bit.
+17. **Never `dst[n++] = (uint8_t)*s++` through a FAR pointer in a loop.**
+    Read the byte into a local first (`char c = *s++; ... (uint8_t)c`),
+    or index (`s[n]`), or drop the cast. With the cast, the increment and
+    the far read in one expression the compiler never finishes -- it is
+    not a wrong answer but no answer, and `make` is what gets killed.
 
 ## B1 — stack-array element plus operand compiles to a load
 
@@ -791,6 +798,44 @@ of that and reported 61 calls, every one of them safe -- the compiler
 calls an outlined fragment while narrow and the fragment widens before it
 returns.  Rule 17: do not spin a scan's output into a bug without reading
 one hit all the way through.
+
+## B18 — a far byte loop the compiler never finishes compiling
+
+    while (*s && n < 127)
+        dst[n++] = (WORD)(uint8_t)*s++;      /* s is const char __far * */
+
+does not compile at `-O1` or `-O2` under `--data-model=small`. Nothing is
+reported: the compiler runs until something kills it, and what killed it
+here, twice, was the host's memory guard stopping `make` -- the first sign
+was a build that died with no error in its log, on a file that had
+compiled a minute earlier.
+
+**The trigger is the combination**, measured one axis at a time
+(`b18_farloop.c`, each compile under a 15-second timeout):
+
+| shape | |
+|---|---|
+| `dst[n++] = (uint8_t)*s++` | **hangs** |
+| the same without the `(uint8_t)` | compiles |
+| `dst[n] = (uint8_t)s[n]; n++` -- index, not increment | compiles |
+| `char c = *s++; dst[n++] = (uint8_t)c` -- the read into a local | compiles |
+| `*(const uint8_t __far *)(a + n)` -- the address recomputed | compiles |
+| unbounded `while (*s)` with the cast and increment | hangs |
+| `-O0` | compiles |
+| `--data-model=large`, any level | compiles |
+| `-O2 --speed`, `-O2 --no-cross-call` | hang |
+
+So it needs a post-increment read through a far pointer, narrowed in the
+same expression, in a loop, with the optimiser on, in the small data model.
+Found 2026-09-18 the day `expand_string()` (`src/aes/graf.c`) was given a
+FAR string for `docs/far-trees.md`; the fix there is the local (rule 17).
+
+**How `check-cc` sees it:** a bug that never returns cannot be reported by
+the compiler, so `HANGS` in `check.py` compiles the file under a timeout and
+"still present" means the timeout fired. At `-O0` it compiles at once and
+reads `FIXED upstream`, which the matrix above records deliberately.
+
+Not yet reported upstream.
 
 ## Another project's ledger: MicroPython on the SNES
 

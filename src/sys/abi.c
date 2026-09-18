@@ -238,7 +238,7 @@ static uint32_t ad_rso;
 static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
                      WORD *int_out, const int32_t *addr_in)
 {
-    OBJECT *tree = 0;
+    OBJECT FAR *tree = 0;
     GRECT clip;
     WORD ret = 1;                   /* TRUE unless the call says otherwise */
     WORD k;
@@ -253,7 +253,7 @@ static WORD crysbind(WORD opcode, WORD FAR *global, const WORD *int_in,
     case 50: case 54: case 55: case 56:
     case 75:
     case 114:
-        tree = (OBJECT *)near_of(addr_in[0]);
+        tree = (OBJECT FAR *)(uint32_t)addr_in[0];    /* any bank: see docs/far-trees.md */
         if (!tree)
             return -1;
         break;

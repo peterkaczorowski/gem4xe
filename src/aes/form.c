@@ -8,6 +8,7 @@
  * (with bit 15 set for a double click on a TOUCHEXIT).  RETURN selects the
  * DEFAULT object; TAB and the arrows move between fields.
  */
+#include "portab.h"
 #include "aes.h"
 
 /* ---- screen ownership -----------------------------------------------------
@@ -39,7 +40,7 @@ void fm_own(WORD beg_ownit)
 }
 
 /* ob_fs: an object's state, and its flags through pflag. */
-static WORD ob_fs(OBJECT *tree, WORD obj, WORD *pflag)
+static WORD ob_fs(OBJECT FAR *tree, WORD obj, WORD *pflag)
 {
     WORD st;
 
@@ -51,7 +52,7 @@ static WORD ob_fs(OBJECT *tree, WORD obj, WORD *pflag)
 /* The next EDITABLE field after (FORWARD) or before (BACKWARD) start_obj,
  * or the DEFAULT object (DEFLT), skipping hidden and disabled ones;
  * start_obj itself if there is none. */
-static WORD find_obj(OBJECT *tree, WORD start_obj, WORD which)
+static WORD find_obj(OBJECT FAR *tree, WORD start_obj, WORD which)
 {
     WORD obj, flag, state, inc, theflag;
 
@@ -84,7 +85,7 @@ static WORD find_obj(OBJECT *tree, WORD start_obj, WORD which)
     return start_obj;
 }
 
-static WORD fm_inifld(OBJECT *tree, WORD start_fld)
+static WORD fm_inifld(OBJECT FAR *tree, WORD start_fld)
 {
     if (start_fld == 0)
         start_fld = find_obj(tree, 0, FORWARD);
@@ -95,7 +96,7 @@ static WORD fm_inifld(OBJECT *tree, WORD start_fld)
  * (*pchar = 0) and name the next field in *pnew_obj; RETURN/ENTER select
  * the DEFAULT object and end the form (FALSE).  Anything else is left for
  * objc_edit. */
-WORD fm_keybd(OBJECT *tree, WORD obj, WORD *pchar, WORD *pnew_obj)
+WORD fm_keybd(OBJECT FAR *tree, WORD obj, WORD *pchar, WORD *pnew_obj)
 {
     WORD direction = -1;
     WORD new_obj, st;
@@ -134,7 +135,7 @@ WORD fm_keybd(OBJECT *tree, WORD obj, WORD *pchar, WORD *pnew_obj)
  * form: an EXIT object selected, or any TOUCHEXIT.  *pnew_obj is the
  * object to go on editing (an EDITABLE one) or the exit object, with
  * bit 15 for a double-clicked TOUCHEXIT. */
-WORD fm_button(OBJECT *tree, WORD new_obj, WORD clks, WORD *pnew_obj)
+WORD fm_button(OBJECT FAR *tree, WORD new_obj, WORD clks, WORD *pnew_obj)
 {
     WORD tobj, orword, parent, state, flags, cont, tstate, tflags;
     WORD rets[6];
@@ -190,7 +191,7 @@ WORD fm_button(OBJECT *tree, WORD new_obj, WORD clks, WORD *pnew_obj)
 
 /* Run the dialog until an EXIT or TOUCHEXIT object is chosen; returns it.
  * start_fld is the field to put the cursor in, 0 for the first. */
-WORD fm_do(OBJECT *tree, WORD start_fld)
+WORD fm_do(OBJECT FAR *tree, WORD start_fld)
 {
     WORD edit_obj, next_obj, which, cont, idx;
     WORD rets[6];
@@ -269,7 +270,7 @@ WORD fm_dial(WORD fmd_type, const GRECT *pi, const GRECT *pt)
 
 /* ---- the AES entry points ------------------------------------------- */
 
-WORD form_do(OBJECT *tree, WORD start)
+WORD form_do(OBJECT FAR *tree, WORD start)
 {
     return fm_do(tree, start);
 }
@@ -279,13 +280,13 @@ WORD form_dial(WORD type, const GRECT *pi, const GRECT *pt)
     return fm_dial(type, pi, pt);
 }
 
-WORD form_keybd(OBJECT *tree, WORD obj, WORD *pchar, WORD *pnew_obj)
+WORD form_keybd(OBJECT FAR *tree, WORD obj, WORD *pchar, WORD *pnew_obj)
 {
     gsx_sclip(&gl_rfull);
     return fm_keybd(tree, obj, pchar, pnew_obj);
 }
 
-WORD form_button(OBJECT *tree, WORD new_obj, WORD clks, WORD *pnew_obj)
+WORD form_button(OBJECT FAR *tree, WORD new_obj, WORD clks, WORD *pnew_obj)
 {
     gsx_sclip(&gl_rfull);
     return fm_button(tree, new_obj, clks, pnew_obj);

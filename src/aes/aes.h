@@ -470,12 +470,12 @@ void bb_fill(WORD mode, WORD fis, WORD patt, WORD x, WORD y, WORD w, WORD h);
 void bb_screen(WORD sx, WORD sy, WORD dx, WORD dy, WORD w, WORD h);
 void bb_save(const GRECT *pr);
 void bb_restore(const GRECT *pr);
-WORD expand_string(WORD *dst, const char *s);
+WORD expand_string(WORD *dst, const char FAR *s);
 void gr_crack(UWORD color, WORD *pbc, WORD *ptc, WORD *pip, WORD *pic, WORD *pmd);
 void gr_inside(GRECT *pt, WORD th);
 void gr_rect(WORD icolor, WORD ipattern, const GRECT *pt);
-WORD gr_just(WORD just, WORD font, const char *ptext, WORD w, WORD h, GRECT *pt);
-void gr_gtext(WORD just, WORD font, const char *ptext, const GRECT *pt);
+WORD gr_just(WORD just, WORD font, const char FAR *ptext, WORD w, WORD h, GRECT *pt);
+void gr_gtext(WORD just, WORD font, const char FAR *ptext, const GRECT *pt);
 void gr_box(WORD x, WORD y, WORD w, WORD h, WORD th);
 void gsx_xbox(const GRECT *pt);
 void gsx_xcbox(const GRECT *pt);
@@ -488,7 +488,7 @@ WORD gsx_getkey(WORD *pkey);
 WORD gr_stilldn(WORD out, WORD x, WORD y, WORD w, WORD h);
 void gr_growbox(const GRECT *po, const GRECT *pt);
 void gr_shrinkbox(const GRECT *po, const GRECT *pt);
-WORD gr_watchbox(OBJECT *tree, WORD obj, WORD instate, WORD outstate);
+WORD gr_watchbox(OBJECT FAR *tree, WORD obj, WORD instate, WORD outstate);
 void gr_mouse(WORD mode, const WORD *pmform);
 void gr_mkstate(WORD *pmx, WORD *pmy, WORD *pmstat, WORD *pkstat);
 void gr_rubwind(WORD xo, WORD yo, WORD wmin, WORD hmin, const GRECT *poff,
@@ -496,7 +496,7 @@ void gr_rubwind(WORD xo, WORD yo, WORD wmin, WORD hmin, const GRECT *poff,
 void gr_rubbox(WORD xo, WORD yo, WORD wmin, WORD hmin, WORD *pw, WORD *ph);
 void gr_dragbox(WORD w, WORD h, WORD sx, WORD sy, const GRECT *pc,
                 WORD *pdx, WORD *pdy);
-WORD gr_slidebox(OBJECT *tree, WORD parent, WORD obj, WORD isvert);
+WORD gr_slidebox(OBJECT FAR *tree, WORD parent, WORD obj, WORD isvert);
 
 /* ---- events: event.c (gemevlib.c + geminput.c) ------------------------- */
 void ev_init(void);
@@ -532,14 +532,14 @@ void ct_arrow_repeat(void);      /* a held arrow: one WM_ARROWED per ask */
 void ct_arrow_stop(void);
 
 /* ---- the menu library: menu.c (gemmnlib.c) ----------------------------- */
-extern OBJECT *gl_mntree;       /* the menu bar showing, or 0 */
+extern OBJECT FAR *gl_mntree;       /* the menu bar showing, or 0 */
 extern MOBLK   gl_ctwait;       /* the rectangle whose entry runs the menu */
 void mn_init(void);
-void mn_bar(OBJECT *tree, WORD showit);
+void mn_bar(OBJECT FAR *tree, WORD showit);
 WORD mn_do(WORD *ptitle, WORD *pitem);
-WORD do_chg(OBJECT *tree, WORD iitem, UWORD chgvalue, WORD dochg,
+WORD do_chg(OBJECT FAR *tree, WORD iitem, UWORD chgvalue, WORD dochg,
             WORD dodraw, WORD chkdisabled);
-void mn_text(OBJECT *tree, WORD item, const char *text);
+void mn_text(OBJECT FAR *tree, WORD item, const char *text);
 /* The objects every menu tree has in these positions -- the shape the
  * RCS builds and the AES trusts.  THEDESK is the Desk TITLE, and it is
  * the word AC_OPEN carries in msg[3]; the control manager and the menu
@@ -577,49 +577,49 @@ void ap_sendmsg(struct PROC *to, WORD type, WORD w3, WORD w4,
 
 /* ---- forms: form.c (gemfmlib.c) --------------------------------------- */
 void fm_own(WORD beg_ownit);
-WORD fm_do(OBJECT *tree, WORD start);
+WORD fm_do(OBJECT FAR *tree, WORD start);
 WORD fm_dial(WORD type, const GRECT *pi, const GRECT *pt);
-WORD fm_keybd(OBJECT *tree, WORD obj, WORD *pchar, WORD *pnew_obj);
-WORD fm_button(OBJECT *tree, WORD new_obj, WORD clks, WORD *pnew_obj);
+WORD fm_keybd(OBJECT FAR *tree, WORD obj, WORD *pchar, WORD *pnew_obj);
+WORD fm_button(OBJECT FAR *tree, WORD new_obj, WORD clks, WORD *pnew_obj);
 
-WORD form_do(OBJECT *tree, WORD start);
+WORD form_do(OBJECT FAR *tree, WORD start);
 WORD form_dial(WORD type, const GRECT *pi, const GRECT *pt);
 WORD fm_alert(WORD defbut, const char *palstr);   /* form_alert */
 WORD fm_error(WORD n);                            /* form_error */
-WORD form_keybd(OBJECT *tree, WORD obj, WORD *pchar, WORD *pnew_obj);
-WORD form_button(OBJECT *tree, WORD new_obj, WORD clks, WORD *pnew_obj);
+WORD form_keybd(OBJECT FAR *tree, WORD obj, WORD *pchar, WORD *pnew_obj);
+WORD form_button(OBJECT FAR *tree, WORD new_obj, WORD clks, WORD *pnew_obj);
 
 /* ---- the object library: objc.c ---------------------------------------- */
-typedef void (*OBJ_ROUTINE)(OBJECT *tree, WORD obj, WORD sx, WORD sy);
-void everyobj(OBJECT *tree, WORD this, WORD last, OBJ_ROUTINE routine,
+typedef void (*OBJ_ROUTINE)(OBJECT FAR *tree, WORD obj, WORD sx, WORD sy);
+void everyobj(OBJECT FAR *tree, WORD this, WORD last, OBJ_ROUTINE routine,
               WORD startx, WORD starty, WORD maxdep);
-void ob_draw(OBJECT *tree, WORD obj, WORD depth);
-void ob_add(OBJECT *tree, WORD parent, WORD child);
-WORD ob_delete(OBJECT *tree, WORD obj);
-WORD ob_order(OBJECT *tree, WORD mov_obj, WORD new_pos);
-void ob_offset(OBJECT *tree, WORD obj, WORD *px, WORD *py);
-void ob_actxywh(OBJECT *tree, WORD obj, GRECT *pt);
-void ob_relxywh(OBJECT *tree, WORD obj, GRECT *pt);
-WORD ob_get_par(OBJECT *tree, WORD obj);
+void ob_draw(OBJECT FAR *tree, WORD obj, WORD depth);
+void ob_add(OBJECT FAR *tree, WORD parent, WORD child);
+WORD ob_delete(OBJECT FAR *tree, WORD obj);
+WORD ob_order(OBJECT FAR *tree, WORD mov_obj, WORD new_pos);
+void ob_offset(OBJECT FAR *tree, WORD obj, WORD *px, WORD *py);
+void ob_actxywh(OBJECT FAR *tree, WORD obj, GRECT *pt);
+void ob_relxywh(OBJECT FAR *tree, WORD obj, GRECT *pt);
+WORD ob_get_par(OBJECT FAR *tree, WORD obj);
 void ob_format(WORD just, char *raw, const char *tmpl, char *fmt);
-void ob_center(OBJECT *tree, GRECT *pt);
-void ob_change(OBJECT *tree, WORD obj, UWORD new_state, WORD redraw);
-WORD ob_find(OBJECT *tree, WORD currobj, WORD depth, WORD mx, WORD my);
-WORD ob_edit(OBJECT *tree, WORD obj, WORD in_char, WORD *idx, WORD kind);
+void ob_center(OBJECT FAR *tree, GRECT *pt);
+void ob_change(OBJECT FAR *tree, WORD obj, UWORD new_state, WORD redraw);
+WORD ob_find(OBJECT FAR *tree, WORD currobj, WORD depth, WORD mx, WORD my);
+WORD ob_edit(OBJECT FAR *tree, WORD obj, WORD in_char, WORD *idx, WORD kind);
 
-void objc_draw(OBJECT *tree, WORD start, WORD depth, const GRECT *clip);
-WORD objc_find(OBJECT *tree, WORD start, WORD depth, WORD mx, WORD my);
-void objc_offset(OBJECT *tree, WORD obj, WORD *px, WORD *py);
-void objc_change(OBJECT *tree, WORD obj, const GRECT *clip, UWORD newstate,
+void objc_draw(OBJECT FAR *tree, WORD start, WORD depth, const GRECT *clip);
+WORD objc_find(OBJECT FAR *tree, WORD start, WORD depth, WORD mx, WORD my);
+void objc_offset(OBJECT FAR *tree, WORD obj, WORD *px, WORD *py);
+void objc_change(OBJECT FAR *tree, WORD obj, const GRECT *clip, UWORD newstate,
                  WORD redraw);
-WORD objc_edit(OBJECT *tree, WORD obj, WORD kchar, WORD *idx, WORD kind);
+WORD objc_edit(OBJECT FAR *tree, WORD obj, WORD kchar, WORD *idx, WORD kind);
 
 /* ---- the window manager: wind.c (gemwmlib.c + gemwrect.c) ------------- */
-extern OBJECT *gl_wtree;            /* the window tree: W_TREE[NUM_WIN] */
-extern OBJECT *gl_awind;            /* the frame being drawn: W_ACTIVE[] */
+extern OBJECT FAR *gl_wtree;            /* the window tree: W_TREE[NUM_WIN] */
+extern OBJECT FAR *gl_awind;            /* the frame being drawn: W_ACTIVE[] */
 extern WORD    gl_wtop;             /* the top window, NIL for none */
 extern WINDOW  gl_win[NUM_WIN];
-extern OBJECT *gl_newdesk;          /* the desktop tree, if one is installed */
+extern OBJECT FAR *gl_newdesk;          /* the desktop tree, if one is installed */
 extern WORD    gl_newroot;
 extern GRECT   gl_rzero;
 
@@ -657,7 +657,7 @@ WORD rs_load(const char *name);
 WORD rs_free(void);
 WORD rs_gaddr(UWORD rtype, UWORD rindex, uint32_t *paddr);
 WORD rs_saddr(UWORD rtype, UWORD rindex, uint32_t addr);
-void rs_obfix(OBJECT *tree, WORD obj);
+void rs_obfix(OBJECT FAR *tree, WORD obj);
 void rs_fixit(RSHDR *h);            /* the loader's fix-up, on any image */
 
 /* ---- what the system says: LANG.RSC (src/aes/lang.c) ------------------ */

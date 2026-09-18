@@ -646,11 +646,20 @@ void gr_rect(WORD icolor, WORD ipattern, const GRECT *pt)
 
 /* Stage a C string into intin[] as v_gtext wants it, one word per unsigned
  * byte; returns the count.  Clamped to the parameter block. */
-WORD expand_string(WORD *dst, const char *s)
+WORD expand_string(WORD *dst, const char FAR *s)
 {
     WORD n = 0;
-    while (*s && n < INTIN_SIZE - 1)
-        dst[n++] = (WORD)(uint8_t)*s++;
+    /* The byte is read into a local FIRST.  `dst[n++] = (uint8_t)*s++`
+     * through a far pointer never finishes compiling at -O1 or -O2 in the
+     * small data model -- cc65816 5.18.2 loops until it is killed (B18,
+     * tools/ccbug/b18_farloop.c).  Splitting the read from the narrowing
+     * is one of four shapes it accepts; this one costs nothing. */
+    while (n < INTIN_SIZE - 1) {
+        char c = *s++;
+        if (!c)
+            break;
+        dst[n++] = (WORD)(uint8_t)c;
+    }
     dst[n] = 0;
     return n;
 }
@@ -674,7 +683,7 @@ void gsx_tblt(WORD font, WORD x, WORD y, WORD nc)
  * miscompiles `*out = c ? a : b` once it inlines a static function -- the
  * store lands in a dead stack slot and *out is never written
  * (tools/ccbug/, `make check-cc`) -- so the count is returned instead. */
-static WORD gsx_tcalc(WORD font, const char *ptext, WORD *pw, WORD *ph)
+static WORD gsx_tcalc(WORD font, const char FAR *ptext, WORD *pw, WORD *ph)
 {
     WORD wc, hc, n;
 
@@ -694,7 +703,7 @@ static WORD gsx_tcalc(WORD font, const char *ptext, WORD *pw, WORD *ph)
 /* Place text of the given justification inside (pt->g_x, pt->g_y, w, h):
  * pt is moved to where the first character goes.  Returns the number of
  * characters that fit (staged in intin[]). */
-WORD gr_just(WORD just, WORD font, const char *ptext, WORD w, WORD h, GRECT *pt)
+WORD gr_just(WORD just, WORD font, const char FAR *ptext, WORD w, WORD h, GRECT *pt)
 {
     WORD numchs;
 
@@ -720,7 +729,7 @@ WORD gr_just(WORD just, WORD font, const char *ptext, WORD w, WORD h, GRECT *pt)
     return numchs;
 }
 
-void gr_gtext(WORD just, WORD font, const char *ptext, const GRECT *pt)
+void gr_gtext(WORD just, WORD font, const char FAR *ptext, const GRECT *pt)
 {
     GRECT t;
     WORD numchs;

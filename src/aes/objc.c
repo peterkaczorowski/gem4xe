@@ -13,6 +13,7 @@
  * AES has no private path to the screen, which is what keeps the device seam
  * meaningful.
  */
+#include "portab.h"
 #include "aes.h"
 #include "../vdi/vdi.h"
 #include "../sys/zwin.h"
@@ -55,13 +56,13 @@ static WORD str_cpy(char *dst, const char *src)
  * ob_spec is a 32-bit GEM address; on this target everything the AES
  * reaches lives in bank $00, so the low 16 bits are the pointer. */
 
-#define SPEC_PTR(spec)  ((void *)(uint16_t)(spec))
+#define SPEC_PTR(spec)  ((void FAR *)(uint32_t)(spec))
 
-static uint32_t ob_getspec(const OBJECT *tree, WORD obj)
+static uint32_t ob_getspec(const OBJECT FAR *tree, WORD obj)
 {
     uint32_t spec = tree[obj].ob_spec;
     if (tree[obj].ob_flags & INDIRECT)
-        spec = *(const uint32_t *)SPEC_PTR(spec);
+        spec = *(const uint32_t FAR *)SPEC_PTR(spec);
     return spec;
 }
 
@@ -69,7 +70,7 @@ static uint32_t ob_getspec(const OBJECT *tree, WORD obj)
 
 /* The parent of obj, found by walking the sibling chain to the object whose
  * ob_tail points back at us: GEM stores no parent link. */
-WORD ob_get_par(OBJECT *tree, WORD obj)
+WORD ob_get_par(OBJECT FAR *tree, WORD obj)
 {
     WORD pobj;
 
@@ -86,7 +87,7 @@ WORD ob_get_par(OBJECT *tree, WORD obj)
 }
 
 /* The sibling before obj under parent, or NIL if obj is the first. */
-static WORD get_prev(const OBJECT *tree, WORD parent, WORD obj)
+static WORD get_prev(const OBJECT FAR *tree, WORD parent, WORD obj)
 {
     WORD pobj, nobj;
 
@@ -104,7 +105,7 @@ static WORD get_prev(const OBJECT *tree, WORD parent, WORD obj)
 }
 
 /* Screen position of obj: its own ob_x/ob_y plus every ancestor's. */
-void ob_offset(OBJECT *tree, WORD obj, WORD *px, WORD *py)
+void ob_offset(OBJECT FAR *tree, WORD obj, WORD *px, WORD *py)
 {
     WORD x = 0, y = 0;
 
@@ -117,14 +118,14 @@ void ob_offset(OBJECT *tree, WORD obj, WORD *px, WORD *py)
     *py = y;
 }
 
-void ob_actxywh(OBJECT *tree, WORD obj, GRECT *pt)
+void ob_actxywh(OBJECT FAR *tree, WORD obj, GRECT *pt)
 {
     ob_offset(tree, obj, &pt->g_x, &pt->g_y);
     pt->g_w = tree[obj].ob_width;
     pt->g_h = tree[obj].ob_height;
 }
 
-void ob_relxywh(OBJECT *tree, WORD obj, GRECT *pt)
+void ob_relxywh(OBJECT FAR *tree, WORD obj, GRECT *pt)
 {
     pt->g_x = tree[obj].ob_x;
     pt->g_y = tree[obj].ob_y;
@@ -135,7 +136,7 @@ void ob_relxywh(OBJECT *tree, WORD obj, GRECT *pt)
 /* ---- editing the tree: what the window manager does to W_TREE ----------- */
 
 /* Make child the last child of parent. */
-void ob_add(OBJECT *tree, WORD parent, WORD child)
+void ob_add(OBJECT FAR *tree, WORD parent, WORD child)
 {
     WORD ptail;
 
@@ -152,7 +153,7 @@ void ob_add(OBJECT *tree, WORD parent, WORD child)
 
 /* Unlink obj from its parent's chain (the object itself is untouched).
  * FALSE for the root, or an object that is not in its parent's chain. */
-WORD ob_delete(OBJECT *tree, WORD obj)
+WORD ob_delete(OBJECT FAR *tree, WORD obj)
 {
     WORD parent, prev, nextsib;
 
@@ -179,7 +180,7 @@ WORD ob_delete(OBJECT *tree, WORD obj)
 
 /* Move mov_obj to position new_pos among its siblings: 0 is the first
  * (drawn first, so at the back), NIL the last (drawn last, on top). */
-WORD ob_order(OBJECT *tree, WORD mov_obj, WORD new_pos)
+WORD ob_order(OBJECT FAR *tree, WORD mov_obj, WORD new_pos)
 {
     WORD parent, chg_obj, ii;
 
@@ -217,7 +218,7 @@ WORD ob_order(OBJECT *tree, WORD mov_obj, WORD new_pos)
  * no deeper than maxdep below the start, calling routine(tree, obj, x, y)
  * with the object's screen position.  Iterative, the way the donor does it,
  * with a small stack of the positions on the way down. */
-void everyobj(OBJECT *tree, WORD this, WORD last, OBJ_ROUTINE routine,
+void everyobj(OBJECT FAR *tree, WORD this, WORD last, OBJ_ROUTINE routine,
                      WORD startx, WORD starty, WORD maxdep)
 {
     WORD tmp, depth, px, py;
@@ -268,7 +269,7 @@ void everyobj(OBJECT *tree, WORD this, WORD last, OBJ_ROUTINE routine,
  * (indirected) spec, state, type, flags, relative rectangle, and border
  * thickness; returns the BOXCHAR character.  (gemobjop.c ob_sst.) */
 
-static char ob_sst(OBJECT *tree, WORD obj, uint32_t *pspec, WORD *pstate,
+static char ob_sst(OBJECT FAR *tree, WORD obj, uint32_t *pspec, WORD *pstate,
                    WORD *ptype, WORD *pflags, GRECT *pt, WORD *pth)
 {
     uint32_t spec;
@@ -293,7 +294,7 @@ static char ob_sst(OBJECT *tree, WORD obj, uint32_t *pspec, WORD *pstate,
     case G_BOXTEXT:
     case G_FTEXT:
     case G_FBOXTEXT:
-        th = ((const TEDINFO *)SPEC_PTR(spec))->te_thickness;
+        th = ((const TEDINFO FAR *)SPEC_PTR(spec))->te_thickness;
         break;
     case G_BOX:
     case G_BOXCHAR:
@@ -367,7 +368,7 @@ void ob_format(WORD just, char *raw, const char *tmpl, char *fmt)
 
 /* ---- drawing one object ------------------------------------------------ */
 
-static void just_draw(OBJECT *tree, WORD obj, WORD sx, WORD sy)
+static void just_draw(OBJECT FAR *tree, WORD obj, WORD sx, WORD sy)
 {
     WORD bcol, tcol, ipat, icol, tmode, th, tmpth;
     WORD state, type, flags, len;
@@ -411,7 +412,7 @@ static void just_draw(OBJECT *tree, WORD obj, WORD sx, WORD sy)
         case G_BOXTEXT:
         case G_FTEXT:
         case G_FBOXTEXT:
-            ted = *(const TEDINFO *)SPEC_PTR(spec);
+            far_get((uint8_t *)&ted, spec, sizeof ted);   /* not a struct copy: B11 */
             gr_crack((UWORD)ted.te_color, &bcol, &tcol, &ipat, &icol, &tmode);
             break;
         default:
@@ -455,8 +456,8 @@ static void just_draw(OBJECT *tree, WORD obj, WORD sx, WORD sy)
         switch (type) {
         case G_FTEXT:
         case G_FBOXTEXT:
-            str_cpy(g_rawstr, (const char *)SPEC_PTR(ted.te_ptext));
-            str_cpy(g_tmpstr, (const char *)SPEC_PTR(ted.te_ptmplt));
+            far_strget(g_rawstr, ted.te_ptext, sizeof g_rawstr);
+            far_strget(g_tmpstr, ted.te_ptmplt, sizeof g_tmpstr);
             ob_format(ted.te_just, g_rawstr, g_tmpstr, g_fmtstr);
             /* fall through */
         case G_BOXCHAR:
@@ -473,10 +474,10 @@ static void just_draw(OBJECT *tree, WORD obj, WORD sx, WORD sy)
             c = t;
             gr_inside(&c, tmpth);
             gr_gtext(ted.te_just, ted.te_font,
-                     (const char *)SPEC_PTR(ted.te_ptext), &c);
+                     (const char FAR *)SPEC_PTR(ted.te_ptext), &c);
             break;
         case G_IMAGE: {
-            const BITBLK *bi = (const BITBLK *)SPEC_PTR(spec);
+            const BITBLK FAR *bi = (const BITBLK FAR *)SPEC_PTR(spec);
             gsx_blt(bi->bi_pdata, bi->bi_x, bi->bi_y, t.g_x, t.g_y,
                     (WORD)(bi->bi_wb * 8), bi->bi_hl, MD_TRANS,
                     bi->bi_color, WHITE);
@@ -496,12 +497,13 @@ static void just_draw(OBJECT *tree, WORD obj, WORD sx, WORD sy)
              * The colour planes are kept far beside it for the day this
              * case selects them: on a 16-colour surface that is the
              * natural thing to draw, and it is not drawn yet. */
-            ICONBLK ib = *(const ICONBLK *)SPEC_PTR(spec);
+            ICONBLK ib;
+            far_get((uint8_t *)&ib, spec, sizeof ib);   /* not a struct copy: B11 */
             GRECT pi, pl;
             WORD fg = (ib.ib_char >> 12) & 0x0F;
             WORD bg = (ib.ib_char >> 8) & 0x0F;
             WORD ch = ib.ib_char & 0xFF;
-            const char *label = (const char *)SPEC_PTR(ib.ib_ptext);
+            const char FAR *label = (const char FAR *)SPEC_PTR(ib.ib_ptext);
 
             if (state & SELECTED) {     /* selected: the colours change places */
                 WORD tmp = fg;
@@ -545,7 +547,7 @@ static void just_draw(OBJECT *tree, WORD obj, WORD sx, WORD sy)
      * horizontally too for a button.  A title has no border of its own --
      * the menu bar it sits in provides one. */
     if (type == G_STRING || type == G_TITLE || type == G_BUTTON) {
-        len = expand_string(intin, (const char *)SPEC_PTR(spec));
+        len = expand_string(intin, (const char FAR *)SPEC_PTR(spec));
         if (len) {
             gsx_attr(1, MD_TRANS, BLACK);
             tmpx = t.g_x;
@@ -603,7 +605,7 @@ static void just_draw(OBJECT *tree, WORD obj, WORD sx, WORD sy)
 
 /* ---- drawing a subtree -------------------------------------------------- */
 
-void ob_draw(OBJECT *tree, WORD obj, WORD depth)
+void ob_draw(OBJECT FAR *tree, WORD obj, WORD depth)
 {
     WORD last, pobj, sx, sy;
 
@@ -621,7 +623,7 @@ void ob_draw(OBJECT *tree, WORD obj, WORD depth)
 
 /* Draw the subtree at start, `depth` levels deep, clipped.  The clip stays
  * in force afterwards, as in the donor: the AES does not restore it. */
-void objc_draw(OBJECT *tree, WORD start, WORD depth, const GRECT *clip)
+void objc_draw(OBJECT FAR *tree, WORD start, WORD depth, const GRECT *clip)
 {
     gsx_sclip(clip);
     ob_draw(tree, start, depth);
@@ -631,7 +633,7 @@ void objc_draw(OBJECT *tree, WORD start, WORD depth, const GRECT *clip)
  * The deepest object under (mx,my), searching children LAST to FIRST so
  * that the one drawn on top wins, no deeper than `depth` below start. */
 
-WORD ob_find(OBJECT *tree, WORD currobj, WORD depth, WORD mx, WORD my)
+WORD ob_find(OBJECT FAR *tree, WORD currobj, WORD depth, WORD mx, WORD my)
 {
     WORD lastfound, dosibs, done, parent, child;
     GRECT t, o;
@@ -673,12 +675,12 @@ WORD ob_find(OBJECT *tree, WORD currobj, WORD depth, WORD mx, WORD my)
     return lastfound;
 }
 
-WORD objc_find(OBJECT *tree, WORD start, WORD depth, WORD mx, WORD my)
+WORD objc_find(OBJECT FAR *tree, WORD start, WORD depth, WORD mx, WORD my)
 {
     return ob_find(tree, start, depth, mx, my);
 }
 
-void objc_offset(OBJECT *tree, WORD obj, WORD *px, WORD *py)
+void objc_offset(OBJECT FAR *tree, WORD obj, WORD *px, WORD *py)
 {
     ob_offset(tree, obj, px, py);
 }
@@ -687,7 +689,7 @@ void objc_offset(OBJECT *tree, WORD obj, WORD *px, WORD *py)
 
 /* Exported for the form and graphics libraries, which change state under
  * whatever clip is already in force. */
-void ob_change(OBJECT *tree, WORD obj, UWORD new_state, WORD redraw)
+void ob_change(OBJECT FAR *tree, WORD obj, UWORD new_state, WORD redraw)
 {
     WORD flags, type, th, curr_state;
     uint32_t spec;
@@ -718,7 +720,7 @@ void ob_change(OBJECT *tree, WORD obj, UWORD new_state, WORD redraw)
     gsx_mon();
 }
 
-void objc_change(OBJECT *tree, WORD obj, const GRECT *clip, UWORD newstate,
+void objc_change(OBJECT FAR *tree, WORD obj, const GRECT *clip, UWORD newstate,
                  WORD redraw)
 {
     gsx_sclip(clip);
@@ -729,7 +731,7 @@ void objc_change(OBJECT *tree, WORD obj, const GRECT *clip, UWORD newstate,
  * Move the root to the centre of the screen below the menu bar, and return
  * the rectangle it covers including any outline and shadow -- which is what
  * form_dial needs to clear afterwards. */
-void ob_center(OBJECT *tree, GRECT *pt)
+void ob_center(OBJECT FAR *tree, GRECT *pt)
 {
     WORD xd, yd, wd, hd, th, dummy;
     uint32_t spec;
@@ -857,13 +859,13 @@ static WORD check(char *in_char, char valchar)
 }
 
 /* The screen cell of template column ch_pos of the field being edited. */
-static void pxl_rect(OBJECT *tree, WORD obj, WORD ch_pos, GRECT *pt)
+static void pxl_rect(OBJECT FAR *tree, WORD obj, WORD ch_pos, GRECT *pt)
 {
     GRECT o;
 
     ob_actxywh(tree, obj, &o);
     gr_just(edblk.te_just, edblk.te_font,
-            (const char *)SPEC_PTR(edblk.te_ptmplt), o.g_w, o.g_h, &o);
+            (const char FAR *)SPEC_PTR(edblk.te_ptmplt), o.g_w, o.g_h, &o);
     pt->g_x = (WORD)(o.g_x + ch_pos * gl_wchar);
     pt->g_y = o.g_y;
     pt->g_w = gl_wchar;
@@ -873,7 +875,7 @@ static void pxl_rect(OBJECT *tree, WORD obj, WORD ch_pos, GRECT *pt)
 /* dist == 0: toggle the text cursor at template column new_pos (an XOR
  * line, so calling twice removes it).  dist > 0: redraw the field, clipped
  * to `dist` columns from new_pos. */
-static void curfld(OBJECT *tree, WORD obj, WORD new_pos, WORD dist)
+static void curfld(OBJECT FAR *tree, WORD obj, WORD new_pos, WORD dist)
 {
     GRECT oc, t;
 
@@ -930,24 +932,27 @@ static void ins_char(char *str, WORD pos, char chr, WORD tot_len)
         str[tot_len - 1] = 0;
 }
 
-WORD ob_edit(OBJECT *tree, WORD obj, WORD in_char, WORD *idx, WORD kind)
+WORD ob_edit(OBJECT FAR *tree, WORD obj, WORD in_char, WORD *idx, WORD kind)
 {
     WORD pos, len, ii, no_redraw, start, finish, nstart, nfinish;
     WORD dist, tmp_back, cur_pos;
     char bin_char;
-    char *ptext;
+    uint32_t ptext;                 /* te_ptext: a 32-bit GEM address */
 
     if (kind == EDSTART || obj <= 0)
         return 1;
 
-    edblk = *(const TEDINFO *)SPEC_PTR(ob_getspec(tree, obj));
-    ptext = (char *)SPEC_PTR(edblk.te_ptext);
+    far_get((uint8_t *)&edblk, ob_getspec(tree, obj), sizeof edblk);   /* B11 */
+    ptext = edblk.te_ptext;
 
-    str_cpy(g_tmpstr, (const char *)SPEC_PTR(edblk.te_ptmplt));
-    str_cpy(g_rawstr, ptext);
+    far_strget(g_tmpstr, edblk.te_ptmplt, sizeof g_tmpstr);
+    far_strget(g_rawstr, ptext, sizeof g_rawstr);
     /* The validation string is repeated to the template's length: a short
      * one like "9" governs every position. */
-    len = ii = str_cpy(g_valstr, (const char *)SPEC_PTR(edblk.te_pvalid));
+    far_strget(g_valstr, edblk.te_pvalid, sizeof g_valstr);
+    for (ii = 0; g_valstr[ii]; ii++)
+        ;
+    len = ii;
     while (ii > 0 && len < edblk.te_tmplen && len < MAX_LEN - 1)
         g_valstr[len++] = g_valstr[ii - 1];
     g_valstr[len] = 0;
@@ -1024,7 +1029,7 @@ WORD ob_edit(OBJECT *tree, WORD obj, WORD in_char, WORD *idx, WORD kind)
             break;
         }
 
-        str_cpy(ptext, g_rawstr);
+        far_strput(ptext, g_rawstr, edblk.te_txtlen);
         if (!no_redraw) {
             ob_format(edblk.te_just, g_rawstr, g_tmpstr, g_fmtstr);
             ob_stfn(*idx, &nstart, &nfinish);
@@ -1049,7 +1054,7 @@ WORD ob_edit(OBJECT *tree, WORD obj, WORD in_char, WORD *idx, WORD kind)
 /* Edit the field: kind is EDINIT (place the cursor at the end of the
  * text), EDCHAR (apply a key), or EDEND (remove the cursor).  *idx is the
  * cursor index in and out. */
-WORD objc_edit(OBJECT *tree, WORD obj, WORD kchar, WORD *idx, WORD kind)
+WORD objc_edit(OBJECT FAR *tree, WORD obj, WORD kchar, WORD *idx, WORD kind)
 {
     gsx_sclip(&gl_rfull);
     return ob_edit(tree, obj, kchar, idx, kind);
