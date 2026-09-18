@@ -871,13 +871,32 @@ fails the build -- independently the same idea as `mscan.py`, arrived at for
 the same reason: a defect the compiler chooses at random cannot be caught by
 testing, only by looking at what came out.
 
-Writing our version of that scan reproduced
-[[make-a-silent-check-fail-first]] immediately. The first version reported
-**zero** over the whole tree and **one** of the two sites in a deliberately
-bad fixture -- because Calypsi puts the first instruction of a function on
-the same line as its label (`below2:     sec`), and the pattern required
-leading whitespace. Every negative-Y at a function's first instruction was
-invisible. The tree's zero was meaningless until the fixture said two.
+Ours is **`tools/ccbug/negyscan.py`**, `make negyscan`. It reports a
+negative `ldy ##` followed by a LONG indexed access (`[dp],y` or
+`addr.l,y`) -- and only those, because a negative Y with 16-bit addressing
+wraps exactly as C's pointer arithmetic already does and is not a bug. It
+finds **zero** across 68 of gem4xe's 71 sources.
+
+Writing it reproduced [[make-a-silent-check-fail-first]] immediately. The
+first version reported zero over the whole tree and **one** of the two sites
+in a deliberately bad fixture -- because Calypsi puts the first instruction
+of a function on the same line as its label (`below2:     sec`), and the
+pattern required leading whitespace. Every negative-Y at a function's first
+instruction was invisible. The tree's zero was meaningless until the fixture
+said two.
+
+`negyscan_82.s` is that fixture: two sites, the first on a label's own line,
+and four controls beside them that must stay silent (the safe adjust-base
+form, a negative Y with short addressing, a Y reloaded before its use, and
+an ordinary positive Y). `check-cc` asserts it reports exactly two.
+
+**And the fixtures found a hole in `check-cc` itself.** A fixture's result
+was carried in the same dictionary as the bug shapes, where `False` prints
+`FIXED upstream` -- so a scan that had gone blind would have reported good
+news and PASSED. Fixtures are now their own group, a wrong count is a
+failure in its own right (`BLIND -- must report 2`), and they no longer
+inflate the "N of 20 bug shapes" tally, which they had: it read 16 and the
+honest number was 15.
 
 ### Do not mine the patch; mine the ledger
 

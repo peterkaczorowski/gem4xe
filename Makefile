@@ -1224,6 +1224,16 @@ check-cc:
 mscan:
 	python3 tools/ccbug/mscan.py --tree
 
+# Calypsi #82's shape: a negative Y with LONG addressing, where the
+# 65816 adds Y to a 24-bit base as unsigned 16 bits and the access
+# lands one bank away.  Fixed in the 5.18 this tree requires, so this
+# guards a shape rather than a live bug -- but the author who found it
+# reports the compiler picks the bad form by register pressure, which
+# testing cannot catch and only reading the output can.  check-cc
+# asserts the fixture still reports both of its sites.
+negyscan:
+	python3 tools/ccbug/negyscan.py --tree
+
 # The host tests want the gate application built, because the kit's own
 # test rebuilds it out of the kit and compares the bytes: what test-m11
 # proves about that binary is what the kit inherits.
@@ -1626,4 +1636,4 @@ emu-stop:
 clean:
 	rm -rf build
 
-.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc mscan test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m5p test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-boot test-install test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean
+.PHONY: all fonts sdk dist release diag memcheck gacs-check shots test test-host check-cc mscan negyscan test-emu test-m1 test-m2 test-m3 test-m4 test-m5 test-m5p test-m6 test-m7 test-m8 test-m9 test-m10 test-m11 test-m12 test-m13 test-m14 test-m14x test-m14u test-m15 test-m15x test-m15u test-m15d test-m16 test-m17 test-m18 test-m19 test-m20 test-m21 test-m22 test-m23 test-m24 test-m25 test-m26 test-m27 test-m28 test-m29 test-m30 test-m31 test-m32 test-m32n test-boot test-install test-cf test-sd test-cf-dosclock test-cf-firmware test-m11-os test-sdx816 sd demo movie bench emu-stop clean

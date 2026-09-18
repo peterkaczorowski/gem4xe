@@ -167,6 +167,12 @@ def main():
     # B6 and B11 are compiler crashes: compile each file alone and read
     # the outcome from the compiler
     crashes = {}
+    # Scan fixtures are NOT bug shapes and are not counted as ones: they
+    # are the proof that a scan whose passing result is silence can still
+    # speak.  Kept apart because a fixture that stops reporting used to
+    # print "FIXED upstream" and PASS -- a scan going blind read as good
+    # news, which is the exact failure the fixtures exist to prevent.
+    fixtures = {}
     for tag, note in CRASHES.items():
         r = subprocess.run([cc, "--code-model=large", "--data-model=small",
                             f"-O{a.O}", "-o", os.path.join(a.out, f"{tag}.o"),
@@ -183,8 +189,21 @@ def main():
     _mscan = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mscan)
     _fix = os.path.join(ROOT, "tools", "ccbug", "mscan_b17.s")
-    crashes["B17 the scan finds the join it exists to find"] = (
-        len(_mscan.scan(_fix)) == 1)
+    fixtures["B17 mscan finds the join it exists to find"] = (
+        len(_mscan.scan(_fix)), 1)
+
+    # The same discipline for the negative-Y scan.  Calypsi #82 is fixed in
+    # the 5.18 this tree requires, so the scan guards a shape rather than a
+    # live bug -- which makes proving it can still SPEAK the whole of its
+    # value.  Two sites, one of them on a label's own line, and four
+    # controls beside them that must stay silent.
+    _spec2 = _ilu.spec_from_file_location(
+        "negyscan", os.path.join(ROOT, "tools", "ccbug", "negyscan.py"))
+    _negy = _ilu.module_from_spec(_spec2)
+    _spec2.loader.exec_module(_negy)
+    _fix2 = os.path.join(ROOT, "tools", "ccbug", "negyscan_82.s")
+    fixtures["#82 negyscan finds both sites and neither control"] = (
+        len(_negy.scan(_fix2)), 2)
 
     # A refusal the compiler should not make: the file compiles the day the
     # bug is fixed, so the bug is "it did not compile".
@@ -229,9 +248,19 @@ def main():
         print(f"  {note:42s} {'compiles':>16s}   "
               f"{'still present' if here else 'FIXED upstream'}")
         present += here
+    blind = 0
+    for note, (got, want) in fixtures.items():
+        ok = got == want
+        blind += not ok
+        print(f"  {note:42s} {'reports ' + str(got):>16s}   "
+              f"{'ok' if ok else f'BLIND -- must report {want}'}")
     print()
-    if bad:
-        print(f"check-cc: FAILED -- {bad} workaround shape(s) miscompile")
+    if bad or blind:
+        if bad:
+            print(f"check-cc: FAILED -- {bad} workaround shape(s) miscompile")
+        if blind:
+            print(f"check-cc: FAILED -- {blind} scan(s) cannot see the shape "
+                  "they exist to find, so their silence means nothing")
         return 1
     print(f"check-cc: PASSED -- every workaround shape is right; "
           f"{present} of {sum(1 for v in RESULTS.values() if v[1] == 'bug') + len(CRASHES) + len(LISTINGS) + len(REFUSALS)} "
